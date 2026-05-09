@@ -1091,27 +1091,68 @@ Precio: semana_completa = $800.000
 
 ## 20. PENDIENTES PARA ETAPA 4
 
-La Etapa 4 es el **Bot Conversacional con IA**.
+La Etapa 4 debe diseñar el **Motor de Reservas + Bot Conversacional**, dividido en dos subetapas:
+
+- **Etapa 4A — Motor de Reservas Determinístico**
+- **Etapa 4B — Bot Conversacional con IA**
+
+Esta división es importante porque la IA no debe ser la fuente de verdad operacional.  
+El bot puede conversar, interpretar y guiar al cliente, pero la creación de pre-reservas, validación de disponibilidad, pagos, confirmaciones y actualización del sistema deben pasar por workflows determinísticos en n8n.
+
+### Etapa 4A — Motor de Reservas Determinístico
+
+- [ ] Definir estados de CONSULTAS
+- [ ] Definir estados de PRE_RESERVAS
+- [ ] Definir estados de RESERVAS
+- [ ] Definir estados de PAGOS
+- [ ] Flujo consulta → cotización → pre-reserva → pago → confirmación
+- [ ] Creación de PRE_RESERVA con expiración automática
+- [ ] Revalidación de disponibilidad antes de confirmar una reserva
+- [ ] Confirmación automática con MercadoPago
+- [ ] Confirmación manual con comprobante validado por Vicky
+- [ ] Manejo de transferencias bancarias, MercadoPago, efectivo y cripto
+- [ ] Cancelaciones, modificaciones y conflictos
+- [ ] Actualización automática de DISPONIBILIDAD_CACHE
+- [ ] Actualización del calendario visual operativo
+- [ ] Mensajes automáticos al huésped
+- [ ] Mensajes automáticos al grupo operativo
+- [ ] Asignación automática del encargado semanal Franco/Rodrigo
+- [ ] Coordinación automática con Jennifer para limpieza
+- [ ] Registro de LOG_CAMBIOS y source_event
+- [ ] Workflows internos n8n para operaciones críticas
+- [ ] Edge cases de pagos, vencimientos, doble reserva y errores de sincronización
+
+### Etapa 4B — Bot Conversacional con IA
 
 - [ ] System prompt base con toda la info del complejo
-- [ ] Estructura del historial de conversación (CONSULTAS.contexto_json)
-- [ ] Flujo: saludo → fechas → cabaña → precio → pago
-- [ ] FAQ sin llamar a la IA (preguntas frecuentes pre-programadas)
-- [ ] Cuándo y cómo derivar a Vicky o Franco
+- [ ] Estructura del historial de conversación en CONSULTAS.contexto_json
+- [ ] Matriz de intenciones del cliente
+- [ ] Flujo conversacional: saludo → fechas → cabaña → precio → pre-reserva → pago
+- [ ] FAQ sin llamar a la IA para preguntas frecuentes
+- [ ] Cuándo llamar a IA y cuándo responder con reglas fijas
+- [ ] Cuándo y cómo derivar a Vicky, Franco o Rodrigo
 - [ ] Integración del motor de disponibilidad en respuestas
 - [ ] Integración del motor de precios en respuestas
 - [ ] Manejo de EVENTOS_ESPECIALES en el flujo del bot
 - [ ] Formato de presentación del desglose al cliente
+- [ ] Respuestas sobre mascotas, niños, cómo llegar, Starlink, restaurante, kayaks y servicios adicionales
+- [ ] Manejo de negociación de precio o casos especiales
 - [ ] Prompt caching para reducir costos
+- [ ] Estrategia de reducción de tokens
+- [ ] Handoff humano claro y trazable
 
 **Lo que ya está definido y alimenta la Etapa 4:**
+
 - Motor de disponibilidad completo con DISPONIBILIDAD_CACHE (Etapa 2)
 - Motor de precios estándar + motor de eventos especiales (Etapa 3)
 - Tabla CONSULTAS con contexto_json (Etapa 1)
 - Flujo CONSULTAS → PRE_RESERVAS → RESERVAS (Etapa 1)
 - OVERRIDES_OPERATIVOS para excepciones (Etapa 2)
+- Principios de consistencia y source_event (Etapa 1)
+- Regla de revalidación antes de confirmar reservas (Etapa 2)
+- Convención fecha_in inclusive / fecha_out exclusive (Etapa 3)
 
 ---
 
 *Documento generado como parte del proceso de diseño del sistema Complejo Vita Delta.*  
-*Siguiente: ARQUITECTURA_ETAPA_4_VITA_DELTA.md — Bot Conversacional con IA*
+*Siguiente: ARQUITECTURA_ETAPA_4A_MOTOR_RESERVAS.md — Motor de Reservas Determinístico*
