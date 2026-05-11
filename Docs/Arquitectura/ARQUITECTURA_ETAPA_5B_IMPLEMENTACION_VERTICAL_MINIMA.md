@@ -4,7 +4,7 @@
 **Versión:** 1.1
 **Fecha:** Mayo 2026
 **Estado:** Aprobado — CERRADO
-**Depende de:** ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md v1.1 y todas las etapas anteriores
+**Depende de:** ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md v1.0 y todas las etapas anteriores
 **Autores:** Franco (titular) + Claude (arquitecto)
 
 ---
