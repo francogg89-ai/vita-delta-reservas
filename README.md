@@ -12,165 +12,118 @@ El objetivo del proyecto es construir una arquitectura escalable, automatizable 
 - bots conversacionales,
 - integración web,
 - pagos,
-- contabilidad,
+- operación interna,
+- contabilidad futura,
 - y futuras herramientas de inteligencia artificial.
 
 ---
 
-# Objetivo
+## Objetivo
 
-El sistema busca centralizar toda la lógica operativa del complejo en una única fuente de verdad, evitando:
+El sistema busca centralizar la lógica operativa del complejo en una única fuente de verdad, evitando:
 
 - inconsistencias,
 - double booking,
 - cálculos manuales,
-- dependencias excesivas de plataformas externas,
-- y automatizaciones frágiles.
+- dependencia excesiva de plataformas externas,
+- automatizaciones frágiles,
+- pérdida de trazabilidad,
+- y errores operativos difíciles de auditar.
 
 La arquitectura está diseñada para:
-- escalar,
-- migrar fácilmente,
+
+- escalar progresivamente,
+- migrar fácilmente a una base de datos más robusta,
 - integrar nuevas herramientas,
+- separar IA de lógica crítica,
 - y evolucionar sin rehacer el sistema completo.
 
 ---
 
-# Principios arquitectónicos
+## Principios arquitectónicos
 
-## 1. Backend determinístico
+### 1. Backend determinístico
 
 La lógica crítica del sistema nunca depende de IA.
 
 Motores reales manejan:
+
 - disponibilidad,
 - reservas,
 - pricing,
 - bloqueos,
+- pagos,
 - concurrencia,
-- validaciones.
+- validaciones,
+- expiraciones,
+- y consistencia de datos.
+
+La IA puede asistir, pero no decide el estado operativo del sistema.
 
 ---
 
-## 2. IA como capa cognitiva
+### 2. IA como capa cognitiva
 
 La IA se utiliza para:
+
 - conversación,
 - interpretación,
 - asistencia,
 - comunicación,
-- automatización conversacional.
+- clasificación de intención,
+- respuestas al huésped,
+- derivación a humano,
+- y automatización conversacional.
 
-Nunca como fuente de verdad operacional.
-
----
-
-## 3. Una sola fuente de verdad
-
-Toda la disponibilidad deriva de:
-- reservas,
-- pre-reservas,
-- bloqueos,
-- configuración.
-
-Nunca se modifica manualmente.
+Nunca es fuente de verdad operacional.
 
 ---
 
-## 4. Arquitectura modular
+### 3. Una sola fuente de verdad
+
+La disponibilidad deriva de:
+
+- RESERVAS,
+- PRE_RESERVAS,
+- BLOQUEOS,
+- OVERRIDES_OPERATIVOS,
+- CONFIGURACION_GENERAL.
+
+`DISPONIBILIDAD_CACHE` es una tabla derivada.  
+Nunca debe tratarse como fuente primaria de verdad.
+
+---
+
+### 4. Arquitectura modular
 
 Cada motor funciona como módulo independiente:
 
-- Motor de disponibilidad
-- Motor de precios
-- EVENTOS_ESPECIALES
-- Bots
-- Automatizaciones
-- Integraciones
+- Motor de disponibilidad.
+- Motor de precios.
+- Motor de reservas.
+- Motor de eventos especiales.
+- Bot conversacional.
+- Workflows de pagos.
+- Automatizaciones operativas.
+- Integraciones externas.
+
+Esto permite implementar, probar y reemplazar partes del sistema sin romper todo.
 
 ---
 
-# Estado actual del proyecto
+### 5. Implementación progresiva
 
-## Etapa 1 — Arquitectura base
-✅ Completada
+El sistema no se implementa todo de una vez.
 
-Definición de:
-- entidades,
-- permisos,
-- estructura,
-- configuración,
-- principios de migrabilidad,
-- workflows base.
+La secuencia correcta es:
 
----
-
-## Etapa 2 — Motor de disponibilidad
-✅ Completada
-
-Incluye:
-- horarios,
-- bloques,
-- overrides,
-- escalonamientos,
-- race conditions,
-- DISPONIBILIDAD_CACHE,
-- edge cases.
-
----
-
-## Etapa 3 — Motor de precios
-✅ Completada
-
-Incluye:
-- temporadas,
-- jerarquía tarifaria,
-- descuentos,
-- eventos especiales,
-- estadías largas,
-- techos tarifarios,
-- pricing determinístico.
-
----
-
-## Etapa 4 — Motor de reservas
-🔄 En planificación
-
-Próxima etapa:
-- estados transaccionales,
-- pre-reservas,
-- expiraciones,
-- pagos,
-- cancelaciones,
-- workflows completos de reserva.
-
----
-
-# Stack previsto
-
-## Backend / Automatización
-- n8n
-- Google Sheets
-- Apps Script
-- Supabase/PostgreSQL (futuro)
-
----
-
-## Bots / Conversación
-- WhatsApp Cloud API
-- Instagram API
-- OpenAI / Claude
-
----
-
-## Frontend
-- Web de reservas
-- Panel administrativo
-- Dashboard operativo
-
----
-
-# Estructura del repositorio
-
-```text
-docs/
-└── arquitectura/
+```txt
+Arquitectura
+→ Modelo de datos real
+→ Implementación vertical mínima
+→ Validación interna
+→ Canales externos
+→ Bot conversacional
+→ Pagos automáticos
+→ Frontend
+→ Contabilidad y expansión
