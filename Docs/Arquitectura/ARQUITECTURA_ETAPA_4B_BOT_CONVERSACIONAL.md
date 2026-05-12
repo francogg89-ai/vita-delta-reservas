@@ -4,7 +4,7 @@
 **Versión:** 1.0
 **Fecha:** Mayo 2026
 **Estado:** Aprobado — CERRADO
-**Depende de:** ARQUITECTURA_ETAPA_1_VITA_DELTA.md v1.1 / ARQUITECTURA_ETAPA_2_VITA_DELTA.md v1.1 / ARQUITECTURA_ETAPA_3_VITA_DELTA.md v3.0 / ARQUITECTURA_ETAPA_4A_MOTOR_RESERVAS.md v1.0
+**Depende de:** ARQUITECTURA_ETAPA_1_VITA_DELTA.md v1.1 / ARQUITECTURA_ETAPA_2_VITA_DELTA.md v1.3 / ARQUITECTURA_ETAPA_3_VITA_DELTA.md v3.0 / ARQUITECTURA_ETAPA_4A_MOTOR_RESERVAS.md v1.0
 **Autores:** Franco (titular) + Claude (arquitecto)
 
 ---
@@ -571,7 +571,7 @@ Con Claude Sonnet 4 y prompt caching activo, el costo estimado por conversación
         │
         ▼
 [n8n ejecuta: escalar_a_humano]
-  → Notifica a Vicky por WhatsApp:
+  → Notifica al operador responsable por WhatsApp:
     "📌 Derivación — [canal] — [nombre/ID cliente]
      Motivo: [motivo]
      Resumen: [últimos 3 mensajes del cliente]
@@ -582,7 +582,7 @@ Con Claude Sonnet 4 y prompt caching activo, el costo estimado por conversación
 
 ### 11.3 Formato del handoff
 
-El mensaje a Vicky incluye siempre:
+El mensaje al operador responsable incluye siempre:
 
 - Canal de origen (WhatsApp / Instagram)
 - Identificador del cliente (número o ID)
@@ -1459,14 +1459,14 @@ Lista explícita de lo que el bot nunca hace, aunque el cliente lo pida de cualq
 | Acción | Por qué no |
 |---|---|
 | Confirmar una reserva | Solo lo hace `db_confirmar_reserva` tras pago validado |
-| Validar un pago | Solo lo hacen Vicky/Franco o el webhook de MP |
+| Validar un pago | Solo lo hacen el operador responsable, Franco o el webhook de MP |
 | Cancelar una reserva | Requiere intervención humana |
 | Modificar fechas de una reserva | Requiere intervención humana |
 | Dar un descuento | No tiene herramienta para eso |
 | Decir si hay un cliente específico en el complejo | Privacidad |
 | Bloquear una cabaña | No tiene herramienta para eso |
 | Acceder a datos contables o de distribución entre socios | Fuera de su rol |
-| Hablar en nombre de Franco, Rodrigo o Vicky como si fuera esa persona | Identidad falsa |
+| Hablar en nombre de Franco, Rodrigo, Vicky o cualquier integrante del equipo como si fuera esa persona | Identidad falsa |
 | Prometer disponibilidad futura | No puede garantizarla |
 | Dar instrucciones técnicas sobre el sistema | Información interna |
 

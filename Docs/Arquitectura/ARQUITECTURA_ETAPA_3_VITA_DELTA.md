@@ -4,7 +4,7 @@
 **Versión:** 3.0  
 **Fecha:** Mayo 2026  
 **Estado:** Aprobado — CERRADO  
-**Depende de:** ARQUITECTURA_ETAPA_1_VITA_DELTA.md v1.1 / ARQUITECTURA_ETAPA_2_VITA_DELTA.md v1.1  
+**Depende de:** ARQUITECTURA_ETAPA_1_VITA_DELTA.md v1.1 / ARQUITECTURA_ETAPA_2_VITA_DELTA.md v1.3  
 **Autores:** Franco (titular) + Claude (arquitecto)
 
 **Historial de versiones:**
@@ -1109,7 +1109,7 @@ El bot puede conversar, interpretar y guiar al cliente, pero la creación de pre
 - [ ] Creación de PRE_RESERVA con expiración automática
 - [ ] Revalidación de disponibilidad antes de confirmar una reserva
 - [ ] Confirmación automática con MercadoPago
-- [ ] Confirmación manual con comprobante validado por Vicky
+- [ ] Confirmación manual con comprobante validado por el operador responsable
 - [ ] Manejo de transferencias bancarias, MercadoPago, efectivo y cripto
 - [ ] Cancelaciones, modificaciones y conflictos
 - [ ] Actualización automática de DISPONIBILIDAD_CACHE
@@ -1117,7 +1117,7 @@ El bot puede conversar, interpretar y guiar al cliente, pero la creación de pre
 - [ ] Mensajes automáticos al huésped
 - [ ] Mensajes automáticos al grupo operativo
 - [ ] Asignación automática del encargado semanal Franco/Rodrigo
-- [ ] Coordinación automática con Jennifer para limpieza
+- [ ] Coordinación automática con el equipo de limpieza
 - [ ] Registro de LOG_CAMBIOS y source_event
 - [ ] Workflows internos n8n para operaciones críticas
 - [ ] Edge cases de pagos, vencimientos, doble reserva y errores de sincronización
@@ -1130,7 +1130,7 @@ El bot puede conversar, interpretar y guiar al cliente, pero la creación de pre
 - [ ] Flujo conversacional: saludo → fechas → cabaña → precio → pre-reserva → pago
 - [ ] FAQ sin llamar a la IA para preguntas frecuentes
 - [ ] Cuándo llamar a IA y cuándo responder con reglas fijas
-- [ ] Cuándo y cómo derivar a Vicky, Franco o Rodrigo
+- [ ] Cuándo y cómo derivar al operador responsable, Franco o Rodrigo
 - [ ] Integración del motor de disponibilidad en respuestas
 - [ ] Integración del motor de precios en respuestas
 - [ ] Manejo de EVENTOS_ESPECIALES en el flujo del bot

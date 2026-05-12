@@ -79,9 +79,6 @@ Estos principios guían todas las decisiones técnicas del sistema. Ante cualqui
 
 ---
 
-
----
-
 ## 3. PRINCIPIOS DE CONSISTENCIA
 
 Estas reglas garantizan la integridad del sistema y previenen errores críticos como double bookings o datos inconsistentes. Son **no negociables** — ningún flujo, script o automatización puede violarlas.
@@ -101,7 +98,7 @@ Crear reserva, crear pre-reserva y recalcular disponibilidad siempre pasan por w
 Si una cabaña tiene una PRE_RESERVA activa (no vencida), se muestra como no disponible para nuevas reservas aunque el pago no esté confirmado aún. El bot comunica esto como "reserva en proceso".
 
 **Regla 5 — Nunca se escribe disponibilidad manualmente en Sheets.**
-Si un socio o Vicky necesita bloquear una cabaña, lo hace creando un registro en BLOQUEOS. El sistema actualiza DISPONIBILIDAD_CACHE automáticamente.
+Si un socio u operador responsable necesita bloquear una cabaña, lo hace creando un registro en BLOQUEOS. El sistema actualiza DISPONIBILIDAD_CACHE automáticamente.
 
 ### Reglas de consistencia
 
@@ -118,7 +115,7 @@ n8n ejecuta un chequeo cada 5 minutos. Toda PRE_RESERVA con `expira_en < now()` 
 
 Si se detecta una inconsistencia (por ejemplo, dos reservas para la misma cabaña y fechas):
 1. n8n detecta el conflicto al intentar escribir
-2. Notifica inmediatamente a Franco por WhatsApp con el detalle
+2. Notifica inmediatamente al equipo responsable por WhatsApp con el detalle
 3. Pone la segunda reserva en estado `conflicto_pendiente`
 4. No confirma automáticamente — requiere resolución manual
 5. Registra todo en LOG_CAMBIOS
@@ -126,7 +123,7 @@ Si se detecta una inconsistencia (por ejemplo, dos reservas para la misma cabañ
 ### Protocolo ante falla del sistema
 
 Si n8n no está disponible temporalmente:
-- Vicky puede tomar reservas manualmente en Sheets
+- El operador responsable puede tomar reservas manualmente en Sheets
 - Al recuperarse n8n, ejecutar recálculo masivo de DISPONIBILIDAD_CACHE
 - Verificar LOG_CAMBIOS para identificar qué se escribió manualmente
 
@@ -135,7 +132,7 @@ Si n8n no está disponible temporalmente:
 
 ### Google Sheets
 **Rol:** Base de datos central y panel operativo del equipo.  
-**Qué hace:** Almacena todas las tablas del sistema. Es la fuente de verdad. También funciona como interfaz visual para Vicky y los socios — pueden ver y editar datos directamente sin interfaz técnica.  
+**Qué hace:** Almacena todas las tablas del sistema. Es la fuente de verdad. También funciona como interfaz visual para el operador responsable y los socios — pueden ver y editar datos directamente sin interfaz técnica.
 **Qué NO hace:** Lógica de negocio, cálculos complejos, comunicación con APIs externas.  
 **Límites conocidos:** 400 requests/100 segundos a la API. Riesgo de escritura concurrente si múltiples procesos escriben simultáneamente. Solución: todas las escrituras pasan por n8n con cola.
 
@@ -149,7 +146,7 @@ Si n8n no está disponible temporalmente:
 ### Apps Script
 **Rol:** Puente mínimo entre Google Forms/Sheets y n8n.  
 **Qué hace ÚNICAMENTE:**
-- Trigger: cuando Vicky envía el Google Form de reserva → dispara webhook a n8n
+- Trigger: cuando el operador envía el Google Form de reserva → dispara webhook a n8n
 - Endpoint HTTP liviano: la web consulta disponibilidad cacheada (lee DISPONIBILIDAD_CACHE, devuelve JSON)
 - Protección de celdas en Sheets
 
@@ -190,7 +187,7 @@ Si n8n no está disponible temporalmente:
 **Decisión:** Arrancar con Google Sheets. Diseñar como SQL desde el día uno. Migrar a Supabase cuando el volumen lo justifique.
 
 **Justificación:**
-- Sheets permite que el equipo operativo (Vicky, socios) vea y edite datos directamente sin interfaz técnica adicional
+- Sheets permite que el equipo operativo (operador responsable, socios) vea y edite datos directamente sin interfaz técnica adicional
 - El volumen proyectado de Vita Delta no alcanza los límites reales de Sheets en los próximos 2 años
 - Diseñando con IDs y relaciones explícitas, la migración futura es copiar datos y reapuntar conexiones de n8n
 
@@ -244,7 +241,7 @@ Tabla maestra. Una fila por cabaña.
 | activa | Boolean | Sí | False = cabaña eliminada del sistema |
 | bloqueada | Boolean | Sí | True = existe pero no disponible temporalmente |
 | motivo_bloqueo | String | No | "Mantenimiento", "Uso propio", etc. |
-| orden_limpieza | Integer | Sí | Prioridad para Jennifer |
+| orden_limpieza | Integer | Sí | Prioridad para limpieza / operador de limpieza (1 = primero) |
 | descripcion | Text | No | Para bot y web |
 | fotos_urls | Text | No | URLs separadas por coma |
 | created_at | Timestamp | Sí | |
@@ -274,7 +271,7 @@ Base de datos de clientes. Separada de reservas para historial y reconocimiento.
 | nombre | String | Sí | |
 | apellido | String | No | |
 | dni | String | No | |
-| telefono | String | Sí | Con código de país. Ej: +5491158297725 |
+| telefono | String | Sí | Con código de país. Ej: +549XXXXXXXXXX |
 | email | String | No | |
 | canal_preferido | String | No | "whatsapp", "instagram" |
 | primera_reserva_fecha | Date | No | Calculado al confirmar primera reserva |
@@ -318,7 +315,7 @@ Cliente eligió cabaña y fechas. Bloquea disponibilidad temporalmente.
 | id_huesped | Integer | Sí | FK → HUÉSPEDES |
 | fecha_in | Date | Sí | |
 | fecha_out | Date | Sí | |
-| hora_checkin | Time | Sí | Calculada con reglas de escalonamiento |
+| hora_checkin | Time | Sí | Calculada por regla base, escalonamiento de check-in u override según la etapa implementada. En Etapa 5B el escalonamiento automático de check-in queda diferido. |
 | hora_checkout | Time | Sí | |
 | personas | Integer | Sí | |
 | monto_total | Number | Sí | Calculado al crear |
@@ -354,7 +351,7 @@ Reservas confirmadas. Solo llega acá cuando el pago está validado.
 | notas | Text | No | |
 | encargado_semana | String | Sí | "Franco" o "Rodrigo" |
 | created_at | Timestamp | Sí | |
-| created_by | String | Sí | "bot", "vicky", "web", "franco" |
+| created_by | String | Sí | "bot", "operador", "web", "franco" |
 | source_event | String | Sí | Origen del evento que creó/modificó el registro. Ver valores válidos abajo |
 
 ---
@@ -371,6 +368,8 @@ Tabla de referencia para estados válidos.
 | cancelada | Sin penalidad | No | Sí |
 | cancelada_con_cargo | Con retención | No | Sí |
 | bloqueada_manual | Sin reserva real | Sí | No |
+
+> **Nota de actualización:** los estados definitivos de RESERVAS y PRE_RESERVAS quedan especificados en `ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md` v1.1. Esta lista de Etapa 1 es conceptual y no debe usarse como enum final de implementación.
 
 ---
 
@@ -411,9 +410,11 @@ Cada transacción es un registro independiente.
 | estado | String | Sí | "pendiente", "confirmado", "rechazado" |
 | comprobante_url | String | No | Link a imagen del comprobante |
 | fecha_pago | Date | No | Cuando se acreditó |
-| confirmado_por | String | No | "vicky", "bot_mp", "franco" |
+| confirmado_por | String | No | "operador", "bot_mp", "franco" |
 | notas | Text | No | |
 | created_at | Timestamp | Sí | |
+
+> **Nota de actualización:** el modelo definitivo de PAGOS queda especificado en `ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md` v1.1. La lógica de pagos tardíos y pagos sobre PRE_RESERVAS vencidas queda definida en `ARQUITECTURA_ETAPA_5B_IMPLEMENTACION_VERTICAL_MINIMA.md` v1.1.
 
 ---
 
@@ -425,15 +426,17 @@ Tabla precalculada. El bot y la web solo consultan aquí. Nunca calculan en tiem
 | id_cabana | Integer | Sí | FK → CABAÑAS |
 | fecha | Date | Sí | Un registro por día por cabaña |
 | estado | String | Sí | "disponible", "ocupada", "bloqueada", "checkout_disponible" |
-| hora_checkin_disponible | Time | No | Calculada con escalonamiento incluido |
-| hora_checkout | Time | No | |
-| precio_base_noche | Number | No | Tarifa aplicable ese día |
+| hora_checkin_disponible | Time | No | *(conceptual — ver nota)* Calculada con horario base y escalonamiento |
+| hora_checkout | Time | No | *(conceptual — ver nota)* |
+| precio_base_noche | Number | No | *(conceptual — ver nota)* Tarifa aplicable ese día |
 | tipo_dia | String | No | "semana", "finde", "feriado", "ano_nuevo" |
 | temporada | String | No | "alta", "media", "baja" |
 | minimo_noches | Integer | No | Mínimo desde este día |
 | id_reserva_activa | Integer | No | FK → RESERVAS si está ocupada |
 | id_prereserva_activa | Integer | No | FK → PRE_RESERVAS si está en proceso |
 | recalculado_en | Timestamp | Sí | Para saber si la cache está vigente |
+
+> **Nota de actualización:** el modelo definitivo de DISPONIBILIDAD_CACHE queda especificado en `ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md` v1.1. La implementación debe seguir la estructura final de 18 columnas definida allí, que incluye campos como `hora_checkin_minima`, `hora_checkin_maxima`, `hora_checkout_maxima`, `hora_checkout_minima`, `tiene_checkout`, `id_reserva_checkout`, `tiene_checkin` e `id_reserva_checkin`. Los campos marcados como *(conceptual)* en esta tabla no corresponden al nombre ni semántica final.
 
 **Clave primaria compuesta:** (id_cabana, fecha)
 
@@ -513,7 +516,7 @@ Pares clave-valor. Todo lo configurable sin tocar código.
 | hora_checkout_default | 10:00 | Hora estándar de salida |
 | hora_checkin_domingo_temp_alta | 18:00 | Excepción domingo temporada alta |
 | hora_checkout_domingo_temp_alta | 16:00 | Excepción domingo temporada alta |
-| escalonamiento_umbral | 3 | Número de checkouts simultáneos que activa escalonamiento |
+| escalonamiento_umbral | 3 | *(nombre conceptual — ver nota)* Umbral de check-ins del día que activa escalonamiento |
 | escalonamiento_minutos | 45 | Minutos extra por cabaña sobre el umbral |
 | sena_porcentaje | 50 | % de seña sobre el total |
 | prereserva_expiracion_minutos | 60 | Tiempo hasta que vence una pre-reserva sin pago |
@@ -521,10 +524,12 @@ Pares clave-valor. Todo lo configurable sin tocar código.
 | temporada_alta_fin | 02-28 | MM-DD fin temporada alta |
 | encargado_ciclo_inicio_fecha | 2026-05-11 | Fecha inicio ciclo Franco/Rodrigo |
 | encargado_ciclo_inicio_nombre | Franco | Quién arranca el ciclo |
-| whatsapp_franco | +5491158297725 | |
-| whatsapp_rodrigo | +5491135659035 | |
-| whatsapp_jennifer | +5491151789772 | |
+| whatsapp_franco | +549XXXXXXXXXX | Cargar directamente en Sheets — no publicar en repositorio |
+| whatsapp_rodrigo | +549XXXXXXXXXX | Cargar directamente en Sheets — no publicar en repositorio |
+| whatsapp_jennifer | +549XXXXXXXXXX | Cargar directamente en Sheets — no publicar en repositorio |
 | max_cabanas_sistema | 10 | Límite configurable (no hardcodeado) |
+
+> **Nota de actualización:** la clave definitiva de escalonamiento es `escalonamiento_umbral_checkins_dia` (no `escalonamiento_umbral`). El listado completo de claves queda en `ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md` v1.1, Sección 19.
 
 ---
 
@@ -572,9 +577,6 @@ Auditoría de modificaciones importantes.
 
 ---
 
-
----
-
 ### TAREAS_OPERATIVAS
 *(Prevista — no implementada en Etapa 1)*
 
@@ -588,7 +590,7 @@ Entidad para coordinar tareas operativas del complejo: limpieza, mantenimiento, 
 | descripcion | Text | No | Detalle completo |
 | id_cabana | Integer | No | FK → CABAÑAS. Null si es tarea general |
 | id_reserva | Integer | No | FK → RESERVAS si está vinculada a una reserva |
-| asignado_a | String | No | "jennifer", "franco", "rodrigo", nombre del responsable |
+| asignado_a | String | No | "operador_limpieza", "franco", "rodrigo", nombre del responsable |
 | estado | String | Sí | "pendiente", "en_progreso", "completada", "cancelada" |
 | prioridad | String | Sí | "alta", "media", "baja" |
 | fecha_programada | Date | No | Cuándo debe ejecutarse |
@@ -601,11 +603,11 @@ Entidad para coordinar tareas operativas del complejo: limpieza, mantenimiento, 
 
 **Casos de uso previstos:**
 - Al confirmarse una reserva → n8n crea tarea de preparación de cabaña para el día anterior al checkin
-- Al hacer checkout → n8n crea tarea de limpieza asignada a Jennifer con el horario correcto
+- Al hacer checkout → n8n crea tarea de limpieza asignada al operador de limpieza con el horario correcto
 - Incidencias reportadas desde el celular → crean tarea de mantenimiento
 - Tareas recurrentes (mantenimiento preventivo mensual, etc.)
 
-**Nota de implementación:** Esta tabla se activa en Etapa 6 cuando se automatice la coordinación con Jennifer y el equipo operativo.
+**Nota de implementación:** Esta tabla se activa en Etapa 6 cuando se automatice la coordinación con el equipo de limpieza y el equipo operativo.
 
 ---
 ## 7. RELACIONES ENTRE TABLAS
@@ -632,7 +634,7 @@ TARIFAS (1) ───────────────── (N) RESERVAS
 
 ## 8. PERMISOS POR ROL
 
-| Tabla | Admin (Franco/socios) | Encargado (Vicky) | Bot / n8n | Web pública |
+| Tabla | Admin (Franco/socios) | Operador | Bot / n8n | Web pública |
 |---|---|---|---|---|
 | CABAÑAS | R + W | R | R | R |
 | HUÉSPEDES | R + W | R + W | R + W | Crear |
@@ -712,7 +714,7 @@ TARIFAS (1) ───────────────── (N) RESERVAS
 - Solo se crea cuando el pago está confirmado
 - El pago puede confirmarse por:
   - Webhook automático de MercadoPago
-  - Vicky marca manualmente "comprobante validado" en el formulario
+  - El operador responsable marca manualmente "comprobante validado" en el formulario
 - Al confirmar: se actualiza DISPONIBILIDAD_CACHE, se notifica al equipo, se confirma al huésped
 - La PRE_RESERVA queda con estado "convertida" para trazabilidad
 
@@ -750,9 +752,11 @@ Cuando n8n detecta un evento que afecta disponibilidad:
    - ¿Hay reserva confirmada? → estado = "ocupada"
    - ¿Hay pre-reserva vigente? → estado = "ocupada" (bloqueo temporal)
    - ¿Es el día de checkout de una reserva? → estado = "checkout_disponible"
-   - ¿Libre? → estado = "disponible", calcular hora_checkin con escalonamiento
+   - ¿Libre? → estado = "disponible", calcular horarios base y restricciones según la etapa implementada
 3. Actualiza solo las filas afectadas (recálculo parcial)
 4. Actualiza `recalculado_en` timestamp
+
+> **Nota de actualización:** el orden definitivo de recálculo queda definido en `ARQUITECTURA_ETAPA_5B_IMPLEMENTACION_VERTICAL_MINIMA.md` v1.1, Sección 12. `checkout_disponible` solo se asigna después de verificar bloqueos, reservas que ocupan la noche, movimientos operativos confirmados y PRE_RESERVAS vigentes. Si una PRE_RESERVA ocupa la noche de esa fecha, el estado debe ser `ocupada`, aunque haya checkout ese mismo día.
 
 ### Recálculo masivo
 Programado una vez por noche en n8n. Recalcula todo el rango de fechas activas (hoy + 18 meses). Sirve como corrección de inconsistencias y para aplicar cambios de configuración.
@@ -760,9 +764,9 @@ Programado una vez por noche en n8n. Recalcula todo el rango de fechas activas (
 ### Consulta del bot
 ```
 Consulta: ¿Está disponible Bamboo del 10 al 15 de junio?
-→ n8n lee DISPONIBILIDAD_CACHE WHERE id_cabana=1 AND fecha BETWEEN '2026-06-10' AND '2026-06-15'
-→ Si todas las filas tienen estado='disponible' → disponible
-→ Devuelve hora_checkin, hora_checkout, precio_base_noche de cada fila
+→ n8n lee DISPONIBILIDAD_CACHE WHERE id_cabana=1 AND fecha >= '2026-06-10' AND fecha < '2026-06-15'
+→ Si todas las filas tienen estado='disponible' o 'checkout_disponible' → disponible
+→ Devuelve hora_checkin_minima, hora_checkout_maxima de cada fila
 → Tiempo de respuesta: < 300ms
 ```
 
@@ -822,9 +826,6 @@ Los workflows de negocio llaman a estos workflows, nunca escriben directamente a
 
 ---
 
-
----
-
 ### VALORES VÁLIDOS DE `source_event`
 
 Este campo aparece en RESERVAS, PAGOS, BLOQUEOS, CONSULTAS y LOG_CAMBIOS. Permite rastrear el origen real de cada acción.
@@ -835,7 +836,7 @@ Este campo aparece en RESERVAS, PAGOS, BLOQUEOS, CONSULTAS y LOG_CAMBIOS. Permit
 | `bot_instagram` | Acción iniciada por el bot en Instagram DM |
 | `web_publica` | Acción desde la web de reservas pública |
 | `admin_manual` | Acción manual de un socio/admin |
-| `vicky_form` | Vicky completó el formulario interno |
+| `operador_form` | El operador responsable completó el formulario interno |
 | `webhook_mp` | Webhook automático de MercadoPago al detectar pago |
 | `webhook_airbnb` | Sincronización desde Airbnb |
 | `webhook_booking` | Sincronización desde Booking.com |
@@ -865,7 +866,7 @@ La Etapa 2 es el diseño completo del **Motor de Disponibilidad**. Incluye:
 
 ### Ya definido que impacta Etapa 2
 
-- La condición de escalonamiento es: **más de 3 checkouts en el mismo horario** (no específico de viernes/domingos — aplica a cualquier día con esa condición)
+- La condición de escalonamiento es: **a partir del 4.º check-in del mismo día según `orden_checkin_dia`** — aplica a cualquier día con esa condición. Ver Etapa 2 v1.3 para la lógica completa.
 - Horarios default: checkin 13:00 / checkout 10:00
 - Excepción temporada alta domingos: checkin 18:00 / checkout 16:00
 - Escalonamiento: 45 minutos por cabaña adicional sobre el umbral de 3
@@ -873,4 +874,4 @@ La Etapa 2 es el diseño completo del **Motor de Disponibilidad**. Incluye:
 ---
 
 *Documento generado como parte del proceso de diseño del sistema Complejo Vita Delta.*  
-*Para continuar: ver ARQUITECTURA_ETAPA_2_VITA_DELTA.md (pendiente)*
+*Para continuar: ver ARQUITECTURA_ETAPA_2_VITA_DELTA.md v1.3.*

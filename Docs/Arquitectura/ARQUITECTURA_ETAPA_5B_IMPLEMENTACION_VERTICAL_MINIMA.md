@@ -4,7 +4,7 @@
 **Versión:** 1.1
 **Fecha:** Mayo 2026
 **Estado:** Aprobado — CERRADO
-**Depende de:** ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md v1.0 y todas las etapas anteriores
+**Depende de:** ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md v1.1 y todas las etapas anteriores
 **Autores:** Franco (titular) + Claude (arquitecto)
 
 ---
@@ -29,7 +29,7 @@
 16. Estrategia de locking lógico
 17. Manejo de race conditions
 18. Qué acciones siguen siendo manuales
-19. Formulario interno mínimo de Vicky
+19. Formulario interno mínimo del operador
 20. Logging mínimo
 21. Estrategia de rollback y recuperación
 22. Casos de prueba del primer flujo
@@ -54,7 +54,7 @@ Conectar WhatsApp, Instagram o MercadoPago sobre un sistema transaccional no pro
 - Validar que los workflows funcionan correctamente
 - Verificar que el locking lógico previene double bookings
 - Confirmar que LOG_CAMBIOS es útil para debugging
-- Entrenar a Vicky en el flujo antes de que lleguen clientes reales
+- Entrenar al equipo operativo en el flujo antes de que lleguen clientes reales
 - Detectar edge cases antes de exponerlos al público
 
 ---
@@ -64,7 +64,7 @@ Conectar WhatsApp, Instagram o MercadoPago sobre un sistema transaccional no pro
 ### El flujo completo a implementar
 
 ```
-[Franco o Vicky crea una CONSULTA manualmente o via formulario]
+[Operador crea una CONSULTA manualmente o via formulario]
         │
         ▼
 [db_crear_consulta]
@@ -72,18 +72,18 @@ Conectar WhatsApp, Instagram o MercadoPago sobre un sistema transaccional no pro
   → Registra en LOG_CAMBIOS
         │
         ▼
-[Franco o Vicky crea una PRE_RESERVA via formulario]
+[Operador crea una PRE_RESERVA via formulario]
         │
         ▼
 [db_crear_prereserva]
   → Valida disponibilidad en DISPONIBILIDAD_CACHE
-  → Valida que no existe PRE_RESERVA activa para (cabaña, fechas)
+  → Valida que no existe PRE_RESERVA pendiente_pago vigente para (cabaña, fechas)
   → Escribe en PRE_RESERVAS
-  → Actualiza DISPONIBILIDAD_CACHE → estado 'ocupada'
+  → Llama a db_recalcular_disponibilidad para actualizar DISPONIBILIDAD_CACHE
   → Registra en LOG_CAMBIOS
         │
         ▼
-[Cliente transfiere. Vicky valida el comprobante via Google Form]
+[Cliente transfiere. Operador valida el comprobante via Google Form]
         │
         ▼
 [db_registrar_pago]
@@ -91,7 +91,7 @@ Conectar WhatsApp, Instagram o MercadoPago sobre un sistema transaccional no pro
   → Registra en LOG_CAMBIOS
         │
         ▼
-[Vicky aprueba el pago via Google Form]
+[Operador aprueba el pago via Google Form]
         │
         ▼
 [db_confirmar_reserva]  ← WORKFLOW CRÍTICO
@@ -115,7 +115,7 @@ Conectar WhatsApp, Instagram o MercadoPago sobre un sistema transaccional no pro
 - Creación manual de CONSULTAS (via formulario o directamente en Sheets en DEV)
 - Creación de PRE_RESERVAS con validación de disponibilidad
 - Registro de pagos manuales (transferencia bancaria)
-- Validación de comprobante por Vicky via Google Form
+- Validación de comprobante por el operador responsable via Google Form
 - Confirmación de reserva con recheck de disponibilidad
 - Recálculo parcial de DISPONIBILIDAD_CACHE
 - Expiración automática de PRE_RESERVAS vencidas
@@ -140,7 +140,7 @@ Esta lista es cerrada. Nada de lo siguiente se toca en esta etapa.
 | Cancelaciones automáticas | Las cancelaciones son manuales en esta etapa |
 | Recálculo masivo nocturno | Solo recálculo parcial por evento |
 | Contabilidad y distribución entre socios | Etapa posterior |
-| Coordinación automática con Jennifer | Mensaje manual en esta etapa |
+| Coordinación automática con el operador de limpieza | Mensaje manual en esta etapa |
 | Google Calendar como vista secundaria | La vista operativa es el Sheets |
 | Múltiples medios de pago | Solo transferencia bancaria en esta etapa |
 
@@ -157,7 +157,7 @@ Antes de ejecutar el primer flujo, el Sheets de TEST debe tener estos datos carg
 | CABAÑAS | Las 5 cabañas reales (Sección 5 de Etapa 5A) |
 | TARIFAS | Al menos los conceptos `finde_completo`, `semana_1`, `semana_completa` para `grande` y `chica` |
 | TEMPORADAS | Al menos la temporada vigente con su multiplicador |
-| CONFIGURACION_GENERAL | Todas las claves de Etapa 5A, Sección 19, más la clave nueva `prereserva_pago_en_revision_alerta_horas` = `2` |
+| CONFIGURACION_GENERAL | Todas las claves de Etapa 5A, Sección 19, incluyendo `prereserva_pago_en_revision_alerta_horas` = `2` |
 | CUENTAS_COBRO | Al menos una cuenta activa de tipo `transferencia_bancaria` |
 | PLANTILLAS_MENSAJES | Al menos `nueva_reserva_equipo` y `prereserva_creada` |
 
@@ -313,8 +313,8 @@ Esta reconstrucción es lo que hace el recálculo masivo nocturno. En esta etapa
 | 1 | `db_recalcular_disponibilidad` | 1 | Llamado por otros workflows o manualmente |
 | 2 | `db_crear_consulta` | — | Webhook desde formulario o llamada directa |
 | 3 | `db_crear_prereserva` | 1 | Webhook desde formulario |
-| 4 | `db_registrar_pago` | 1 | Webhook desde formulario de Vicky |
-| 5 | `db_confirmar_reserva` | 1 | Webhook desde formulario de Vicky (aprobación) |
+| 4 | `db_registrar_pago` | 1 | Webhook desde formulario del operador |
+| 5 | `db_confirmar_reserva` | 1 | Webhook desde formulario del operador (aprobación) |
 | 6 | `sistema_expirar_prereservas` | Schedule (5 min) | Cron automático |
 
 **Por qué este orden:** `db_recalcular_disponibilidad` se implementa primero porque todos los demás workflows lo llaman. Sin cache poblada, nada puede validar disponibilidad.
@@ -444,22 +444,27 @@ PASO 1 — Validar input
   → id_huesped existe en HUÉSPEDES
   → canal_pago_esperado es valor válido
 
-PASO 2 — Verificar que no existe PRE_RESERVA activa para (id_cabana, fechas)
+PASO 2 — Verificar que no existe PRE_RESERVA activa y vigente para (id_cabana, fechas)
+  // Una PRE_RESERVA vencida pero no procesada aún por el schedule no debe bloquear.
   → Buscar en PRE_RESERVAS WHERE id_cabana = input.id_cabana
     AND estado = 'pendiente_pago'
+    AND expira_en > now()
     AND fecha_in < input.fecha_out
     AND fecha_out > input.fecha_in
   → Si existe: RETORNAR { error: 'prereserva_activa_existente', id_prereserva_conflicto }
 
 PASO 3 — Verificar disponibilidad en DISPONIBILIDAD_CACHE
-  → Para cada fecha entre fecha_in y fecha_out - 1 día:
-    → estado debe ser 'disponible' o 'checkout_disponible'
-  → Si alguna fecha tiene estado 'ocupada' o 'bloqueada':
-    → RETORNAR { error: 'fechas_no_disponibles', fechas_conflicto: [...] }
+  // Intervalo semiabierto [fecha_in, fecha_out): se verifica cada noche del rango.
+  // fecha_out no se verifica (es el día de salida, no ocupa noche).
+  // 'checkout_disponible' no bloquea: la noche de esa fecha está libre.
+  // Sí bloquean: 'ocupada', 'bloqueada', 'limite_escalonamiento'.
+  → Para cada fecha donde fecha >= fecha_in AND fecha < fecha_out:
+    → SI estado IN ('ocupada', 'bloqueada', 'limite_escalonamiento'):
+      → RETORNAR { error: 'fechas_no_disponibles', fechas_conflicto: [...] }
 
 PASO 4 — Calcular precio
   → Llamar al motor de precios (Etapa 3) con (id_cabana, fecha_in, fecha_out, personas)
-  → Si es evento especial con precio = 0: RETORNAR { error: 'paquete_sin_precio' }
+  → Si es evento especial con paquete cuyo precio_total = 0: RETORNAR { error: 'paquete_sin_precio' }
 
 PASO 5 — Calcular expira_en
   → expira_en = now() + prereserva_expiracion_minutos (de CONFIGURACION_GENERAL)
@@ -471,9 +476,13 @@ PASO 6 — Escribir en PRE_RESERVAS
   → created_at = now()
   → updated_at = now()
 
-PASO 7 — Actualizar DISPONIBILIDAD_CACHE
-  → Para cada fecha del rango: estado = 'ocupada', id_prereserva_activa = nuevo id
-  → Llamar a db_recalcular_disponibilidad con scope mínimo (solo fechas afectadas)
+PASO 7 — Recalcular DISPONIBILIDAD_CACHE
+  → Llamar a db_recalcular_disponibilidad con scope mínimo:
+      id_cabanas: [input.id_cabana]
+      fechas: rango desde fecha_in hasta fecha_out - 1 día
+      source_event: 'prereserva_creada'
+  // No escribir manualmente campos parciales en DISPONIBILIDAD_CACHE desde este workflow.
+  // db_recalcular_disponibilidad es el único responsable de escribir la cache con todos los campos.
 
 PASO 8 — Actualizar CONSULTAS
   → estado_conversacion = 'esperando_pago'
@@ -503,7 +512,7 @@ Si se llama dos veces con el mismo `id_consulta` e `id_cabana` y las mismas fech
 ## 10. WORKFLOW: db_confirmar_reserva
 
 **Concurrencia:** 1 — este es el workflow más crítico del sistema
-**Disparador:** Webhook POST desde formulario de Vicky (aprobación de pago)
+**Disparador:** Webhook POST desde formulario del operador (aprobación de pago)
 
 ### Input
 ```json
@@ -521,22 +530,44 @@ Si se llama dos veces con el mismo `id_consulta` e `id_cabana` y las mismas fech
 PASO 1 — Verificar estado de la PRE_RESERVA
   → Leer PRE_RESERVAS WHERE id = id_prereserva
   → SI estado = 'convertida':
-      RETORNAR { ok: true, nota: 'ya_confirmada' }  // idempotencia
+      // Verificar si existe la RESERVA correspondiente antes de asumir idempotencia.
+      reserva_existente = RESERVAS WHERE id_prereserva = id_prereserva
+      SI reserva_existente existe:
+          RETORNAR { ok: true, nota: 'ya_confirmada', id_reserva: reserva_existente.id }
+      SI NO existe:
+          // Estado inconsistente: PRE_RESERVA convertida sin RESERVA asociada (Race condition 4).
+          Registrar en LOG_CAMBIOS con nivel 'error':
+              "PRE_RESERVA {id_prereserva} en estado convertida sin RESERVA asociada"
+          Notificar al equipo responsable para resolución manual
+          RETORNAR { error: 'inconsistencia_convertida_sin_reserva', id_prereserva }
   → SI estado = 'vencida':
-      RETORNAR { error: 'prereserva_vencida' }
+      → PAGO permanece en 'en_revision' si existe
+      → No confirmar reserva automáticamente
+      → Registrar LOG_CAMBIOS con nivel 'warning'
+      → Notificar al equipo responsable
+      → RETORNAR { requiere_revision_manual: true, motivo: 'prereserva_vencida' }
   → SI estado = 'conflicto_pendiente':
       RETORNAR { error: 'conflicto_pendiente_requiere_resolucion_manual' }
   → SI estado != 'pendiente_pago':
       RETORNAR { error: 'estado_invalido', estado_actual }
-  → Registrar timestamp de inicio de procesamiento en PRE_RESERVAS.notas
-    (campo auxiliar: "procesando_desde: {timestamp}")
 
 PASO 2 — Verificar que el PAGO existe y está en estado correcto
   → Leer PAGOS WHERE id = id_pago AND id_prereserva = id_prereserva
   → SI no existe: RETORNAR { error: 'pago_no_encontrado' }
-  → SI estado = 'confirmado': RETORNAR { ok: true, nota: 'ya_confirmada' }  // idempotencia
+  → SI PAGO.estado = 'confirmado':
+      → Buscar RESERVA asociada por id_prereserva
+      → SI existe RESERVA:
+          RETORNAR { ok: true, nota: 'ya_confirmada', id_reserva }
+      → SI no existe RESERVA:
+          Registrar LOG_CAMBIOS nivel error:
+              "PAGO {id_pago} confirmado sin RESERVA asociada. id_prereserva: {id_prereserva}"
+          RETORNAR { error: 'pago_confirmado_sin_reserva', id_pago, id_prereserva }
   → SI estado NOT IN ('en_revision', 'pendiente'):
       RETORNAR { error: 'pago_en_estado_invalido', estado_pago }
+  → Registrar timestamp de inicio de procesamiento en PRE_RESERVAS.notas
+    (campo auxiliar: "procesando_desde: {timestamp}")
+    // Se escribe aquí, después de verificar que el PAGO existe y está en estado válido,
+    // para evitar dejar marca de procesamiento si el workflow aborta por pago inexistente o inválido.
 
 PASO 3 — RECHECK de disponibilidad (segunda verificación, momento de confirmación)
   → Consultar RESERVAS WHERE id_cabana = prereserva.id_cabana
@@ -547,10 +578,11 @@ PASO 3 — RECHECK de disponibilidad (segunda verificación, momento de confirma
 
   → Consultar PRE_RESERVAS WHERE id_cabana = prereserva.id_cabana
     AND estado = 'pendiente_pago'
+    AND expira_en > now()
     AND id != id_prereserva  // excluir la propia
     AND fecha_in < prereserva.fecha_out
     AND fecha_out > prereserva.fecha_in
-  → Si existe otra PRE_RESERVA activa: ir a PASO CONFLICTO
+  → Si existe otra PRE_RESERVA vigente: ir a PASO CONFLICTO
 
   → Consultar BLOQUEOS WHERE (id_cabana = prereserva.id_cabana OR id_cabana IS NULL)
     AND activo = TRUE
@@ -566,7 +598,8 @@ PASO CONFLICTO (si aplica):
   → PRE_RESERVA.estado = 'conflicto_pendiente'
   → PAGO.estado permanece en 'en_revision' (el cliente pagó, no rechazar automáticamente)
   → Registrar en LOG_CAMBIOS con nivel 'error' y todos los detalles
-  → Notificar a Franco y Vicky: "⚠️ Conflicto al confirmar reserva ID {id_prereserva}"
+  → Notificar al equipo responsable (definido en CONFIGURACION_GENERAL):
+      "⚠️ Conflicto al confirmar reserva ID {id_prereserva}"
   → RETORNAR { error: 'conflicto_disponibilidad' }
 
 PASO 4 — Confirmar (disponibilidad verificada, sin conflicto)
@@ -621,14 +654,14 @@ PASO 10 — Escribir en LOG_CAMBIOS
 ```
 
 ### Idempotencia
-El Paso 1 detecta si la PRE_RESERVA ya fue convertida y retorna `ok: true` sin volver a crear la RESERVA. El Paso 2 detecta si el PAGO ya fue confirmado. En ambos casos el workflow termina sin efecto secundario.
+El Paso 1 retorna `ok: true` solo si la PRE_RESERVA está en `convertida` **y** existe la RESERVA asociada — en ese caso retorna `{ ok: true, nota: 'ya_confirmada', id_reserva }`. Si la PRE_RESERVA está en `convertida` pero no existe RESERVA correspondiente, retorna `{ error: 'inconsistencia_convertida_sin_reserva' }` y registra LOG_CAMBIOS con nivel `error`. El Paso 2 detecta si el PAGO ya fue confirmado y retorna idempotencia en ese caso.
 
 ---
 
 ## 11. WORKFLOW: db_registrar_pago
 
 **Concurrencia:** 1
-**Disparador:** Webhook POST desde formulario de Vicky (recepción de comprobante)
+**Disparador:** Webhook POST desde formulario del operador (recepción de comprobante)
 
 ### Input
 ```json
@@ -652,11 +685,46 @@ El Paso 1 detecta si la PRE_RESERVA ya fue convertida y retorna `ok: true` sin v
 ### Lógica
 
 ```
-PASO 1 — Validar input
-  → id_prereserva existe en PRE_RESERVAS y estado = 'pendiente_pago'
+PASO 1 — Validar input y estado de la PRE_RESERVA
+  → id_prereserva existe en PRE_RESERVAS
   → monto_esperado > 0
   → monto_recibido >= 0
   → medio_pago es valor válido
+
+  // Verificar el estado de la PRE_RESERVA y actuar según vigencia:
+
+  // Caso A — PRE_RESERVA vigente: flujo normal
+  → SI PRE_RESERVA.estado = 'pendiente_pago' AND expira_en > now():
+      Continuar normalmente (PASO 2 en adelante)
+
+  // Caso B — PRE_RESERVA en estado pendiente_pago pero ya vencida en tiempo
+  //          (el schedule aún no la procesó): registrar el pago pero marcar para revisión manual.
+  //          Esto cubre el caso de un cliente que pagó en los últimos minutos antes del vencimiento
+  //          y el schedule corrió antes de que el operador lo registrara.
+  → SI PRE_RESERVA.estado = 'pendiente_pago' AND expira_en <= now():
+      Registrar en LOG_CAMBIOS con nivel 'warning':
+          "Pago recibido sobre PRE_RESERVA vencida en tiempo (aún no procesada por schedule).
+           Requiere revisión manual. id_prereserva: {id}. Monto: {monto_recibido}."
+      Agregar en notas del PAGO: "pago_recibido_sobre_prereserva_vencida — requiere_revision_manual"
+      Continuar con PASO 2 (registrar el pago en 'en_revision' de todas formas)
+      // El schedule respetará el PAGO en revisión (Paso 2b de sistema_expirar_prereservas).
+      // No se confirma reserva automáticamente. La resolución es manual según Sección 21.4.
+
+  // Caso C — PRE_RESERVA ya procesada como vencida: el pago llegó tarde pero no se pierde.
+  //          Se registra exclusivamente como trazabilidad de revisión manual.
+  → SI PRE_RESERVA.estado = 'vencida':
+      Registrar en LOG_CAMBIOS con nivel 'warning':
+          "Pago recibido sobre PRE_RESERVA ya vencida (estado=vencida).
+           Requiere revisión manual urgente. id_prereserva: {id}. Monto: {monto_recibido}."
+      Agregar en notas del PAGO: "pago_tardio_sobre_prereserva_vencida — requiere_revision_manual"
+      Notificar al equipo responsable
+      Continuar con PASO 2 (registrar el pago en 'en_revision' como trazabilidad)
+      // No se reactiva la PRE_RESERVA. No se confirma reserva automáticamente.
+      // La resolución es manual según Sección 21.4.
+
+  // Caso D — PRE_RESERVA en cualquier otro estado incompatible: rechazar.
+  → SI PRE_RESERVA.estado NOT IN ('pendiente_pago', 'vencida'):
+      RETORNAR { error: 'prereserva_en_estado_invalido', estado_actual: PRE_RESERVA.estado }
 
 PASO 2 — Verificar idempotencia
   → Buscar PAGOS WHERE id_prereserva = input.id_prereserva
@@ -672,7 +740,7 @@ PASO 3 — Verificar diferencia de monto
   → umbral = diferencia_pago_tolerancia (de CONFIGURACION_GENERAL, default 5000)
   → SI diferencia > umbral:
       → Registrar warning en LOG_CAMBIOS
-      → Continuar (Vicky tomó la decisión de registrar igual)
+      → Continuar (el operador tomó la decisión de registrar igual)
   → SI diferencia > 0 Y diferencia <= umbral:
       → Registrar info en LOG_CAMBIOS con nota de diferencia menor
 
@@ -723,55 +791,159 @@ Si `fechas` está vacío: recalcular próximos 60 días.
 ### Lógica
 
 ```
-PARA CADA (id_cabana, fecha) en el producto cartesiano de inputs:
+PARA CADA (id_cabana_actual, fecha_actual) en el producto cartesiano de inputs:
 
-  PASO 1 — Verificar BLOQUEOS activos
-  → SI existe BLOQUEO activo para (id_cabana O null, fecha):
-      estado = 'bloqueada'
-      → escribir y continuar con siguiente (id_cabana, fecha)
+  // Inicializar todos los campos de la fila en vacío antes de calcular.
+  // El upsert final escribe siempre todos los campos, nunca deja valores residuales.
+  estado = null
+  id_reserva_activa = vacío
+  id_prereserva_activa = vacío
+  tiene_checkout = FALSE
+  id_reserva_checkout = vacío
+  tiene_checkin = FALSE
+  id_reserva_checkin = vacío
 
-  PASO 2 — Verificar RESERVAS confirmadas
-  // Dos consultas separadas para distinguir ocupada de checkout_disponible
+  PASO 1 — Detectar movimientos operativos confirmados del día
+  // Siempre se calculan primero, independientemente del estado final de la noche.
+  // Son señales para el equipo de limpieza y deben conservarse incluso si hay bloqueo.
 
-  // 2A: ¿La fecha está dentro del período de ocupación de la reserva?
-  → SI existe RESERVA WHERE id_cabana = id_cabana
-    AND estado IN ('confirmada', 'activa')
-    AND fecha_checkin <= fecha
-    AND fecha_checkout > fecha:
-      estado = 'ocupada', id_reserva_activa = reserva.id
-      → escribir y continuar
+  // 1A: ¿Hay una reserva que hace checkout exactamente en fecha_actual?
+  → SI existe RESERVA WHERE RESERVAS.id_cabana = id_cabana_actual
+      AND estado IN ('confirmada', 'activa')
+      AND fecha_checkout = fecha_actual:
+      tiene_checkout = TRUE
+      id_reserva_checkout = esa_reserva.id
 
-  // 2B: ¿La fecha es exactamente el día de checkout de una reserva?
-  //     (fecha_checkout = fecha significa que el huésped sale ese día:
-  //      la cabaña puede recibir un nuevo checkin si no hay otro conflicto)
-  → SI existe RESERVA WHERE id_cabana = id_cabana
-    AND estado IN ('confirmada', 'activa')
-    AND fecha_checkout = fecha:
-      // Verificar que ningún otro elemento ocupa ese mismo día
-      // (otra RESERVA que entra ese día, PRE_RESERVA activa, o BLOQUEO)
-      SI no existe conflicto adicional para (id_cabana, fecha):
-        estado = 'checkout_disponible', id_reserva_activa = reserva.id
-        → escribir y continuar
-      // Si hay conflicto adicional: el PASO 2A o PASO 1 ya lo habrán capturado
+  // 1B: ¿Hay una reserva que hace checkin exactamente en fecha_actual?
+  → SI existe RESERVA WHERE RESERVAS.id_cabana = id_cabana_actual
+      AND estado IN ('confirmada', 'activa')
+      AND fecha_checkin = fecha_actual:
+      tiene_checkin = TRUE
+      id_reserva_checkin = esa_reserva.id
 
-  PASO 3 — Verificar PRE_RESERVAS activas
-  → SI existe PRE_RESERVA WHERE id_cabana = id_cabana
-    AND estado = 'pendiente_pago'
-    AND fecha_in <= fecha
-    AND fecha_out > fecha:
-      estado = 'ocupada', id_prereserva_activa = prereserva.id
-      → escribir y continuar
+  PASO 2 — Verificar si la noche de fecha_actual está ocupada por una RESERVA
+  // Principio: [fecha_checkin, fecha_checkout) — la noche de fecha_actual está ocupada
+  // si fecha_checkin <= fecha_actual < fecha_checkout.
+  // fecha_checkout = fecha_actual significa que el huésped sale ese día: la noche NO está ocupada.
+  → SI existe RESERVA WHERE RESERVAS.id_cabana = id_cabana_actual
+      AND estado IN ('confirmada', 'activa')
+      AND fecha_checkin <= fecha_actual
+      AND fecha_checkout > fecha_actual:
+      estado = 'ocupada'
+      id_reserva_activa = esa_reserva.id
+      → ir a PASO 3 (verificar bloqueo en conflicto con RESERVA, luego escribir)
 
-  PASO 4 — Calcular disponible
-  → estado = 'disponible'
-  → Calcular hora_checkin_minima según reglas de horario (sin escalonamiento en esta etapa)
-  → Calcular tipo_dia: finde / semana / feriado
-  → Calcular temporada desde TEMPORADAS
-  → Calcular minimo_noches desde CONFIGURACION_GENERAL
+  PASO 3 — Verificar BLOQUEOS activos
+  // Un bloqueo aplica si cubre la fecha puntual o si BLOQUEOS.id_cabana IS NULL (bloqueo total).
+  // fecha_hasta funciona como límite exclusivo, consistente con fecha_checkout en RESERVAS:
+  // un bloqueo que termina exactamente en fecha_actual no cubre esa fecha.
+  bloqueo_existe = SI existe BLOQUEO WHERE (BLOQUEOS.id_cabana = id_cabana_actual OR BLOQUEOS.id_cabana IS NULL)
+      AND activo = TRUE
+      AND fecha_desde <= fecha_actual
+      AND fecha_hasta > fecha_actual
+
+  SI bloqueo_existe:
+    SI estado = 'ocupada':
+      // RESERVAS prevalece sobre BLOQUEOS (Sección 6.1). La noche sigue ocupada.
+      // El bloqueo es una señal operativa de conflicto, no cancela la reserva.
+      Registrar en LOG_CAMBIOS con nivel 'warning':
+          "Conflicto: BLOQUEO sobre fecha con RESERVA activa. id_cabana: {id}, fecha: {fecha}"
+      // id_reserva_activa se conserva. Estado sigue 'ocupada'.
+      → ir a PASO 5 (escribir y continuar)
+    SI estado != 'ocupada':
+      // Sin RESERVA activa ocupando la noche → verificar si hay PRE_RESERVA vigente bajo el bloqueo.
+      // Aunque el BLOQUEO define el estado final (Sección 6.3), la PRE_RESERVA no se cancela
+      // automáticamente y el equipo debe ser notificado para resolución manual.
+      prereserva_bajo_bloqueo = buscar PRE_RESERVA WHERE
+          id_cabana = id_cabana_actual
+          AND estado = 'pendiente_pago'
+          AND expira_en > now()
+          AND fecha_in <= fecha_actual
+          AND fecha_out > fecha_actual
+
+      SI prereserva_bajo_bloqueo existe:
+        estado = 'bloqueada'
+        id_prereserva_activa = prereserva_bajo_bloqueo.id
+        // tiene_checkout e id_reserva_checkout se conservan si se calcularon en PASO 1.
+        Registrar en LOG_CAMBIOS con nivel 'warning':
+            "Conflicto: BLOQUEO sobre fecha con PRE_RESERVA vigente. id_cabana: {id}, fecha: {fecha}, id_prereserva: {id_prereserva}"
+        Notificar al equipo responsable
+        → ir a PASO 5 (escribir y continuar)
+      SI NO existe prereserva_bajo_bloqueo:
+        estado = 'bloqueada'
+        // id_prereserva_activa queda vacío (ya inicializado).
+        // tiene_checkout e id_reserva_checkout se conservan si se calcularon en PASO 1.
+        → ir a PASO 5 (escribir y continuar)
+
+  // Llegar aquí: sin bloqueo, sin RESERVA ocupando la noche.
+
+  PASO 4 — Verificar PRE_RESERVAS vigentes
+  // Solo cuentan PRE_RESERVAS pendientes y no vencidas.
+  // Se evalúan solo si no hay RESERVA ocupando la noche ni BLOQUEO aplicable.
+  // Intervalo semiabierto: fecha_in <= fecha_actual < fecha_out.
+  → SI existe PRE_RESERVA WHERE PRE_RESERVAS.id_cabana = id_cabana_actual
+      AND estado = 'pendiente_pago'
+      AND expira_en > now()
+      AND fecha_in <= fecha_actual
+      AND fecha_out > fecha_actual:
+      estado = 'ocupada'
+      id_prereserva_activa = prereserva.id
+      // id_reserva_activa queda vacío (la noche está ocupada por pre-reserva, no por reserva).
+      // tiene_checkout e id_reserva_checkout se conservan si se calcularon en PASO 1.
+      → ir a PASO 5 (escribir y continuar)
+
+  PASO 4B — Determinar estado final cuando la noche no está ocupada
+  // Llegar hasta aquí: sin bloqueo, sin RESERVA ocupando la noche, sin PRE_RESERVA vigente.
+  // checkout_disponible solo aplica si no hay ninguno de los anteriores.
+  // Si tiene_checkout = TRUE: el día tiene checkout pero la noche está libre → checkout_disponible.
+  // Si tiene_checkout = FALSE: el día está completamente libre → disponible.
+  // En ambos casos la fecha es reservable, por lo que se calculan horarios y restricciones.
+  SI tiene_checkout = TRUE:
+      estado = 'checkout_disponible'
+  SINO:
+      estado = 'disponible'
+
+  // Calcular horarios y restricciones para cualquier fecha reservable (disponible o checkout_disponible).
+  // En 5B no se aplica escalonamiento automático de check-in. La hora_checkin se carga manualmente
+  // o se usa la hora base. El escalonamiento de check-in queda definido en Etapa 2 v1.3, pero
+  // su implementación automática se difiere para una etapa posterior.
+  hora_checkin_minima = calcular_hora_checkin_base(fecha_actual)  // hora base sin escalonamiento
+  hora_checkin_maxima = hora_checkin_max_cliente (de CONFIGURACION_GENERAL)
+  // No existe escalonamiento automático de checkout en ninguna etapa.
+  hora_checkout_maxima = calcular_hora_checkout_base(fecha_actual)
+  hora_checkout_minima = hora_checkout_min_cliente (de CONFIGURACION_GENERAL)
+  es_ultimo_dia_bloque = calcular_es_ultimo_dia_bloque(fecha_actual)
+  tipo_dia = calcular_tipo_dia(fecha_actual)  // finde / semana / feriado
+  temporada = calcular_temporada(fecha_actual)
+  minimo_noches = leer de CONFIGURACION_GENERAL
 
   PASO 5 — Escribir en DISPONIBILIDAD_CACHE
-  → Upsert: si existe la fila (id_cabana, fecha), actualizar; si no, insertar
+  // Upsert por clave (id_cabana_actual, fecha_actual).
+  // SIEMPRE se escriben explícitamente todos los campos siguientes para evitar valores residuales:
+  //   estado, id_reserva_activa, id_prereserva_activa,
+  //   tiene_checkout, id_reserva_checkout, tiene_checkin, id_reserva_checkin,
+  //   hora_checkin_minima, hora_checkin_maxima, hora_checkout_maxima, hora_checkout_minima,
+  //   tipo_dia, temporada, es_ultimo_dia_bloque, minimo_noches, recalculado_en.
+  //
+  // Semántica de campos según estado resultante:
+  //   disponible:          id_reserva_activa=vacío, id_prereserva_activa=vacío,
+  //                        tiene_checkout=FALSE, id_reserva_checkout=vacío,
+  //                        tiene_checkin=FALSE, id_reserva_checkin=vacío
+  //   checkout_disponible: id_reserva_activa=vacío, id_prereserva_activa=vacío,
+  //                        tiene_checkout=TRUE, id_reserva_checkout=id,
+  //                        tiene_checkin=FALSE o TRUE según 3B
+  //   ocupada (RESERVA):   id_reserva_activa=id, id_prereserva_activa=vacío,
+  //                        tiene_checkout y tiene_checkin según PASO 3
+  //   ocupada (PRE_RESERVA):id_reserva_activa=vacío, id_prereserva_activa=id,
+  //                        tiene_checkout y tiene_checkin según PASO 3
+  //   bloqueada (simple):   id_reserva_activa=vacío, id_prereserva_activa=vacío,
+  //                        tiene_checkout según PASO 1 (puede ser TRUE si hay checkout ese día),
+  //                        tiene_checkin=FALSE
+  //   bloqueada (conflicto con PRE_RESERVA vigente):
+  //                        id_reserva_activa=vacío, id_prereserva_activa=id_prereserva,
+  //                        tiene_checkout según PASO 1, tiene_checkin=FALSE
   → recalculado_en = now()
+  → continuar con siguiente par
 
 PASO FINAL — Escribir en LOG_CAMBIOS
   → Un único registro por ejecución del workflow (no por fila)
@@ -800,7 +972,7 @@ PASO FINAL — Escribir en LOG_CAMBIOS
 ```
 PASO 1 — Buscar PRE_RESERVAS vencidas
   → WHERE estado = 'pendiente_pago'
-    AND expira_en < NOW()
+    AND expira_en <= NOW()
 
 PASO 2 — Para cada PRE_RESERVA encontrada:
 
@@ -823,9 +995,9 @@ PASO 2 — Para cada PRE_RESERVA encontrada:
 
       → Calcular horas_transcurridas = horas entre expira_en y now()
       → SI horas_transcurridas <= prereserva_pago_en_revision_alerta_horas:
-          Notificar a Vicky solamente
+          Notificar al operador responsable de reservas
       → SI horas_transcurridas > prereserva_pago_en_revision_alerta_horas:
-          Notificar a Franco Y Rodrigo (alerta elevada):
+          Notificar al equipo responsable de alerta elevada definido en configuración:
             "⚠️ PRE_RESERVA {id} lleva más de {X}hs vencida con pago en revisión
              sin resolver. Requiere atención inmediata."
           Registrar en LOG_CAMBIOS con nivel 'error'
@@ -856,7 +1028,7 @@ PASO 3 — Log de ejecución del schedule
   → SI prereservas_vencidas = 0 AND prereservas_con_pago_pendiente = 0:
       → En DEV/TEST: registrar igualmente (útil para verificar que el schedule corre)
       → En PROD: NO registrar (evitar saturar LOG_CAMBIOS con ejecuciones sin efecto)
-      → El nivel de log activo se lee de CONFIGURACION_GENERAL clave `LOG_NIVEL_MINIMO`
+      → El nivel de log activo se configura como variable de entorno de n8n (`LOG_NIVEL_MINIMO`).
 ```
 
 ### Idempotencia
@@ -893,7 +1065,7 @@ Si cualquiera de los pasos 1 a 4 falla, el workflow retorna error sin escribir n
 - `id_huesped` existe en HUÉSPEDES
 - `fecha_out > fecha_in`
 - `personas > 0` y `personas <= cabaña.capacidad_max`
-- No existe PRE_RESERVA en `pendiente_pago` para misma (cabaña, fechas)
+- No existe PRE_RESERVA `pendiente_pago` vigente (`expira_en > now()`) para misma (cabaña, fechas)
 - DISPONIBILIDAD_CACHE confirma `disponible` o `checkout_disponible` para todo el rango
 
 **RESERVAS:**
@@ -903,10 +1075,13 @@ Si cualquiera de los pasos 1 a 4 falla, el workflow retorna error sin escribir n
 - PAGO en estado `en_revision` o `pendiente`
 
 **PAGOS:**
-- `id_prereserva` existe y está en estado `pendiente_pago`
+- `id_prereserva` existe en PRE_RESERVAS
+- PRE_RESERVA en estado `pendiente_pago` (vigente o vencida en tiempo) o `vencida`: se registra el pago en todos los casos para preservar trazabilidad
+- PRE_RESERVA en cualquier otro estado (`convertida`, `cancelada_*`, `conflicto_pendiente`): rechazar con `error: 'prereserva_en_estado_invalido'`
 - `monto_esperado > 0`
 - `medio_pago` es valor válido
 - `moneda` es valor válido
+- Si PRE_RESERVA vencida (en tiempo o en estado): el PAGO se registra en `en_revision` con nota de revisión manual; no se confirma reserva automáticamente
 
 ### 14.3 Cómo se rechaza una escritura inválida
 
@@ -935,9 +1110,9 @@ Cualquier workflow puede ser ejecutado más de una vez con el mismo input sin pr
 | Workflow | Clave de idempotencia | Comportamiento si ya existe |
 |---|---|---|
 | `db_crear_consulta` | `id_contacto_externo` + estado activo | Retorna consulta existente, no crea nueva |
-| `db_crear_prereserva` | `id_cabana` + `fecha_in` + `fecha_out` + estado `pendiente_pago` | Retorna error con id del conflicto |
+| `db_crear_prereserva` | `id_cabana` + `fecha_in` + `fecha_out` + PRE_RESERVA `pendiente_pago` vigente (`expira_en > now()`) | Retorna error con id del conflicto |
 | `db_registrar_pago` | `id_prereserva` + `tipo` + estado activo | Retorna pago existente, no crea nuevo |
-| `db_confirmar_reserva` | Estado de PRE_RESERVA + estado de PAGO | Retorna `ya_confirmada` si ya fue procesado |
+| `db_confirmar_reserva` | Estado de PRE_RESERVA + existencia de RESERVA asociada | Retorna `ya_confirmada` si PRE_RESERVA=convertida y RESERVA existe; error `inconsistencia_convertida_sin_reserva` si convertida sin RESERVA; si PAGO está confirmado pero no existe RESERVA asociada, retorna error `pago_confirmado_sin_reserva` y registra LOG_CAMBIOS nivel error |
 | `db_recalcular_disponibilidad` | Upsert por (id_cabana, fecha) | Sobreescribe con el valor más reciente |
 | `sistema_expirar_prereservas` | Verifica estado antes de vencer | No procesa PRE_RESERVAS ya vencidas |
 
@@ -965,7 +1140,7 @@ Google Sheets no tiene transacciones nativas ni locks de fila. Si dos ejecucione
 El workflow `db_confirmar_reserva` tiene concurrencia configurada en 1. Si llegan dos ejecuciones simultáneas, la segunda espera en cola hasta que la primera termine. Esta es la protección principal.
 
 **Capa 2 — Timestamp de inicio de procesamiento**
-Al entrar al Paso 1 de `db_confirmar_reserva`, el workflow escribe en `PRE_RESERVAS.notas` un campo auxiliar: `"procesando_desde: {timestamp}"`. Si una segunda ejecución llega para la misma PRE_RESERVA y encuentra ese campo con un timestamp reciente (menos de 60 segundos), retorna error `procesamiento_en_curso`.
+Al verificar que el PAGO existe y está en estado válido (final del Paso 2 de `db_confirmar_reserva`), el workflow escribe en `PRE_RESERVAS.notas` un campo auxiliar: `"procesando_desde: {timestamp}"`. Si una segunda ejecución llega para la misma PRE_RESERVA y encuentra ese campo con un timestamp reciente (menos de 60 segundos), retorna error `procesamiento_en_curso`.
 
 ```
 procesando_desde: 2026-06-05T14:23:00Z
@@ -980,7 +1155,7 @@ Si a pesar de las tres capas se detecta una doble RESERVA (en el recálculo de d
 
 1. Ambas RESERVAS pasan a estado `conflicto_pendiente`
 2. LOG_CAMBIOS registra el conflicto con nivel `error`
-3. Notificación inmediata a Franco
+3. Notificación inmediata al equipo responsable (definido en CONFIGURACION_GENERAL)
 4. El equipo resuelve manualmente cuál RESERVA es válida
 
 ### 16.4 Ventana de riesgo real
@@ -993,7 +1168,7 @@ Con concurrencia = 1 en n8n, la ventana de riesgo real es prácticamente cero en
 
 ### Race condition 1 — Dos formularios enviados simultáneamente para la misma cabaña
 
-**Escenario:** Franco y Vicky crean pre-reservas para Bamboo el mismo fin de semana con diferencia de segundos.
+**Escenario:** Dos operadores crean pre-reservas para Bamboo el mismo fin de semana con diferencia de segundos.
 
 **Resolución:**
 - Concurrencia = 1 en `db_crear_prereserva`
@@ -1006,14 +1181,17 @@ Con concurrencia = 1 en n8n, la ventana de riesgo real es prácticamente cero en
 
 ### Race condition 2 — PRE_RESERVA vence mientras se procesa el pago
 
-**Escenario:** La PRE_RESERVA tiene `expira_en = 14:00`. El schedule de expiración corre a las 14:00. Vicky aprueba el comprobante también a las 14:00.
+**Escenario:** La PRE_RESERVA tiene `expira_en = 14:00`. El schedule de expiración corre a las 14:00. El operador registra el comprobante también a las 14:00.
 
-**Resolución:**
-- `sistema_expirar_prereservas` verifica si hay PAGO en `en_revision` antes de vencer (Paso 2b)
-- Si el PAGO ya fue registrado: NO vence la PRE_RESERVA, registra warning, notifica al equipo
-- Si el PAGO no está registrado aún: vence normalmente
-- Si `db_confirmar_reserva` llega después de que la PRE_RESERVA ya venció: Paso 1 detecta estado `vencida` y retorna error
-- En ambos casos: sin double booking, sin pérdida silenciosa del pago
+**Resolución según el momento exacto:**
+
+- **Si el PAGO se registra antes de que el schedule procese la PRE_RESERVA** (Caso B de `db_registrar_pago`): la PRE_RESERVA está en `pendiente_pago` pero `expira_en <= now()`. El pago se registra en `en_revision` con nota `pago_recibido_sobre_prereserva_vencida`. Luego `sistema_expirar_prereservas` detecta el PAGO en revisión (Paso 2b) y NO vence la PRE_RESERVA. Registra warning y notifica al equipo. La resolución es manual.
+
+- **Si el schedule procesa la PRE_RESERVA antes de que llegue el PAGO** (Caso C de `db_registrar_pago`): la PRE_RESERVA ya está en estado `vencida`. El pago se registra de todas formas en `en_revision` con nota `pago_tardio_sobre_prereserva_vencida`. Se notifica al equipo para resolución manual. No se pierde trazabilidad del pago.
+
+- **En ningún caso** se confirma la reserva automáticamente cuando la PRE_RESERVA está vencida o venció en tiempo. La resolución sigue el protocolo de Sección 21.4.
+
+- Sin double booking en todos los escenarios, sin pérdida silenciosa del pago.
 
 ---
 
@@ -1025,7 +1203,7 @@ Con concurrencia = 1 en n8n, la ventana de riesgo real es prácticamente cero en
 - El bloqueo se crea en BLOQUEOS (no hay validación que lo impida)
 - n8n detecta el conflicto al recalcular disponibilidad: la fecha tiene estado `ocupada` (por PRE_RESERVA) pero también hay BLOQUEO
 - LOG_CAMBIOS registra el conflicto con nivel `warning`
-- Notificación a Franco: "Hay un bloqueo que conflictúa con PRE_RESERVA #{id}"
+- Notificación al equipo responsable: "Hay un bloqueo que conflictúa con PRE_RESERVA #{id}"
 - El equipo decide: cancelar PRE_RESERVA o eliminar el bloqueo
 - El sistema no resuelve automáticamente
 
@@ -1038,12 +1216,12 @@ Con concurrencia = 1 en n8n, la ventana de riesgo real es prácticamente cero en
 **Estado inconsistente:** PRE_RESERVA en `convertida` sin RESERVA correspondiente.
 
 **Resolución:**
-- Al reiniciarse n8n, el webhook de Vicky puede reintentarse
+- Al reiniciarse n8n, el webhook del operador puede reintentarse
 - `db_confirmar_reserva` Paso 1: PRE_RESERVA está en `convertida`
 - El workflow no retorna `ya_confirmada` porque no hay RESERVA
 - Detecta el estado inconsistente: PRE_RESERVA en `convertida` sin RESERVA
 - Registra en LOG_CAMBIOS con nivel `error`: "PRE_RESERVA {id} en estado convertida sin RESERVA asociada"
-- Notifica a Franco para resolución manual
+- Notifica al equipo responsable para resolución manual
 - El equipo puede crear la RESERVA manualmente o revertir la PRE_RESERVA a `pendiente_pago`
 
 Esta es la razón por la que el timestamp de procesamiento (Sección 16) es útil: permite identificar que la ejecución anterior llegó hasta cierto punto.
@@ -1056,18 +1234,18 @@ Esta es la razón por la que el timestamp de procesamiento (Sección 16) es úti
 
 | Acción | Quién | Cómo |
 |---|---|---|
-| Crear CONSULTA inicial | Franco / Vicky | Formulario interno o directamente en Sheets DEV |
-| Crear PRE_RESERVA | Franco / Vicky | Formulario interno → webhook → `db_crear_prereserva` |
-| Validar comprobante de pago | Vicky | Google Form → webhook → `db_registrar_pago` |
-| Aprobar pago y confirmar reserva | Vicky | Google Form → webhook → `db_confirmar_reserva` |
-| Registrar checkin | Franco / Vicky | Directamente en RESERVAS (cambio de estado a `activa`) |
-| Registrar checkout | Franco / Vicky | Directamente en RESERVAS (cambio de estado a `completada`) |
+| Crear CONSULTA inicial | Operador | Formulario interno o directamente en Sheets DEV |
+| Crear PRE_RESERVA | Operador | Formulario interno → webhook → `db_crear_prereserva` |
+| Validar comprobante de pago | Operador | Google Form → webhook → `db_registrar_pago` |
+| Aprobar pago y confirmar reserva | Operador | Google Form → webhook → `db_confirmar_reserva` |
+| Registrar checkin | Operador | Directamente en RESERVAS (cambio de estado a `activa`) |
+| Registrar checkout | Operador | Directamente en RESERVAS (cambio de estado a `completada`) |
 | Crear bloqueos | Franco / Rodrigo | Directamente en BLOQUEOS → Apps Script notifica a n8n |
 | Cargar feriados | Franco / Rodrigo | Directamente en FERIADOS |
 | Actualizar tarifas | Franco / Rodrigo | Directamente en TARIFAS |
-| Cancelar reservas | Franco / Vicky | Directamente en RESERVAS + registrar en LOG_CAMBIOS |
-| Notificar a Jennifer | Franco / Rodrigo | WhatsApp manual |
-| Notificar al cliente | Vicky | WhatsApp manual |
+| Cancelar reservas | Operador | Directamente en RESERVAS + registrar en LOG_CAMBIOS |
+| Notificar al equipo de limpieza | Franco / Rodrigo | WhatsApp manual |
+| Notificar al cliente | Operador | WhatsApp manual |
 
 ### 18.2 Qué automatiza n8n en esta etapa
 
@@ -1084,14 +1262,14 @@ Esta es la razón por la que el timestamp de procesamiento (Sección 16) es úti
 
 ---
 
-## 19. FORMULARIO INTERNO MÍNIMO DE VICKY
+## 19. FORMULARIO INTERNO MÍNIMO DEL OPERADOR
 
 En esta etapa, el único punto de entrada manual estructurado es un Google Form con dos propósitos: registrar el comprobante recibido y aprobar el pago.
 
 ### 19.1 Formulario A: Registro de comprobante
 
 **Nombre:** "Vita Delta — Registrar comprobante de pago"
-**Propósito:** Vicky completa este formulario cuando el cliente envía un comprobante.
+**Propósito:** El operador completa este formulario cuando el cliente envía un comprobante.
 
 **Campos:**
 
@@ -1110,7 +1288,7 @@ En esta etapa, el único punto de entrada manual estructurado es un Google Form 
 ### 19.2 Formulario B: Aprobación de pago
 
 **Nombre:** "Vita Delta — Aprobar pago"
-**Propósito:** Vicky o Franco completan este formulario tras verificar el comprobante.
+**Propósito:** El operador completa este formulario tras verificar el comprobante.
 
 **Campos:**
 
@@ -1119,10 +1297,12 @@ En esta etapa, el único punto de entrada manual estructurado es un Google Form 
 | ID de pago | Número | Sí | Mayor que 0 |
 | ID de pre-reserva | Número | Sí | Mayor que 0 |
 | Decisión | Lista | Sí | Aprobar / Rechazar |
-| Validado por | Lista | Sí | Vicky / Franco / Rodrigo |
+| Validado por | Texto | Sí | Nombre del operador que aprueba |
 | Motivo de rechazo | Texto | Solo si Rechazar | |
 
-**Al enviar:** Apps Script dispara webhook a n8n → `db_confirmar_reserva` (si Aprobar) o `db_registrar_pago` con estado rechazado (si Rechazar)
+**Al enviar:**
+- Si Decisión = Aprobar: Apps Script dispara webhook a n8n → `db_confirmar_reserva`.
+- Si Decisión = Rechazar: Apps Script ejecuta una rama de rechazo que actualiza `PAGOS.estado = rechazado`, completa `motivo_rechazo`, registra en LOG_CAMBIOS y no llama a `db_confirmar_reserva`. Esta rama no requiere un workflow separado en esta etapa: es lógica directa del script disparado por el formulario.
 
 ### 19.3 Apps Script mínimo
 
@@ -1134,7 +1314,7 @@ function onFormSubmit(e) {
   const payload = {
     id_prereserva: parseInt(datos['ID de pre-reserva'][0]),
     // ... mapeo de campos ...
-    source_event: 'vicky_form'
+    source_event: 'operador_form'
   };
 
   const url = PropertiesService.getScriptProperties()
@@ -1177,9 +1357,9 @@ campo_modificado:  estado
 valor_anterior:    (vacío — registro nuevo)
 valor_nuevo:       confirmada
 modificado_por:    n8n
-source_event:      vicky_form
+source_event:      operador_form
 nivel:             info
-detalle:           {"id_prereserva": 1, "id_pago": 1, "validado_por": "vicky",
+detalle:           {"id_prereserva": 1, "id_pago": 1, "validado_por": "operador",
                     "encargado_semana": "Franco", "monto_total": 350000}
 ```
 
@@ -1198,7 +1378,7 @@ detalle:           {"id_prereserva": 1, "id_pago": 1, "validado_por": "vicky",
 | TEST | info | Todo |
 | PROD | warning | Solo cambios de estado, errores y conflictos |
 
-El nivel mínimo se configura en CONFIGURACION_GENERAL con la clave `LOG_NIVEL_MINIMO`.
+El nivel mínimo se configura como variable de entorno de n8n (`LOG_NIVEL_MINIMO`), según Sección 5.2.
 
 ---
 
@@ -1230,27 +1410,33 @@ Ejecutar en orden después de cualquier falla de workflow:
 6. Registrar en LOG_CAMBIOS la corrección manual con `source_event: 'sistema_correccion'`
 7. Si el cliente pagó y hubo error: contactar al cliente manualmente, no dejar en silencio
 
-### 21.4 Caso específico: PRE_RESERVA vencida con PAGO en revisión durante más de X horas
+### 21.4 Caso específico: PRE_RESERVA vencida con PAGO en revisión
 
-**Cómo se detecta:** LOG_CAMBIOS muestra registros de nivel `warning` o `error` con el texto `pago_en_revision_vencido`. PRE_RESERVAS.notas contiene `requiere_revision_manual: pago_en_revision_vencido`.
+Este protocolo cubre dos variantes que `db_registrar_pago` puede generar:
 
-**Protocolo de recuperación:**
+**Variante B — PRE_RESERVA `pendiente_pago` con `expira_en <= now()` (vencida en tiempo, no procesada aún por schedule):**
+**Cómo se detecta:** PAGOS.notas contiene `pago_recibido_sobre_prereserva_vencida`. LOG_CAMBIOS muestra warning. La PRE_RESERVA puede volver a aparecer en `sistema_expirar_prereservas` como `pago_en_revision_vencido` si el schedule corre después.
+
+**Variante C — PRE_RESERVA ya en estado `vencida` cuando llega el pago:**
+**Cómo se detecta:** PAGOS.notas contiene `pago_tardio_sobre_prereserva_vencida`. LOG_CAMBIOS muestra warning con texto específico. La PRE_RESERVA ya está en `vencida` y la disponibilidad ya fue liberada.
+
+**Protocolo de recuperación (aplica a ambas variantes):**
 
 1. Identificar la PRE_RESERVA y el PAGO asociado en LOG_CAMBIOS
 2. Revisar el comprobante manualmente (URL en PAGOS.comprobante_url)
 3. **Si el pago es válido:**
    - Confirmar que la cabaña sigue disponible (consultar DISPONIBILIDAD_CACHE)
-   - Si disponible: aprobar el PAGO via formulario B → `db_confirmar_reserva` crea la RESERVA normalmente
+   - Si disponible: reactivar la PRE_RESERVA manualmente a `pendiente_pago` (si está en variante B) o crear una nueva PRE_RESERVA (si está en variante C, las fechas ya están libres). Si se crea una nueva PRE_RESERVA para rescatar un pago tardío válido, el PAGO existente debe reasignarse a la nueva `id_prereserva` o se debe crear un nuevo PAGO asociado a la nueva PRE_RESERVA. La decisión debe registrarse en LOG_CAMBIOS con `source_event: 'sistema_correccion'` antes de aprobar el pago vía Formulario B → `db_confirmar_reserva` crea la RESERVA normalmente
    - Si no disponible (otra reserva entró mientras tanto): notificar al cliente, coordinar reembolso o reasignación, registrar en LOG_CAMBIOS con `source_event: 'sistema_correccion'`
 4. **Si el pago es inválido** (comprobante apócrifo, monto incorrecto, transferencia de tercero):
    - Cambiar PAGOS.estado = `rechazado`, PAGOS.motivo_rechazo = motivo
-   - Cambiar PRE_RESERVAS.estado = `cancelada_por_cliente` (o el motivo real)
-   - Llamar a `db_recalcular_disponibilidad` para liberar las fechas
+   - Si la PRE_RESERVA sigue en `pendiente_pago`: cambiar a `cancelada_por_cliente`
+   - Llamar a `db_recalcular_disponibilidad` para las fechas si aún están bloqueadas
    - Registrar en LOG_CAMBIOS con `source_event: 'sistema_correccion'` y detalle completo
    - Notificar al cliente manualmente
-5. En ambos casos: limpiar el campo PRE_RESERVAS.notas de la marca `requiere_revision_manual`
+5. En ambos casos: limpiar el campo PAGOS.notas de la marca de revisión manual y registrar la decisión tomada
 
-**Regla:** Ningún caso de `pago_en_revision_vencido` se resuelve en silencio. Toda decisión queda registrada en LOG_CAMBIOS con `source_event: 'sistema_correccion'` y el nombre de quien tomó la decisión.
+**Regla:** Ningún pago tardío o sobre pre-reserva vencida se resuelve en silencio. Toda decisión queda registrada en LOG_CAMBIOS con `source_event: 'sistema_correccion'` y el nombre de quien tomó la decisión.
 
 ---
 
@@ -1299,7 +1485,7 @@ Después de cada ronda de pruebas, limpiar el entorno TEST:
 **Input:** Seña esperada $175.000, monto recibido $174.000 (diferencia $1.000 < umbral $5.000)
 **Pasos esperados:** `db_registrar_pago` registra con diferencia, continúa normalmente
 **Output esperado:** PAGO en `en_revision`, LOG_CAMBIOS con nota de diferencia menor
-**Comportamiento esperado:** No bloquea el flujo, Vicky puede aprobar igual
+**Comportamiento esperado:** No bloquea el flujo, el operador puede aprobar igual
 
 ---
 
@@ -1307,14 +1493,14 @@ Después de cada ronda de pruebas, limpiar el entorno TEST:
 
 **Input:** Seña esperada $175.000, monto recibido $100.000 (diferencia $75.000 > umbral)
 **Pasos esperados:** `db_registrar_pago` registra pero con warning explícito
-**Output esperado:** PAGO en `en_revision`, LOG_CAMBIOS con nivel warning, Vicky debe decidir
-**Comportamiento esperado:** El flujo no se bloquea automáticamente; Vicky puede rechazar o aprobar
+**Output esperado:** PAGO en `en_revision`, LOG_CAMBIOS con nivel warning, operador debe decidir
+**Comportamiento esperado:** El flujo no se bloquea automáticamente; el operador puede rechazar o aprobar
 
 ---
 
 ### Caso 6 — Idempotencia: db_confirmar_reserva llamado dos veces
 
-**Input:** Vicky envía el formulario de aprobación dos veces (doble clic accidental)
+**Input:** El operador envía el formulario de aprobación dos veces (doble clic accidental)
 **Pasos esperados:** Primera llamada confirma. Segunda llamada entra, Paso 1 detecta PRE_RESERVA en `convertida`, retorna `ya_confirmada`
 **Output esperado:** Solo 1 RESERVA creada, sin duplicado
 **LOG_CAMBIOS esperado:** 2 registros: el de la confirmación real + 1 de nivel info indicando replay idempotente
@@ -1356,6 +1542,82 @@ Después de cada ronda de pruebas, limpiar el entorno TEST:
 
 ---
 
+### Caso 11 — Reserva encadenada válida: nueva reserva posterior
+
+**Precondición:** RESERVA existente confirmada: Bamboo `26/06 → 27/06`
+**Input:** Nueva PRE_RESERVA: Bamboo `27/06 → 28/06`
+**Pasos esperados:** `db_crear_prereserva` — PASO 2 no detecta conflicto (la PRE_RESERVA nueva empieza cuando la RESERVA existente termina); PASO 3 verifica cache: el `27/06` tiene `estado = checkout_disponible` → no bloquea → PRE_RESERVA creada
+**Output esperado:** PRE_RESERVA creada correctamente. Cache para `27/06`: `estado = ocupada`, `tiene_checkout = TRUE`, `id_prereserva_activa` = nueva pre-reserva
+**Propósito:** Verificar que reservas encadenadas son válidas (intervalo semiabierto)
+
+---
+
+### Caso 12 — Reserva encadenada válida: nueva reserva anterior
+
+**Precondición:** RESERVA existente confirmada: Bamboo `26/06 → 27/06`
+**Input:** Nueva PRE_RESERVA: Bamboo `25/06 → 26/06`
+**Pasos esperados:** `db_crear_prereserva` — PASO 2 no detecta conflicto (la PRE_RESERVA nueva termina donde la RESERVA existente empieza); PASO 3 verifica cache: el `25/06` está disponible; el `26/06` no se verifica (es `fecha_out` de la nueva pre-reserva, fuera del intervalo `[fecha_in, fecha_out)`) → PRE_RESERVA creada
+
+**Output esperado — después de crear la PRE_RESERVA (antes de confirmarla):**
+- `25/06`: `estado = ocupada`, `id_prereserva_activa` = nueva PRE_RESERVA, `tiene_checkout = FALSE`
+- `26/06`: no forma parte del rango de la PRE_RESERVA (es `fecha_out`). La PRE_RESERVA no genera `tiene_checkout`. El `26/06` conserva su estado anterior: `tiene_checkin = TRUE` de la RESERVA `26/06 → 27/06`
+
+**Output esperado — después de confirmar la PRE_RESERVA (convertida en RESERVA):**
+- `25/06`: `estado = ocupada`, `id_reserva_activa` = nueva RESERVA, `tiene_checkout = FALSE`
+- `26/06`: `tiene_checkout = TRUE`, `id_reserva_checkout` = nueva RESERVA saliente; `tiene_checkin = TRUE`, `id_reserva_checkin` = RESERVA existente. Estado según si la noche del `26/06` está ocupada por la RESERVA existente (sí → `ocupada`)
+
+**Propósito:** Verificar que la nueva reserva que termina donde otra empieza es válida, y que la PRE_RESERVA no genera `tiene_checkout` — ese campo solo lo producen RESERVAS confirmadas
+
+---
+
+### Caso 13 — Reserva envolvente inválida
+
+**Precondición:** RESERVA existente confirmada: Bamboo `26/06 → 27/06`
+**Input:** Nueva PRE_RESERVA: Bamboo `25/06 → 27/06`
+**Pasos esperados:** `db_crear_prereserva` — PASO 2 no detecta PRE_RESERVA conflictiva (pero sí hay RESERVA); PASO 3 verifica cache: el `26/06` tiene `estado = ocupada` (noche ocupada por RESERVA existente) → rechaza
+**Output esperado:** Error `fechas_no_disponibles`, sin escritura. LOG_CAMBIOS con warning
+**Propósito:** Verificar que una reserva que pisa noches ocupadas es rechazada aunque el día de checkout coincida
+
+---
+
+### Caso 14 — Checkout + PRE_RESERVA mismo día: estado correcto en cache
+
+**Precondición:** RESERVA existente confirmada: Bamboo `18/06 → 20/06`
+**Input:** Nueva PRE_RESERVA: Bamboo `20/06 → 22/06`
+**Pasos esperados:** PRE_RESERVA creada correctamente (el `20/06` tenía `checkout_disponible`). Luego `db_recalcular_disponibilidad` recalcula el `20/06`
+**Output esperado en cache para `20/06` después del recálculo:**
+  - `estado = ocupada`
+  - `id_prereserva_activa` = ID de la nueva PRE_RESERVA
+  - `id_reserva_activa` = vacío
+  - `tiene_checkout = TRUE`, `id_reserva_checkout` = ID de la RESERVA `18/06 → 20/06`
+  - `tiene_checkin = FALSE` (la PRE_RESERVA no genera checkin en cache — solo RESERVAS confirmadas)
+  - **No debe quedar `checkout_disponible`**
+**Propósito:** Verificar que el orden correcto en `db_recalcular_disponibilidad` (PRE_RESERVAS después de movimientos operativos) produce el estado correcto
+
+---
+
+### Caso 15 — Intento de confirmar PRE_RESERVA ya vencida
+
+**Precondición:** PRE_RESERVA en estado `vencida`. PAGO asociado en estado `en_revision`.
+**Input:** Ejecutar `db_confirmar_reserva` con `id_prereserva` de la PRE_RESERVA vencida y su `id_pago` asociado.
+**Pasos esperados:**
+- PASO 1 detecta `PRE_RESERVA.estado = vencida`
+- No confirma reserva automáticamente
+- PAGO permanece en `en_revision`
+- Registra LOG_CAMBIOS con nivel `warning`
+- Notifica al equipo responsable
+- Retorna `{ requiere_revision_manual: true, motivo: 'prereserva_vencida' }`
+
+**Output esperado:**
+- No se crea RESERVA
+- PRE_RESERVA sigue en estado `vencida`
+- PAGO sigue en estado `en_revision`
+- LOG_CAMBIOS registra la situación con nivel `warning`
+
+**Propósito:** Verificar que un pago tardío sobre PRE_RESERVA vencida no se pierde ni se confirma automáticamente. La resolución queda en manos del equipo según Sección 21.4.
+
+---
+
 ## 23. PROTOCOLO DE PRUEBA
 
 ### 23.1 Entorno
@@ -1372,16 +1634,21 @@ Todas las pruebas se ejecutan sobre `VITA_DELTA_TEST`. Nunca sobre DEV ni PROD.
 ### 23.3 Orden de ejecución de casos de prueba
 
 ```
-1. Caso 7 (capacidad excedida) — prueba validación de input
-2. Caso 8 (cabaña bloqueada) — prueba integración BLOQUEOS → CACHE
-3. Caso 1 (happy path) — prueba flujo completo
-4. Caso 2 (fechas ocupadas) — prueba que la cache se actualizó correctamente en Caso 1
-5. Caso 4 (diferencia de monto) — prueba tolerancia
-6. Caso 5 (diferencia alta) — prueba warning de monto
-7. Caso 6 (idempotencia) — prueba replay
-8. Caso 3 (vencimiento) — crear PRE_RESERVA nueva, forzar vencimiento, verificar
-9. Caso 9 (vencimiento con pago) — crear PRE_RESERVA + PAGO en revisión, forzar vencimiento
-10. Caso 10 (conflicto manual) — prueba del recheck con dato corrupto inyectado
+1.  Caso 7 (capacidad excedida) — prueba validación de input
+2.  Caso 8 (cabaña bloqueada) — prueba integración BLOQUEOS → CACHE
+3.  Caso 11 (encadenada posterior) — prueba intervalo semiabierto, reserva válida
+4.  Caso 12 (encadenada anterior) — prueba intervalo semiabierto, reserva válida
+5.  Caso 13 (envolvente inválida) — prueba rechazo por noche ocupada
+6.  Caso 1 (happy path) — prueba flujo completo
+7.  Caso 2 (fechas ocupadas) — prueba que la cache se actualizó correctamente en Caso 1
+8.  Caso 14 (checkout + PRE_RESERVA mismo día) — prueba estado correcto en cache
+9.  Caso 4 (diferencia de monto) — prueba tolerancia
+10. Caso 5 (diferencia alta) — prueba warning de monto
+11. Caso 6 (idempotencia) — prueba replay
+12. Caso 3 (vencimiento) — crear PRE_RESERVA nueva, forzar vencimiento, verificar
+13. Caso 9 (vencimiento con pago) — crear PRE_RESERVA + PAGO en revisión, forzar vencimiento
+14. Caso 15 (confirmar PRE_RESERVA vencida) — intentar confirmar con pago en revisión
+15. Caso 10 (conflicto manual) — prueba del recheck con dato corrupto inyectado
 ```
 
 ### 23.4 Qué verificar después de cada caso
@@ -1397,7 +1664,7 @@ Para cada caso, verificar en el Sheets TEST:
 
 ### 23.5 Limpieza entre casos
 
-Entre casos que modifiquen datos (Casos 1, 3, 4, 5, 8, 9, 10): limpiar las filas creadas en CONSULTAS, PRE_RESERVAS, RESERVAS y PAGOS, y ejecutar recálculo de disponibilidad para las fechas usadas.
+Entre casos que modifiquen datos (Casos 1, 3, 4, 5, 8, 9, 10, 15): limpiar las filas creadas en CONSULTAS, PRE_RESERVAS, RESERVAS y PAGOS, y ejecutar recálculo de disponibilidad para las fechas usadas.
 
 El Caso 2 depende del Caso 1 (verifica que las fechas quedaron ocupadas), por lo que se ejecuta inmediatamente después sin limpiar.
 
@@ -1416,7 +1683,10 @@ La Etapa 5B se considera operativa y puede avanzar a la siguiente cuando se cump
 
 ### Criterios funcionales
 
-- [ ] Los 10 casos de prueba de la Sección 22 pasan en VITA_DELTA_TEST sin intervención técnica
+- [ ] Los 15 casos de prueba de la Sección 22 pasan en VITA_DELTA_TEST sin intervención técnica
+- [ ] Los Casos 11 y 12 (encadenadas) crean PRE_RESERVAS sin error; el Caso 13 (envolvente) es rechazado
+- [ ] El Caso 14 (checkout + PRE_RESERVA mismo día) produce `estado = ocupada` en cache, nunca `checkout_disponible`
+- [ ] El Caso 15 (PRE_RESERVA vencida con pago) devuelve `requiere_revision_manual`, no crea RESERVA y mantiene el PAGO en `en_revision`
 - [ ] El Caso 1 (happy path) puede ejecutarse tres veces seguidas con distintas fechas y distintas cabañas sin errores
 - [ ] El Caso 6 (idempotencia) produce exactamente 1 RESERVA en cada ejecución, sin importar cuántas veces se llame al formulario de aprobación
 - [ ] El Caso 10 (conflicto simulado) es detectado por el recheck y NO crea una RESERVA en estado `confirmada`
@@ -1434,7 +1704,7 @@ La Etapa 5B se considera operativa y puede avanzar a la siguiente cuando se cump
 
 ### Criterio operativo
 
-- [ ] Vicky puede completar el flujo completo (Formulario A → Formulario B → verificar en Sheets) sin instrucciones técnicas adicionales, solo con la documentación de esta etapa
+- [ ] El operador responsable puede completar el flujo completo (Formulario A → Formulario B → verificar en Sheets) sin instrucciones técnicas adicionales, solo con la documentación de esta etapa
 
 ---
 
@@ -1456,7 +1726,7 @@ Lo que queda diferido explícitamente de esta etapa:
 
 ### Pagos automáticos
 
-- [ ] Webhook de MercadoPago (reemplaza el formulario de Vicky para pagos con link MP)
+- [ ] Webhook de MercadoPago (reemplaza el formulario del operador para pagos con link MP)
 - [ ] El flujo de `db_confirmar_reserva` no cambia; solo cambia el disparador
 
 ### Bot conversacional
@@ -1467,7 +1737,7 @@ Lo que queda diferido explícitamente de esta etapa:
 
 ### Automatizaciones operativas
 
-- [ ] Notificación automática a Jennifer por WhatsApp
+- [ ] Notificación automática al operador de limpieza por WhatsApp
 - [ ] Notificación automática al cliente por WhatsApp
 - [ ] Actualización automática del calendario visual
 - [ ] Asignación automática del encargado semanal (en 5B se calcula pero no se notifica)

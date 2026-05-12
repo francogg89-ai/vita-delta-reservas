@@ -1,11 +1,15 @@
 # ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md
 # Modelo de Datos Real — Google Sheets
 
-**Versión:** 1.0
+**Versión:** 1.1
 **Fecha:** Mayo 2026
 **Estado:** Aprobado — CERRADO
-**Depende de:** ARQUITECTURA_ETAPA_1 v1.1 / ETAPA_2 v1.1 / ETAPA_3 v3.0 / ETAPA_4A v1.0 / ETAPA_4B v1.0
+**Depende de:** ARQUITECTURA_ETAPA_1 v1.1 / ETAPA_2 v1.3 / ETAPA_3 v3.0 / ETAPA_4A v1.0 / ETAPA_4B v1.0
 **Autores:** Franco (titular) + Claude (arquitecto)
+
+**Historial de versiones:**
+- v1.0 — Modelo de datos inicial completo
+- v1.1 — Alineación con ETAPA_2 v1.3: columnas operativas en DISPONIBILIDAD_CACHE (`tiene_checkout`, `id_reserva_checkout`, `tiene_checkin`, `id_reserva_checkin`), semántica de estados actualizada al intervalo semiabierto `[fecha_checkin, fecha_checkout)`, eliminación de claves de escalonamiento de checkout de CONFIGURACION_GENERAL, actualización de `tipo_override` en OVERRIDES_OPERATIVOS.
 
 ---
 
@@ -32,8 +36,8 @@
 19. Hoja: CONFIGURACION_GENERAL
 20. Hoja: PLANTILLAS_MENSAJES
 21. Hoja: CUENTAS_COBRO
-22. Hoja: DESCUENTOS
-23. Hoja: GASTOS
+22. Hoja: GASTOS
+23. Hoja: DESCUENTOS
 24. Hoja: SOCIOS
 25. Hoja: LOG_CAMBIOS
 26. Hojas auxiliares y vistas operativas
@@ -113,11 +117,13 @@ El resultado de esta etapa es un documento de referencia que permite crear el Sh
 | JSON | Texto plano | Sin validación interna |
 | URL | Texto | Sin validación |
 
-### Columnas presentes en todas las hojas fuente
+### Columnas presentes en hojas fuente
 | Columna | Tipo | Descripción |
 |---|---|---|
 | `created_at` | Timestamp | Cuándo se creó el registro. Solo escribe n8n o fórmula de Sheets en hojas manuales |
 | `updated_at` | Timestamp | Última modificación. Solo escribe n8n |
+
+> **Convención de presencia:** Las hojas transaccionales y las hojas que pueden modificarse por n8n incluyen `created_at` y `updated_at`. Las hojas manuales o de configuración pueden tener solo `created_at` cuando no se requiere trazabilidad de actualización fila por fila. La especificación definitiva de columnas de cada hoja prevalece sobre esta convención general.
 
 ---
 
@@ -126,7 +132,7 @@ El resultado de esta etapa es un documento de referencia que permite crear el Sh
 | Hoja | Categoría | Escribe | Lee | Etapa origen |
 |---|---|---|---|---|
 | CABAÑAS | Fuente | Franco/Rodrigo | Todos | 1 |
-| HUÉSPEDES | Fuente | n8n / Vicky | Todos | 1 |
+| HUÉSPEDES | Fuente | n8n / operador | Todos | 1 |
 | FERIADOS | Fuente | Franco/Rodrigo | Todos | 1 |
 | TARIFAS | Fuente | Franco/Rodrigo | Todos | 1+3 |
 | TEMPORADAS | Fuente | Franco/Rodrigo | Todos | 3 |
@@ -134,20 +140,20 @@ El resultado de esta etapa es un documento de referencia que permite crear el Sh
 | PAQUETES_EVENTO | Fuente | Franco/Rodrigo | Todos | 3 |
 | CONSULTAS | Fuente | n8n | Equipo (solo lectura) | 1+4A+4B |
 | PRE_RESERVAS | Fuente | n8n | Equipo (solo lectura) | 1+4A |
-| RESERVAS | Fuente | n8n / Vicky (transiciones) | Todos | 1+4A |
-| PAGOS | Fuente | n8n / Vicky (validaciones) | Equipo | 1+4A |
+| RESERVAS | Fuente | n8n / operador (transiciones) | Todos | 1+4A |
+| PAGOS | Fuente | n8n / operador (validaciones) | Equipo | 1+4A |
 | DISPONIBILIDAD_CACHE | Derivada | n8n únicamente | Bot / Web / Equipo | 1+2 |
-| BLOQUEOS | Fuente | Franco/Rodrigo/Vicky | Todos | 1 |
+| BLOQUEOS | Fuente | Franco/Rodrigo/operador | Todos | 1 |
 | OVERRIDES_OPERATIVOS | Fuente | Franco/Rodrigo | Todos | 2 |
 | CONFIGURACION_GENERAL | Fuente | Franco/Rodrigo | Todos | 1+2+3+4A+4B |
-| PLANTILLAS_MENSAJES | Fuente | Franco/Rodrigo/Vicky | n8n / Bot | 4A+4B |
+| PLANTILLAS_MENSAJES | Fuente | Franco/Rodrigo/operador | n8n / Bot | 4A+4B |
 | CUENTAS_COBRO | Fuente | Franco/Rodrigo | n8n / Bot | 4A |
-| GASTOS | Fuente | Franco/Rodrigo/Vicky | Franco/Rodrigo | 1 |
+| GASTOS | Fuente | Franco/Rodrigo/operador | Franco/Rodrigo | 1 |
 | DESCUENTOS | Fuente | Franco/Rodrigo | n8n (futuro) | 3 (prevista) |
 | SOCIOS | Fuente | Franco/Rodrigo | Franco/Rodrigo | 1 |
 | LOG_CAMBIOS | Fuente | n8n únicamente | Franco/Rodrigo | 1+ todas |
 | VISTA_CALENDARIO | Auxiliar/Vista | n8n | Equipo operativo | 4A |
-| VISTA_PRERESERVAS_ACTIVAS | Auxiliar/Vista | n8n | Vicky / Franco | 4A |
+| VISTA_PRERESERVAS_ACTIVAS | Auxiliar/Vista | n8n | Operador / Franco | 4A |
 | VISTA_OCUPACION | Auxiliar/Vista | n8n | Franco/Rodrigo | 4A |
 
 ---
@@ -171,7 +177,7 @@ El resultado de esta etapa es un documento de referencia que permite crear el Sh
 | 6 | `activa` | Booleano | Sí | FALSE = no existe más en el sistema |
 | 7 | `bloqueada` | Booleano | Sí | TRUE = existe pero no disponible temporalmente |
 | 8 | `motivo_bloqueo` | Texto | No | Solo si bloqueada = TRUE |
-| 9 | `orden_limpieza` | Entero | Sí | Prioridad para Jennifer (1 = primero) |
+| 9 | `orden_limpieza` | Entero | Sí | Prioridad para limpieza / operador de limpieza (1 = primero) |
 | 10 | `descripcion` | Texto | No | Para bot y web |
 | 11 | `fotos_urls` | Texto | No | URLs separadas por coma |
 | 12 | `created_at` | Timestamp | Sí | |
@@ -194,7 +200,7 @@ El resultado de esta etapa es un documento de referencia que permite crear el Sh
 ## 6. HOJA: HUÉSPEDES
 
 **Categoría:** Fuente
-**Escribe:** n8n (creación automática) / Vicky (correcciones manuales)
+**Escribe:** n8n (creación automática) / operador responsable (correcciones manuales)
 **Lee:** Todos
 **Etapa origen:** 1 — sin cambios estructurales
 
@@ -206,7 +212,7 @@ El resultado de esta etapa es un documento de referencia que permite crear el Sh
 | 2 | `nombre` | Texto | Sí | |
 | 3 | `apellido` | Texto | No | |
 | 4 | `dni` | Texto | No | |
-| 5 | `telefono` | Texto | Sí | Con código de país: +5491158297725 |
+| 5 | `telefono` | Texto | Sí | Con código de país: +549XXXXXXXXXX |
 | 6 | `email` | Texto | No | |
 | 7 | `canal_preferido` | Texto | No | `whatsapp` / `instagram` / `web` |
 | 8 | `primera_reserva_fecha` | Fecha | No | YYYY-MM-DD. Calculado al confirmar |
@@ -222,7 +228,7 @@ El campo `telefono` debe ser único en la tabla. n8n verifica antes de crear un 
 
 | id_huesped | nombre | apellido | telefono | canal_preferido | total_reservas |
 |---|---|---|---|---|---|
-| 1 | Juan | García | +5491158297725 | whatsapp | 2 |
+| 1 | Juan | García | +549XXXXXXXXXX | whatsapp | 2 |
 
 ---
 
@@ -243,7 +249,7 @@ El campo `telefono` debe ser único en la tabla. n8n verifica antes de crear un 
 | 4 | `activo` | Booleano | Sí | FALSE = ignorado por el motor |
 
 ### Nota de carga
-Los feriados nacionales de Argentina se cargan manualmente al inicio de cada año. Los feriados de Año Nuevo tienen tipo `ano_nuevo` para que el motor los derive a EVENTOS_ESPECIALES. No incluir aquí los días de Año Nuevo que ya están en PAQUETES_EVENTO: el motor consulta primero EVENTOS_ESPECIALES.
+Los feriados nacionales de Argentina se cargan manualmente al inicio de cada año. Los días vinculados a Año Nuevo pueden cargarse en FERIADOS con tipo `ano_nuevo` para clasificación operativa del día. Esa carga no define precios. Los precios y combinaciones vendibles de Año Nuevo se definen exclusivamente en EVENTOS_ESPECIALES y PAQUETES_EVENTO.
 
 ---
 
@@ -387,29 +393,31 @@ No deben existir dos temporadas activas con rangos que se solapen. n8n detecta e
 |---|---|---|---|---|
 | 1 | `id_paquete` | Entero | Sí | ID único autoincremental |
 | 2 | `id_evento` | Entero | Sí | FK → EVENTOS_ESPECIALES |
-| 3 | `nombre` | Texto | Sí | "31 solo", "30+31+1", etc. |
-| 4 | `fecha_in` | Fecha | Sí | Fecha de checkin del paquete |
-| 5 | `fecha_out` | Fecha | Sí | Fecha de checkout (exclusive) |
-| 6 | `tipo_cabana` | Texto | Sí | `grande` / `chica` / `todas` |
-| 7 | `precio` | Monto | Sí | Precio fijo del paquete en ARS |
-| 8 | `minimo_noches` | Entero | Sí | Mínimo de noches obligatorio |
-| 9 | `activo` | Booleano | Sí | |
-| 10 | `created_at` | Timestamp | Sí | |
+| 3 | `tipo_cabana` | Texto | Sí | `grande` / `chica` / `todas` |
+| 4 | `nombre_paquete` | Texto | Sí | "31 solo", "30+31+1", etc. |
+| 5 | `fecha_in` | Fecha | Sí | Fecha de checkin del paquete |
+| 6 | `fecha_out` | Fecha | Sí | Fecha de checkout (exclusive) |
+| 7 | `precio_total` | Monto | Sí | Precio fijo del paquete en ARS |
+| 8 | `personas_max` | Entero | No | Máximo de personas para este paquete. Vacío = capacidad_max de la cabaña |
+| 9 | `incluye` | Texto | No | Descripción de qué incluye el paquete |
+| 10 | `notas` | Texto | No | Notas internas del paquete |
+| 11 | `activo` | Booleano | Sí | |
+| 12 | `created_at` | Timestamp | Sí | |
 
 ### Ejemplo real (Año Nuevo 2026/2027 — cabañas grandes, precios a definir)
 
-| id_paquete | id_evento | nombre | fecha_in | fecha_out | tipo_cabana | precio | minimo_noches | activo |
-|---|---|---|---|---|---|---|---|---|
-| 1 | 1 | Solo 31 dic | 2026-12-31 | 2027-01-01 | grande | 0 | 1 | TRUE |
-| 2 | 1 | 30+31 dic | 2026-12-30 | 2027-01-01 | grande | 0 | 2 | TRUE |
-| 3 | 1 | 31 dic + 1 ene | 2026-12-31 | 2027-01-02 | grande | 0 | 2 | TRUE |
-| 4 | 1 | 30+31+1 | 2026-12-30 | 2027-01-02 | grande | 0 | 3 | TRUE |
+| id_paquete | id_evento | tipo_cabana | nombre_paquete | fecha_in | fecha_out | precio_total | personas_max | incluye | notas | activo |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 1 | grande | Solo 31 dic | 2026-12-31 | 2027-01-01 | 0 | | | | TRUE |
+| 2 | 1 | grande | 30+31 dic | 2026-12-30 | 2027-01-01 | 0 | | | | TRUE |
+| 3 | 1 | grande | 31 dic + 1 ene | 2026-12-31 | 2027-01-02 | 0 | | | | TRUE |
+| 4 | 1 | grande | 30+31+1 | 2026-12-30 | 2027-01-02 | 0 | | | | TRUE |
 
 *Nota: precios en 0 como placeholder. Franco carga los precios reales antes de la temporada.*
 
 ### Regla: paquetes con precio 0
 
-Si `precio = 0`, el paquete se considera incompleto. El motor de precios no puede cotizarlo ni permitir su venta automática. Ante una consulta que intersecte un EVENTO_ESPECIAL con paquetes en precio 0, el sistema deriva inmediatamente a humano con el motivo `paquete_sin_precio`. Esta regla aplica aunque el paquete tenga `activo = TRUE`. La activación real del paquete para venta automática requiere que `precio > 0`.
+Si `precio_total = 0`, el paquete se considera incompleto. El motor de precios no puede cotizarlo ni permitir su venta automática. Ante una consulta que intersecte un EVENTO_ESPECIAL con paquetes cuyo precio_total sea 0, el sistema deriva inmediatamente a humano con el motivo `paquete_sin_precio`. Esta regla aplica aunque el paquete tenga `activo = TRUE`. La activación real del paquete para venta automática requiere que `precio_total > 0`.
 
 ---
 
@@ -448,7 +456,7 @@ Si `precio = 0`, el paquete se considera incompleto. El motor de precios no pued
 
 | id_consulta | canal | id_contacto_externo | id_huesped | estado_conversacion | fecha_in_tentativa | fecha_out_tentativa | personas_tentativa |
 |---|---|---|---|---|---|---|---|
-| 1 | whatsapp | +5491158297725 | 1 | esperando_pago | 2026-06-20 | 2026-06-22 | 3 |
+| 1 | whatsapp | +549XXXXXXXXXX | 1 | esperando_pago | 2026-06-20 | 2026-06-22 | 3 |
 
 `contexto_json` ejemplo:
 ```json
@@ -492,8 +500,8 @@ Si `precio = 0`, el paquete se considera incompleto. El motor de precios no pued
 | 4 | `id_huesped` | Entero | Sí | FK → HUÉSPEDES |
 | 5 | `fecha_in` | Fecha | Sí | YYYY-MM-DD (inclusive) |
 | 6 | `fecha_out` | Fecha | Sí | YYYY-MM-DD (exclusive) |
-| 7 | `hora_checkin` | Hora | Sí | HH:MM calculado con escalonamiento |
-| 8 | `hora_checkout` | Hora | Sí | HH:MM calculado con escalonamiento |
+| 7 | `hora_checkin` | Hora | Sí | HH:MM calculado por regla base, escalonamiento de check-in u override |
+| 8 | `hora_checkout` | Hora | Sí | HH:MM calculado por regla base u override |
 | 9 | `personas` | Entero | Sí | |
 | 10 | `monto_total` | Monto | Sí | Precio total calculado |
 | 11 | `monto_sena` | Monto | Sí | 50% del total por defecto |
@@ -522,7 +530,7 @@ Si `precio = 0`, el paquete se considera incompleto. El motor de precios no pued
 ## 14. HOJA: RESERVAS
 
 **Categoría:** Fuente
-**Escribe:** n8n (creación y transiciones automáticas) / Vicky o Franco (transiciones manuales documentadas: activa, completada)
+**Escribe:** n8n (creación y transiciones automáticas) / operador responsable (transiciones manuales documentadas: activa, completada)
 **Lee:** Todos
 **Etapa origen:** 1 — ampliada por Etapa 4A
 
@@ -550,7 +558,7 @@ Si `precio = 0`, el paquete se considera incompleto. El motor de precios no pued
 | 18 | `ninos` | Booleano | No | |
 | 19 | `encargado_semana` | Texto | Sí | `Franco` / `Rodrigo` |
 | 20 | `notas` | Texto | No | También usado para trazabilidad de modificaciones: `modificacion_de:#ID` o `reemplazada_por:#ID` |
-| 21 | `created_by` | Texto | Sí | `bot` / `vicky` / `web` / `franco` / `rodrigo` |
+| 21 | `created_by` | Texto | Sí | `bot` / `web` / `franco` / `rodrigo` / `operador` |
 | 22 | `source_event` | Texto | Sí | |
 | 23 | `created_at` | Timestamp | Sí | |
 | 24 | `updated_at` | Timestamp | Sí | |
@@ -559,7 +567,7 @@ Si `precio = 0`, el paquete se considera incompleto. El motor de precios no pued
 `confirmada` / `activa` / `completada` / `cancelada` / `cancelada_con_cargo` / `conflicto_pendiente`
 
 ### Transiciones manuales permitidas
-Vicky o Franco pueden cambiar manualmente:
+El operador responsable (Franco, Rodrigo u operador según configuración operativa) puede cambiar manualmente:
 - `confirmada` → `activa` (al registrar checkin)
 - `activa` → `completada` (al registrar checkout)
 
@@ -576,7 +584,7 @@ Cualquier otra transición debe pasar por n8n. El cambio manual debe registrarse
 ## 15. HOJA: PAGOS
 
 **Categoría:** Fuente
-**Escribe:** n8n (creación y actualización automática) / Vicky o Franco (validaciones manuales de comprobantes)
+**Escribe:** n8n (creación y actualización automática) / operador responsable (validaciones manuales de comprobantes)
 **Lee:** n8n / equipo
 **Etapa origen:** 1 — rediseñada por Etapa 4A (arquitectura multicanal)
 
@@ -599,7 +607,7 @@ Cualquier otra transición debe pasar por n8n. El cambio manual debe registrarse
 | 13 | `comprobante_url` | Texto | No | Link a imagen o PDF del comprobante |
 | 14 | `referencia_externa` | Texto | No | ID de la transacción en MP u otro proveedor |
 | 15 | `tx_hash` | Texto | No | Hash de transacción para pagos cripto |
-| 16 | `validado_por` | Texto | No | `bot_mp` / `vicky` / `franco` / `rodrigo` |
+| 16 | `validado_por` | Texto | No | `bot_mp` / `franco` / `rodrigo` / `operador` |
 | 17 | `validado_en` | Timestamp | No | Cuándo se confirmó |
 | 18 | `motivo_rechazo` | Texto | No | Por qué fue rechazado |
 | 19 | `notas` | Texto | No | |
@@ -617,7 +625,7 @@ Cualquier otra transición debe pasar por n8n. El cambio manual debe registrarse
 
 | id_pago | id_prereserva | id_reserva | tipo | medio_pago | proveedor | cuenta_destino | monto_esperado | monto_recibido | moneda | estado | es_automatico | validado_por | validado_en |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | 1 | 142 | sena | transferencia_bancaria | banco_galicia | CVU: 000xxxxx | 175000 | 175000 | ARS | confirmado | FALSE | vicky | 2026-06-05T15:45:00Z |
+| 1 | 1 | 142 | sena | transferencia_bancaria | banco_galicia | CVU: 000xxxxx | 175000 | 175000 | ARS | confirmado | FALSE | operador | 2026-06-05T15:45:00Z |
 
 ---
 
@@ -626,7 +634,14 @@ Cualquier otra transición debe pasar por n8n. El cambio manual debe registrarse
 **Categoría:** Derivada
 **Escribe:** n8n únicamente — NUNCA editar manualmente
 **Lee:** Bot / Web / n8n / equipo (solo lectura)
-**Etapa origen:** 1 — especificada en Etapa 2
+**Etapa origen:** 1 — especificada en Etapa 2 / actualizada en v1.1
+
+### Principio de intervalo semiabierto
+
+Una reserva ocupa noches en el intervalo `[fecha_checkin, fecha_checkout)`:
+- `fecha_checkin` ocupa noche (está bloqueada).
+- `fecha_checkout` es el día de salida: **no ocupa noche** y puede ser `fecha_checkin` de otra reserva.
+- Dos reservas encadenadas (una termina donde la otra empieza) son válidas y no generan conflicto.
 
 ### Columnas
 
@@ -635,38 +650,61 @@ Cualquier otra transición debe pasar por n8n. El cambio manual debe registrarse
 | 1 | `id_cabana` | Entero | Sí | FK → CABAÑAS. Parte de la clave primaria compuesta |
 | 2 | `fecha` | Fecha | Sí | YYYY-MM-DD. Parte de la clave primaria compuesta |
 | 3 | `estado` | Texto | Sí | Ver estados abajo |
-| 4 | `hora_checkin_minima` | Hora | No | Mínimo permitido considerando escalonamiento |
+| 4 | `hora_checkin_minima` | Hora | No | Mínimo permitido según regla base, escalonamiento de check-in u override |
 | 5 | `hora_checkin_maxima` | Hora | No | Máximo permitido (de CONFIGURACION_GENERAL) |
-| 6 | `hora_checkout_maxima` | Hora | No | Máximo permitido considerando escalonamiento |
-| 7 | `hora_checkout_minima` | Hora | No | Mínimo permitido (de CONFIGURACION_GENERAL) |
+| 6 | `hora_checkout_maxima` | Hora | No | Hora límite de salida según regla base u override |
+| 7 | `hora_checkout_minima` | Hora | No | Mínimo permitido por CONFIGURACION_GENERAL u override |
 | 8 | `tipo_dia` | Texto | No | `semana` / `finde` / `feriado` / `ano_nuevo` |
 | 9 | `temporada` | Texto | No | `alta` / `media` / `baja` |
 | 10 | `es_ultimo_dia_bloque` | Booleano | No | Si aplica checkout 16:00 |
 | 11 | `minimo_noches` | Entero | No | Mínimo de noches desde este día |
-| 12 | `id_reserva_activa` | Entero | No | FK → RESERVAS si está ocupada |
-| 13 | `id_prereserva_activa` | Entero | No | FK → PRE_RESERVAS si está en proceso |
-| 14 | `recalculado_en` | Timestamp | Sí | Última vez que se calculó |
-
-### Estados de `estado`
-`disponible` / `ocupada` / `bloqueada` / `checkout_disponible` / `limite_escalonamiento`
+| 12 | `id_reserva_activa` | Entero | No | FK → RESERVAS si la noche de esta fecha está ocupada por una reserva |
+| 13 | `id_prereserva_activa` | Entero | No | FK → PRE_RESERVAS si la noche está bloqueada por una pre-reserva vigente o si una pre-reserva vigente queda afectada por un bloqueo manual |
+| 14 | `tiene_checkout` | Booleano | No | TRUE si una reserva confirmada/activa hace checkout ese día |
+| 15 | `id_reserva_checkout` | Entero | No | FK → RESERVAS. ID de la reserva que hace checkout ese día, si aplica |
+| 16 | `tiene_checkin` | Booleano | No | TRUE si una reserva confirmada/activa hace checkin ese día |
+| 17 | `id_reserva_checkin` | Entero | No | FK → RESERVAS. ID de la reserva que hace checkin ese día, si aplica |
+| 18 | `recalculado_en` | Timestamp | Sí | Última vez que se calculó |
 
 ### Clave primaria compuesta
 El par (`id_cabana`, `fecha`) es único. Cada fila representa un día específico para una cabaña específica.
 
+### Estados de `estado`
+
+| Estado | Semántica | El bot puede mostrar |
+|---|---|---|
+| `disponible` | La noche de esta fecha no está ocupada y no hay restricciones que bloqueen una nueva reserva. | Sí |
+| `checkout_disponible` | Hay checkout de una reserva este día, pero la noche no está ocupada por ninguna otra reserva o pre-reserva. Puede recibir un nuevo checkin. | Sí, con nota |
+| `ocupada` | La noche de esta fecha está ocupada por una reserva confirmada/activa o por una pre-reserva vigente. Puede haber también un checkout ese mismo día — ver `tiene_checkout`. | No |
+| `bloqueada` | Bloqueo manual activo. La noche no está disponible. Si existe una PRE_RESERVA vigente afectada por el bloqueo, puede conservarse `id_prereserva_activa` para trazabilidad y resolución manual. | No |
+| `limite_escalonamiento` | El escalonamiento de checkin alcanzó el límite máximo configurado. El equipo decide manualmente. | No |
+
+> **Nota sobre campos operativos:** `tiene_checkout`, `id_reserva_checkout`, `tiene_checkin` e `id_reserva_checkin` reflejan movimientos operativos confirmados asociados a RESERVAS confirmadas o activas. No se generan para PRE_RESERVAS. Una PRE_RESERVA vigente bloquea disponibilidad mediante `id_prereserva_activa` y `estado = ocupada`, pero no representa todavía movimiento operativo real: el equipo de limpieza no prepara ni limpia una cabaña hasta que la reserva esté confirmada. No se agregan columnas equivalentes de pre-reserva en esta etapa.
+
+### Semántica de checkout + checkin el mismo día
+
+Cuando una reserva termina el día X y otra comienza el día X:
+- `estado` = `ocupada` (la noche del día X pertenece a la nueva reserva).
+- `tiene_checkout` = TRUE, `id_reserva_checkout` = ID de la reserva saliente.
+- `tiene_checkin` = TRUE, `id_reserva_checkin` = ID de la reserva entrante.
+- `id_prereserva_activa` = vacío (la nueva reserva ya está confirmada).
+
+Esto permite que el equipo de limpieza sepa que hay rotación ese día incluso cuando el estado principal es `ocupada`.
+
 ### Ejemplo real
 
-| id_cabana | fecha | estado | hora_checkin_minima | hora_checkin_maxima | hora_checkout_maxima | tipo_dia | temporada | es_ultimo_dia_bloque | minimo_noches |
-|---|---|---|---|---|---|---|---|---|---|
-| 1 | 2026-06-20 | disponible | 13:00 | 22:00 | 10:00 | finde | media | FALSE | 2 |
-| 1 | 2026-06-21 | disponible | 13:00 | 22:00 | 16:00 | finde | media | TRUE | 1 |
-| 1 | 2026-06-22 | disponible | 13:00 | 22:00 | 10:00 | semana | media | FALSE | 1 |
+| id_cabana | fecha | estado | hora_checkin_minima | hora_checkin_maxima | hora_checkout_maxima | hora_checkout_minima | tipo_dia | temporada | es_ultimo_dia_bloque | minimo_noches | tiene_checkout | tiene_checkin |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-06-20 | disponible | 13:00 | 22:00 | 10:00 | 07:00 | finde | media | FALSE | 2 | FALSE | FALSE |
+| 1 | 2026-06-21 | disponible | 13:00 | 22:00 | 16:00 | 07:00 | finde | media | TRUE | 1 | FALSE | FALSE |
+| 1 | 2026-06-22 | checkout_disponible | 13:00 | 22:00 | 10:00 | 07:00 | semana | media | FALSE | 1 | TRUE | FALSE |
 
----
+
 
 ## 17. HOJA: BLOQUEOS
 
 **Categoría:** Fuente
-**Escribe:** Franco / Rodrigo / Vicky (con permiso)
+**Escribe:** Franco / Rodrigo / operador responsable (con permiso)
 **Lee:** n8n / equipo
 **Etapa origen:** 1 — sin cambios estructurales
 
@@ -676,8 +714,8 @@ El par (`id_cabana`, `fecha`) es único. Cada fila representa un día específic
 |---|---|---|---|---|
 | 1 | `id_bloqueo` | Entero | Sí | ID único autoincremental |
 | 2 | `id_cabana` | Entero | No | FK → CABAÑAS. Null = todas las cabañas |
-| 3 | `fecha_desde` | Fecha | Sí | YYYY-MM-DD |
-| 4 | `fecha_hasta` | Fecha | Sí | YYYY-MM-DD |
+| 3 | `fecha_desde` | Fecha | Sí | Inicio del bloqueo, inclusive (YYYY-MM-DD) |
+| 4 | `fecha_hasta` | Fecha | Sí | Fin del bloqueo, exclusive. La fecha indicada ya queda libre (YYYY-MM-DD) |
 | 5 | `motivo` | Texto | Sí | `mantenimiento` / `uso_propio` / `tormenta` / `overbooking` / `otro` |
 | 6 | `descripcion` | Texto | No | Detalle libre |
 | 7 | `creado_por` | Texto | Sí | Quién lo creó |
@@ -702,8 +740,8 @@ El par (`id_cabana`, `fecha`) es único. Cada fila representa un día específic
 | # | Columna | Tipo | Obligatorio | Descripción |
 |---|---|---|---|---|
 | 1 | `id_override` | Entero | Sí | ID único autoincremental |
-| 2 | `fecha_desde` | Fecha | Sí | Inicio del rango (o fecha puntual si fecha_hasta vacío) |
-| 3 | `fecha_hasta` | Fecha | No | Fin del rango. Vacío = aplica solo a fecha_desde |
+| 2 | `fecha_desde` | Fecha | Sí | Inicio del rango, inclusive (o fecha puntual si fecha_hasta vacío) |
+| 3 | `fecha_hasta` | Fecha | No | Fin del rango, exclusive. La fecha indicada ya no está cubierta. Vacío = aplica solo a fecha_desde |
 | 4 | `id_cabana` | Entero | No | FK → CABAÑAS. Vacío = aplica a todas las cabañas |
 | 5 | `tipo_override` | Texto | Sí | Ver valores válidos abajo |
 | 6 | `valor` | Texto | Sí | Nuevo valor para ese tipo (hora, número, booleano como texto) |
@@ -714,7 +752,10 @@ El par (`id_cabana`, `fecha`) es único. Cada fila representa un día específic
 | 11 | `created_at` | Timestamp | Sí | |
 
 ### Valores válidos de `tipo_override`
-`escalonamiento_activo` / `escalonamiento_umbral_checkout` / `escalonamiento_umbral_checkin` / `hora_checkin` / `hora_checkout` / `checkin_flexible` / `checkout_flexible` / `minimo_noches` / `disponibilidad_bloqueada`
+`escalonamiento_activo` / `escalonamiento_umbral_checkins_dia` / `hora_checkin` / `hora_checkout` / `checkin_flexible` / `checkout_flexible` / `minimo_noches` / `disponibilidad_bloqueada`
+
+> **v1.1 — Eliminados:** `escalonamiento_umbral_checkout` y `escalonamiento_umbral_checkin`. No deben usarse como tipo_override. El único override de umbral válido es `escalonamiento_umbral_checkins_dia`.
+> `hora_checkout` es la única vía de ajuste manual de horario de salida; no existe escalonamiento automático de checkout.
 
 ### Ejemplo real
 
@@ -756,14 +797,12 @@ Tres columnas fijas:
 #### Escalonamiento (Etapa 2)
 | Clave | Valor actual | Descripción |
 |---|---|---|
-| `escalonamiento_activo` | true | Master switch del escalonamiento |
-| `escalonamiento_umbral_checkout` | 3 | Checkouts simultáneos que activan escalonamiento de checkin |
-| `escalonamiento_umbral_checkin` | 3 | Checkins simultáneos que activan escalonamiento de checkout |
-| `escalonamiento_minutos` | 45 | Minutos de ajuste por cabaña adicional |
+| `escalonamiento_activo` | true | Master switch del escalonamiento de check-in. false = horarios base puros |
+| `escalonamiento_umbral_checkins_dia` | 3 | Cantidad de check-ins del mismo día que mantienen horario base antes de escalonar |
+| `escalonamiento_minutos` | 45 | Minutos de retraso por cada check-in sobre el umbral |
 | `escalonamiento_checkin_max` | 22:00 | Límite máximo de check-in por escalonamiento |
-| `escalonamiento_checkout_min` | 09:00 | Límite mínimo de checkout por escalonamiento |
-| `escalonamiento_checkout_max_minutos` | 60 | Máximo minutos de adelanto en checkout |
-| `escalonamiento_checkout_tramo_minutos` | 30 | Minutos por tramo en escalonamiento de checkout |
+
+> **v1.1 — Claves eliminadas:** `escalonamiento_umbral_checkout`, `escalonamiento_umbral_checkin`, `escalonamiento_checkout_min`, `escalonamiento_checkout_max_minutos`, `escalonamiento_checkout_tramo_minutos`. No deben cargarse en CONFIGURACION_GENERAL. El escalonamiento automático de checkout no está implementado en esta versión.
 
 #### Flexibilidad del cliente (Etapa 2)
 | Clave | Valor actual | Descripción |
@@ -803,6 +842,7 @@ Tres columnas fijas:
 | `prereserva_expiracion_minutos` | 60 | Tiempo de vida de una PRE_RESERVA sin pago |
 | `prereserva_notificacion_vencimiento_umbral` | 200000 | Monto desde el que se notifica al vencer |
 | `prereserva_recordatorio_minutos_antes` | 15 | Minutos antes del vencimiento para recordatorio |
+| `prereserva_pago_en_revision_alerta_horas` | 2 | Horas con pago en revisión antes de escalar alerta al equipo responsable |
 | `diferencia_pago_tolerancia` | 5000 | Diferencia máxima de monto aceptable sin consultar |
 
 #### Checkout tardío (Etapa 4A)
@@ -836,9 +876,10 @@ Tres columnas fijas:
 | Clave | Valor actual | Descripción |
 |---|---|---|
 | `max_cabanas_sistema` | 10 | Límite configurable de cabañas |
-| `whatsapp_franco` | +5491158297725 | |
-| `whatsapp_rodrigo` | +5491135659035 | |
-| `whatsapp_jennifer` | +5491151789772 | Si aún no existe, agregar |
+| `sheets_url` | (completar con URL del Sheets activo) | URL del Sheets correspondiente al entorno |
+| `whatsapp_franco` | +549XXXXXXXXXX | Completar directamente en Sheets — no publicar en repositorio |
+| `whatsapp_rodrigo` | +549XXXXXXXXXX | Completar directamente en Sheets — no publicar en repositorio |
+| `whatsapp_jennifer` | +549XXXXXXXXXX | Completar directamente en Sheets — no publicar en repositorio |
 
 #### Alertas y métricas (Etapa 4B)
 | Clave | Valor actual | Descripción |
@@ -852,7 +893,7 @@ Tres columnas fijas:
 ## 20. HOJA: PLANTILLAS_MENSAJES
 
 **Categoría:** Fuente
-**Escribe:** Franco / Rodrigo / Vicky (con cuidado — el texto impacta directamente en lo que reciben los clientes)
+**Escribe:** Franco / Rodrigo / operador responsable (con cuidado — el texto impacta directamente en lo que reciben los clientes)
 **Lee:** n8n / bot
 **Etapa origen:** 4A y 4B (nueva)
 
@@ -867,7 +908,7 @@ Tres columnas fijas:
 | 5 | `texto` | Texto | Sí | Texto con variables entre llaves: {nombre}, {fecha_checkin} |
 | 6 | `keywords` | Texto | No | Palabras clave separadas por coma para detección de FAQ por clasificador |
 | 7 | `score_minimo` | Decimal | No | Umbral de confianza para esta FAQ. Default del sistema si vacío |
-| 8 | `destinatario` | Texto | Sí | `huesped` / `equipo` / `jennifer` / `franco` |
+| 8 | `destinatario` | Texto | Sí | `huesped` / `equipo` / `limpieza` / `franco` |
 | 9 | `activa` | Booleano | Sí | |
 | 10 | `created_at` | Timestamp | Sí | |
 
@@ -888,8 +929,8 @@ Tres columnas fijas:
 | 8 | faq_kayaks | todos | huesped | faq | kayak, kayaks, actividad, rio, remar |
 | 9 | faq_llegada | todos | huesped | faq | llegar, como llego, como se llega, lancha, muelle |
 | 10 | nueva_reserva_equipo | whatsapp | equipo | reserva_confirmed | |
-| 11 | coordinacion_jennifer_checkin | whatsapp | jennifer | reserva_confirmed | |
-| 12 | coordinacion_jennifer_checkout | whatsapp | jennifer | checkout_registrado | |
+| 11 | coordinacion_limpieza_checkin | whatsapp | limpieza | reserva_confirmed | |
+| 12 | coordinacion_limpieza_checkout | whatsapp | limpieza | checkout_registrado | |
 
 ---
 
@@ -924,7 +965,31 @@ Tres columnas fijas:
 
 ---
 
-## 22. HOJA: DESCUENTOS
+## 22. HOJA: GASTOS
+
+**Categoría:** Fuente
+**Escribe:** Franco / Rodrigo / operador responsable
+**Lee:** Franco / Rodrigo
+**Etapa origen:** 1 — sin cambios estructurales
+
+### Columnas
+
+| # | Columna | Tipo | Obligatorio | Descripción |
+|---|---|---|---|---|
+| 1 | `id_gasto` | Entero | Sí | ID único |
+| 2 | `fecha` | Fecha | Sí | YYYY-MM-DD |
+| 3 | `categoria` | Texto | Sí | `limpieza` / `mantenimiento` / `servicios` / `marketing` / `otro` |
+| 4 | `descripcion` | Texto | Sí | |
+| 5 | `monto` | Monto | Sí | |
+| 6 | `id_cabana` | Entero | No | FK → CABAÑAS. Vacío si es gasto general del complejo |
+| 7 | `pagado_por` | Texto | Sí | `Franco` / `Rodrigo` / nombre del socio |
+| 8 | `reembolsable` | Booleano | Sí | Si se descuenta de utilidades |
+| 9 | `comprobante_url` | Texto | No | |
+| 10 | `created_at` | Timestamp | Sí | |
+
+---
+
+## 23. HOJA: DESCUENTOS
 
 **Categoría:** Fuente
 **Escribe:** Franco o Rodrigo manualmente
@@ -963,30 +1028,6 @@ Tres columnas fijas:
 - `usos_actuales` solo lo escribe n8n. Franco y Rodrigo no deben modificarlo manualmente.
 - Si `usos_maximos` tiene valor y `usos_actuales >= usos_maximos`, el descuento se considera agotado aunque `activo = TRUE`.
 - La columna `usos_actuales` debe estar protegida contra edición manual en Sheets.
-
----
-
-## 23. HOJA: GASTOS
-
-**Categoría:** Fuente
-**Escribe:** Franco / Rodrigo / Vicky
-**Lee:** Franco / Rodrigo
-**Etapa origen:** 1 — sin cambios estructurales
-
-### Columnas
-
-| # | Columna | Tipo | Obligatorio | Descripción |
-|---|---|---|---|---|
-| 1 | `id_gasto` | Entero | Sí | ID único |
-| 2 | `fecha` | Fecha | Sí | YYYY-MM-DD |
-| 3 | `categoria` | Texto | Sí | `limpieza` / `mantenimiento` / `servicios` / `marketing` / `otro` |
-| 4 | `descripcion` | Texto | Sí | |
-| 5 | `monto` | Monto | Sí | |
-| 6 | `id_cabana` | Entero | No | FK → CABAÑAS. Vacío si es gasto general del complejo |
-| 7 | `pagado_por` | Texto | Sí | `Franco` / `Rodrigo` / nombre del socio |
-| 8 | `reembolsable` | Booleano | Sí | Si se descuenta de utilidades |
-| 9 | `comprobante_url` | Texto | No | |
-| 10 | `created_at` | Timestamp | Sí | |
 
 ---
 
@@ -1072,17 +1113,17 @@ Estas hojas no son fuente de verdad. Son vistas generadas por n8n para facilitar
 
 ### VISTA_CALENDARIO
 
-**Propósito:** Calendario visual de ocupación para el equipo (Franco, Rodrigo, Vicky, Jennifer).
+**Propósito:** Calendario visual de ocupación para el equipo (Franco, Rodrigo y operadores).
 **Actualiza:** n8n al confirmar, cancelar o completar una reserva.
 **Contenido:** Una fila por reserva activa o futura. Columnas: cabaña, huésped, fecha_checkin, fecha_checkout, hora_checkin, hora_checkout, personas, encargado, estado, monto_total, canal_origen.
 **No incluye:** Reservas canceladas o completadas hace más de 30 días.
 
 ### VISTA_PRERESERVAS_ACTIVAS
 
-**Propósito:** Panel para Vicky de pre-reservas pendientes de pago.
+**Propósito:** Panel para el operador responsable de reservas — pre-reservas pendientes de pago.
 **Actualiza:** n8n cada vez que cambia el estado de una PRE_RESERVA.
 **Contenido:** Solo PRE_RESERVAS en estado `pendiente_pago`. Columnas: id, cabaña, huésped, teléfono, fechas, monto_sena, canal_pago_esperado, expira_en, minutos_restantes (columna calculada en Sheets).
-**Uso:** Vicky ve de un vistazo qué pre-reservas están por vencer y puede actuar.
+**Uso:** El operador ve de un vistazo qué pre-reservas están por vencer y puede actuar.
 
 ### VISTA_OCUPACION
 
@@ -1096,7 +1137,7 @@ Estas hojas no son fuente de verdad. Son vistas generadas por n8n para facilitar
 
 ### Matriz de permisos
 
-| Hoja | Franco/Rodrigo | Vicky | n8n | Bot/Web |
+| Hoja | Franco/Rodrigo | Operador | n8n | Bot/Web |
 |---|---|---|---|---|
 | CABAÑAS | R+W | R | R | R |
 | HUÉSPEDES | R+W | R+W | R+W | R (crear) |
@@ -1122,7 +1163,7 @@ Estas hojas no son fuente de verdad. Son vistas generadas por n8n para facilitar
 | VISTAS | R | R | W | — |
 
 *Solo transiciones específicas documentadas en Sección 14 y 15.
-**Vicky puede crear bloqueos con motivos operativos; bloqueos de uso propio los crean Franco o Rodrigo.
+**El operador responsable puede crear bloqueos con motivos operativos; bloqueos de uso propio los crean Franco o Rodrigo.
 
 ### Protecciones a configurar en Sheets
 
@@ -1162,11 +1203,11 @@ Estas hojas no son fuente de verdad. Son vistas generadas por n8n para facilitar
 | RESERVAS — encargado_semana, monto_saldo, campo notas para trazabilidad | 4A | Operación del equipo y modificaciones |
 | PAGOS — estructura base | 1 | Pagos simples |
 | PAGOS — arquitectura multicanal completa | 4A | Soporte para transferencia, MP, cripto, efectivo |
-| DISPONIBILIDAD_CACHE | 1+2 | Precálculo de disponibilidad |
+| DISPONIBILIDAD_CACHE | 1+2 | Precálculo de disponibilidad. Columnas operativas (`tiene_checkout`, `id_reserva_checkout`, `tiene_checkin`, `id_reserva_checkin`) agregadas en v1.1 |
 | BLOQUEOS | 1 | Bloqueos manuales |
 | OVERRIDES_OPERATIVOS | 2 | Excepciones operativas sin tocar código |
 | CONFIGURACION_GENERAL — claves base | 1 | Parámetros del sistema |
-| CONFIGURACION_GENERAL — escalonamiento | 2 | Motor de disponibilidad |
+| CONFIGURACION_GENERAL — escalonamiento (solo checkin) | 2 / v1.1 | Motor de disponibilidad. Escalonamiento de checkout eliminado en v1.1 |
 | CONFIGURACION_GENERAL — precios y estadía larga | 3 | Motor de precios |
 | CONFIGURACION_GENERAL — pre-reservas y encargado | 4A | Motor de reservas |
 | CONFIGURACION_GENERAL — bot y clasificador | 4B | Bot conversacional |
@@ -1197,13 +1238,13 @@ Orden recomendado para crear el Sheets desde cero. Cada paso depende del anterio
 - [ ] Cargar las 5 cabañas en CABAÑAS (datos de Sección 5)
 - [ ] Cargar los 3 socios en SOCIOS
 - [ ] Cargar temporadas iniciales en TEMPORADAS (al menos temporada media y alta del año en curso)
-- [ ] Cargar evento Año Nuevo en EVENTOS_ESPECIALES (con precios en 0 como placeholder)
+- [ ] Cargar evento Año Nuevo en EVENTOS_ESPECIALES
 - [ ] Cargar paquetes de Año Nuevo en PAQUETES_EVENTO (con precios en 0)
 - [ ] Cargar tarifas base en TARIFAS (al menos los conceptos de Sección 8 para grande y chica)
 - [ ] Cargar CONFIGURACION_GENERAL con todas las claves de Sección 19
 - [ ] Cargar CUENTAS_COBRO con los medios de pago activos (Sección 21)
 - [ ] Cargar PLANTILLAS_MENSAJES con las plantillas mínimas (Sección 20)
-- [ ] Dejar DESCUENTOS vacía — no requiere datos iniciales (Sección 22)
+- [ ] Dejar DESCUENTOS vacía — no requiere datos iniciales (Sección 23)
 
 ### Fase 3 — Validaciones de datos
 
@@ -1217,13 +1258,18 @@ Orden recomendado para crear el Sheets desde cero. Cada paso depende del anterio
 - [ ] En BLOQUEOS: validación de lista para `motivo`
 - [ ] En OVERRIDES_OPERATIVOS: validación de lista para `tipo_override`
 - [ ] En CONFIGURACION_GENERAL: proteger columna `clave` contra edición
+- [ ] En DISPONIBILIDAD_CACHE: validación de lista para `estado` (`disponible`, `ocupada`, `bloqueada`, `checkout_disponible`, `limite_escalonamiento`)
+- [ ] En DISPONIBILIDAD_CACHE: validación de lista para `tipo_dia` (`semana`, `finde`, `feriado`, `ano_nuevo`)
+- [ ] En DISPONIBILIDAD_CACHE: validación de lista para `temporada` (`alta`, `media`, `baja`)
+- [ ] En DISPONIBILIDAD_CACHE: validación de lista para `tiene_checkout` (TRUE / FALSE)
+- [ ] En DISPONIBILIDAD_CACHE: validación de lista para `tiene_checkin` (TRUE / FALSE)
 
 ### Fase 4 — Protecciones
 
 - [ ] Proteger hoja completa: CONSULTAS, PRE_RESERVAS, DISPONIBILIDAD_CACHE, LOG_CAMBIOS
 - [ ] Proteger rangos de columnas de sistema en RESERVAS y PAGOS (ver Sección 27)
 - [ ] Proteger columna `usos_actuales` en DESCUENTOS contra edición manual
-- [ ] Verificar que Vicky tiene acceso de editor solo a las hojas que le corresponden
+- [ ] Verificar que el operador responsable tiene acceso de editor solo a las hojas que le corresponden
 - [ ] Verificar que la cuenta de servicio de n8n tiene acceso de editor al Sheets completo
 
 ### Fase 5 — Datos de feriados
@@ -1237,7 +1283,7 @@ Orden recomendado para crear el Sheets desde cero. Cada paso depende del anterio
 - [ ] Revisar que los IDs iniciales estén en 1 (o en el valor correcto si se importan datos de un sistema previo)
 - [ ] Revisar que DISPONIBILIDAD_CACHE esté vacía (se poblará con el primer recálculo masivo de n8n)
 - [ ] Revisar que LOG_CAMBIOS esté vacía
-- [ ] Compartir el Sheets con todos los miembros del equipo según los permisos de Sección 26
+- [ ] Compartir el Sheets con todos los miembros del equipo según los permisos de Sección 27
 - [ ] Documentar la URL del Sheets en CONFIGURACION_GENERAL como clave `sheets_url`
 
 ---

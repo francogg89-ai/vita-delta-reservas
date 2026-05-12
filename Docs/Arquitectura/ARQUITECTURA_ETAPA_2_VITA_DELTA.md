@@ -1,7 +1,7 @@
 # ARQUITECTURA_ETAPA_2_VITA_DELTA.md
 # Motor de Disponibilidad — Diseño Completo
 
-**Versión:** 1.1  
+**Versión:** 1.3  
 **Fecha:** Mayo 2026  
 **Estado:** Aprobado — CERRADO  
 **Depende de:** ARQUITECTURA_ETAPA_1_VITA_DELTA.md v1.1  
@@ -10,6 +10,8 @@
 **Historial de versiones:**
 - v1.0 — Motor de disponibilidad completo, escalonamiento, horarios, cache, edge cases
 - v1.1 — Ajustes: escalonamiento checkout limitado, OVERRIDES_OPERATIVOS, race conditions documentadas, DISPONIBILIDAD_CACHE simplificada
+- v1.2 — Corrección crítica: intervalo semiabierto `[fecha_in, fecha_out)`, condición canónica de solapamiento, condición de bloqueos parciales, eliminación de `BETWEEN` incorrecto en `calcular_disponibilidad`
+- v1.3 — Decisión operativa: eliminado escalonamiento automático de checkout. Solo existe escalonamiento de check-in. El checkout mantiene siempre su horario base (10:00 / 16:00 último día de bloque / override manual). Renombrada clave `escalonamiento_umbral_checkout` a `escalonamiento_umbral_checkins_dia`. Eliminadas claves `escalonamiento_umbral_checkin`, `escalonamiento_checkout_min`, `escalonamiento_checkout_max_minutos`, `escalonamiento_checkout_tramo_minutos` y función `aplicar_escalonamiento_checkout`. `hora_checkout_minima` en cache redefinida como mínimo por configuración, no por escalonamiento.
 
 ---
 
@@ -18,16 +20,16 @@
 1. Objetivo del motor de disponibilidad
 2. Principios del motor
 3. Reglas de horarios
-4. Motor de escalonamiento *(actualizado en v1.1)*
+4. Motor de escalonamiento *(actualizado en v1.1 — escalonamiento de checkout eliminado en v1.3)*
 5. Reglas del último día del bloque
 6. Checkin y checkout flexible por el cliente
 7. Overrides operativos *(nuevo en v1.1)*
-8. Algoritmo completo de disponibilidad
+8. Algoritmo completo de disponibilidad *(condición de solapamiento corregida en v1.2)*
 9. Estructura de DISPONIBILIDAD_CACHE *(simplificada en v1.1)*
 10. Triggers de recálculo
 11. Configuración del motor (todo en CONFIGURACION_GENERAL)
 12. Edge cases documentados *(race conditions agregadas en v1.1)*
-13. Pendientes para Etapa 3
+13. Continuidad hacia Etapa 3
 
 ---
 
@@ -40,7 +42,7 @@ El motor de disponibilidad es el componente que responde a una pregunta simple:
 Para responder esa pregunta, el motor combina:
 - Estado de ocupación de la cabaña (reservas, pre-reservas, bloqueos)
 - Reglas de horarios según tipo de día y temporada
-- Escalonamiento según carga operativa de Jennifer
+- Escalonamiento según carga operativa del equipo de limpieza
 - Preferencias del cliente (dentro de los márgenes permitidos)
 
 El resultado de todo este cálculo se almacena en **DISPONIBILIDAD_CACHE** y se recalcula por eventos, no en tiempo real durante las consultas.
@@ -134,52 +136,50 @@ Esta restricción se configura en TARIFAS con `minimo_noches_obligatorio = 2` pa
 
 ## 4. MOTOR DE ESCALONAMIENTO
 
+> **v1.3 — Escalonamiento de checkout eliminado.** El checkout mantiene siempre su horario base según reglas normales (10:00 estándar, 16:00 último día de bloque, o override manual). No existe adelanto automático de checkout. El único escalonamiento operativo es sobre el check-in.
+
 ### 4.1 Concepto
 
-El escalonamiento existe para dar tiempo a Jennifer de limpiar y preparar cabañas cuando hay alta concentración de movimientos el mismo día. Hay dos direcciones:
+El escalonamiento existe para dar tiempo al equipo de limpieza a limpiar y preparar cabañas cuando hay alta concentración de ingresos el mismo día.
 
-- **Escalonamiento de check-in:** se retrasa la entrada cuando hay muchos checkouts el mismo día
-- **Escalonamiento de check-out:** se adelanta la salida cuando hay muchos check-ins el mismo día
+**Dirección única implementada: escalonamiento de check-in.**
+
+Cuando se acumulan muchos check-ins el mismo día, las cabañas que ingresan después del umbral tienen su horario de entrada retrasado en tramos de 45 minutos. El huésped puede llegar al complejo a cualquier hora, usar los espacios comunes y dejar equipaje bajo cuidado, pero el acceso formal a la cabaña es a partir del horario confirmado.
+
+El escalonamiento de checkout (adelantar la salida) fue evaluado y descartado por razones comerciales y operativas: genera fricción con los huéspedes y es difícil de comunicar. Si en el futuro se necesita un ajuste puntual de checkout, se usa `OVERRIDES_OPERATIVOS`.
 
 ### 4.2 Parámetros configurables
 
 Todos en CONFIGURACION_GENERAL:
 
-| Clave | Valor actual | Descripción |
+| Clave | Valor default | Descripción |
 |---|---|---|
-| `escalonamiento_activo` | true | Master switch. Si es false, el motor ignora todo el escalonamiento |
-| `escalonamiento_umbral_checkout` | 3 | Número de checkouts simultáneos que activa escalonamiento de checkin |
-| `escalonamiento_umbral_checkin` | 3 | Número de check-ins simultáneos que activa escalonamiento de checkout |
-| `escalonamiento_minutos` | 45 | Minutos de ajuste por cabaña adicional sobre el umbral |
+| `escalonamiento_activo` | true | Master switch. Si es false, el motor ignora el escalonamiento y usa horarios base puros |
+| `escalonamiento_umbral_checkins_dia` | 3 | Cantidad de check-ins del mismo día que mantienen horario base antes de empezar a escalonar |
+| `escalonamiento_minutos` | 45 | Minutos de retraso adicional por cada check-in sobre el umbral |
+| `escalonamiento_checkin_max` | 22:00 | Límite máximo de check-in por escalonamiento |
 
-**Nota crítica:** Para desactivar el escalonamiento completamente (por ejemplo, al contratar más personal), basta con cambiar `escalonamiento_activo = false`. Ningún horario se modifica, el sistema funciona con horarios base puros.
+**Nota:** Para desactivar el escalonamiento completamente (por ejemplo, al contratar más personal), basta con cambiar `escalonamiento_activo = false`. Ningún horario de checkin se modifica y el sistema usa horarios base puros.
 
-### 4.3 Escalonamiento de check-in (dirección normal)
+### 4.3 Escalonamiento de check-in
 
-**Condición de activación:** El número de checkouts a las 10:00hs ese día supera el umbral.
+**Condición de activación:** El orden del check-in de esta cabaña en el día supera el umbral.
 
-**Lógica:**
-
+**Fórmula:**
 ```
-checkouts_ese_dia = contar reservas con checkout = fecha_checkin_nueva
-                    Y hora_checkout = 10:00
+SI orden_checkin_dia <= escalonamiento_umbral_checkins_dia:
+    hora_checkin = hora_checkin_base
 
-SI checkouts_ese_dia <= umbral (3):
-    hora_checkin = hora_checkin_base (13:00 o 18:00 según reglas)
-
-SI checkouts_ese_dia = 4 (umbral + 1):
-    hora_checkin = hora_checkin_base + 45 min
-
-SI checkouts_ese_dia = 5 (umbral + 2):
-    hora_checkin = hora_checkin_base + 90 min
-
-SI checkouts_ese_dia = N (umbral + X):
-    hora_checkin = hora_checkin_base + (X * 45 min)
+SI orden_checkin_dia > escalonamiento_umbral_checkins_dia:
+    hora_checkin = hora_checkin_base
+                   + ((orden_checkin_dia - escalonamiento_umbral_checkins_dia) × escalonamiento_minutos)
 ```
 
-**Ejemplos con umbral = 3 y base = 13:00:**
+Donde `orden_checkin_dia` es la posición de esta cabaña entre todas las que hacen check-in ese día (1 = primera, 2 = segunda, etc.), ordenadas por momento de confirmación de reserva.
 
-| Checkouts ese día | Check-in calculado | Ajuste |
+**Ejemplos con umbral = 3, base = 13:00, minutos = 45:**
+
+| orden_checkin_dia | Check-in calculado | Ajuste |
 |---|---|---|
 | 1, 2 o 3 | 13:00 | Sin ajuste |
 | 4 | 13:45 | +45 min |
@@ -188,80 +188,35 @@ SI checkouts_ese_dia = N (umbral + X):
 
 **Ejemplos con domingo (base = 18:00):**
 
-| Checkouts ese día | Check-in calculado | Ajuste |
+| orden_checkin_dia | Check-in calculado | Ajuste |
 |---|---|---|
 | 1, 2 o 3 | 18:00 | Sin ajuste |
 | 4 | 18:45 | +45 min |
 | 5 | 19:30 | +90 min |
 
-### 4.4 Escalonamiento de check-out (dirección inversa)
+**Límite de seguridad:** Si `hora_checkin_calculada > escalonamiento_checkin_max (22:00)`, n8n asigna estado `limite_escalonamiento` a esa combinación (cabaña, fecha), notifica al equipo responsable definido en CONFIGURACION_GENERAL, y el equipo decide manualmente.
 
-**Condición de activación:** El número de check-ins a las 13:00hs ese día supera el umbral, Y la cabaña nueva tiene checkout ese mismo día.
+### 4.4 Escalonamiento de check-out — fuera de alcance
 
-**Lógica:**
+> El escalonamiento automático de checkout **no está implementado** en esta versión.
+>
+> El checkout siempre respeta su horario base:
+> - 10:00 estándar
+> - 16:00 si aplica último día de bloque (ver Sección 5)
+> - Horario especial solo mediante `OVERRIDES_OPERATIVOS` (intervención manual)
+>
+> Las claves `escalonamiento_umbral_checkin`, `escalonamiento_checkout_min`, `escalonamiento_checkout_max_minutos` y `escalonamiento_checkout_tramo_minutos` fueron eliminadas del sistema en v1.3. No deben cargarse en CONFIGURACION_GENERAL.
 
-```
-checkins_ese_dia = contar reservas con checkin = fecha_checkout_nueva
-                   Y hora_checkin = 13:00 (o ajustada)
+### 4.5 Límite de seguridad del check-in
 
-SI checkins_ese_dia <= umbral (3):
-    hora_checkout = hora_checkout_base (10:00 o 16:00 según reglas)
+Si el cálculo de escalonamiento produce una hora mayor a `escalonamiento_checkin_max`:
 
-SI checkins_ese_dia = 4 (umbral + 1):
-    hora_checkout = hora_checkout_base - 45 min
-
-SI checkins_ese_dia = 5 (umbral + 2):
-    hora_checkout = hora_checkout_base - 90 min
-
-SI checkins_ese_dia = N (umbral + X):
-    hora_checkout = hora_checkout_base - (X * 45 min)
-```
-
-**Ejemplos con umbral = 3 y base = 10:00:**
-
-| Check-ins ese día | Check-out calculado | Ajuste |
-|---|---|---|
-| 1, 2 o 3 | 10:00 | Sin ajuste |
-| 4 | 09:15 | -45 min |
-| 5 | 08:30 | -90 min |
-| 6 | 07:45 | -135 min |
-
-### 4.5 Aceptación explícita del cliente para checkout adelantado
-
-Cuando el motor calcula un checkout adelantado por escalonamiento, el bot debe:
-
-1. Informar al cliente el horario ajustado antes de crear la pre-reserva
-2. Pedir confirmación explícita: *"El checkout ese día sería a las 09:30hs. ¿Lo aceptás?"*
-3. Solo si el cliente acepta → crear PRE_RESERVA con el horario ajustado
-4. Si el cliente no acepta → informar que ese día no hay disponibilidad con checkout estándar
-
-Esta aceptación queda registrada en el campo `notas` de PRE_RESERVAS y en LOG_CAMBIOS.
-
----
-
-### 4.6 Interacción entre ambos escalonamientos
-
-Cuando ambas condiciones se activan el mismo día (muchos checkouts Y muchos check-ins), el motor aplica **el escalonamiento según el rol de la cabaña en la nueva reserva**:
-
-- Si la nueva reserva **entra** ese día → aplica escalonamiento de check-in
-- Si la nueva reserva **sale** ese día → aplica escalonamiento de check-out
-- Nunca se aplican ambos a la misma cabaña en la misma reserva
-
-### 4.7 Límites de seguridad
-
-| Límite | Check-in | Check-out | Clave |
-|---|---|---|---|
-| Máximo permitido automático | 22:00 | — | `escalonamiento_checkin_max` |
-| Mínimo permitido automático | — | 09:00 | `escalonamiento_checkout_min` |
-| Máximo adelanto checkout | — | 60 min | `escalonamiento_checkout_max_minutos` |
-
-Si el cálculo supera estos límites:
-1. n8n asigna estado `limite_operativo` a esa combinación (cabaña, fecha)
-2. Notifica a Franco y Rodrigo por WhatsApp con el detalle
-3. El equipo decide manualmente si confirmar, bloquear o escalar
+1. n8n asigna estado `limite_escalonamiento` a esa combinación (cabaña, fecha)
+2. Notifica al equipo responsable definido en CONFIGURACION_GENERAL por WhatsApp con el detalle
+3. El equipo decide manualmente si confirmar, bloquear o reasignar
 4. Queda registrado en LOG_CAMBIOS
 
----
+
 
 ## 5. REGLAS DEL ÚLTIMO DÍA DEL BLOQUE
 
@@ -334,11 +289,11 @@ El horario final resulta de aplicar, en orden:
 
 ```
 1. Horario base (reglas de sección 3)
-2. Escalonamiento (reglas de sección 4) → puede modificar el base
+2. Escalonamiento de check-in (reglas de sección 4) → puede retrasar la entrada
 3. Preferencia del cliente → puede ajustar dentro del margen resultante
 ```
 
-El cliente **nunca puede reducir** el horario base calculado para check-in, ni **adelantar** el checkout más allá de lo que el escalonamiento ya determinó.
+El checkout no tiene escalonamiento automático. Su horario máximo es siempre el calculado por las reglas base (10:00 o 16:00 último día de bloque). El cliente puede elegir salir antes de ese máximo, dentro del mínimo configurado.
 
 ### 6.2 Margen permitido para check-in
 
@@ -362,27 +317,29 @@ El cliente puede elegir cualquier hora entre hora_checkin_minima y hora_checkin_
 ### 6.3 Margen permitido para check-out
 
 ```
-hora_checkout_maxima = MIN(hora_checkout_base, hora_checkout_escalonamiento)
+hora_checkout_maxima = hora_checkout_base
+                       (10:00 estándar, 16:00 si es último día de bloque, o override manual)
 hora_checkout_minima = hora_checkout_min_cliente (configurable, default: 07:00)
 
-El cliente puede elegir cualquier hora entre hora_checkout_minima y hora_checkout_maxima
+El cliente puede elegir cualquier hora entre hora_checkout_minima y hora_checkout_maxima.
+No existe escalonamiento automático que adelante este máximo.
 ```
 
 **Ejemplos:**
 
-| Escalonamiento calcula | Cliente pide | Resultado |
+| hora_checkout_maxima | Cliente pide | Resultado |
 |---|---|---|
-| 10:00 (sin ajuste) | 10:00 | 10:00 ✓ |
-| 10:00 (sin ajuste) | 08:00 | 08:00 ✓ |
-| 09:15 (ajustado) | 10:00 | Rechazado → máximo es 09:15 |
-| 09:15 (ajustado) | 08:00 | 08:00 ✓ |
-| 09:15 (ajustado) | 07:30 | 07:30 ✓ |
+| 10:00 (día normal) | 10:00 | 10:00 ✓ |
+| 10:00 (día normal) | 08:00 | 08:00 ✓ |
+| 10:00 (día normal) | 11:00 | Rechazado → máximo es 10:00 |
+| 16:00 (último día de bloque) | 14:00 | 14:00 ✓ |
+| 16:00 (último día de bloque) | 16:00 | 16:00 ✓ |
 
 ### 6.4 Impacto en el escalonamiento
 
-La hora preferida por el cliente **no modifica el cálculo de escalonamiento de otras cabañas**. El motor siempre cuenta checkouts/checkins usando los horarios base calculados, no los horarios elegidos por el cliente.
+La hora preferida por el cliente **no modifica el cálculo de escalonamiento de otras cabañas**. El motor siempre cuenta check-ins usando los horarios base, no los horarios elegidos por el cliente.
 
-Esto es importante: si un cliente elige entrar a las 17:00 en vez de 13:45, eso no "libera" tiempo para otra cabaña. El escalonamiento se basa en la carga de trabajo potencial de Jennifer, que se calcula con los horarios base.
+Esto es importante: si un cliente elige entrar a las 17:00 en vez de 13:45, eso no altera el orden de check-ins del día ni cambia el escalonamiento de las cabañas siguientes.
 
 ### 6.5 Configuración
 
@@ -392,8 +349,6 @@ Esto es importante: si un cliente elige entrar a las 17:00 en vez de 13:45, eso 
 | `checkout_flexible_activo` | true | Si el cliente puede elegir su hora de salida |
 | `hora_checkin_max_cliente` | 22:00 | Hora máxima de entrada permitida |
 | `hora_checkout_min_cliente` | 07:00 | Hora mínima de salida permitida |
-
----
 
 ---
 
@@ -430,11 +385,10 @@ Los overrides permiten modificar el comportamiento del motor para una fecha espe
 
 | Tipo | Valor esperado | Descripción |
 |---|---|---|
-| `escalonamiento_activo` | `true` / `false` | Activa o desactiva escalonamiento para esas fechas |
-| `escalonamiento_umbral_checkout` | Número entero | Sobreescribe umbral de checkouts |
-| `escalonamiento_umbral_checkin` | Número entero | Sobreescribe umbral de check-ins |
+| `escalonamiento_activo` | `true` / `false` | Activa o desactiva escalonamiento de check-in para esas fechas |
+| `escalonamiento_umbral_checkins_dia` | Número entero | Sobreescribe el umbral de check-ins del día para activar escalonamiento de check-in |
 | `hora_checkin` | `HH:MM` | Fuerza hora de check-in específica |
-| `hora_checkout` | `HH:MM` | Fuerza hora de check-out específica |
+| `hora_checkout` | `HH:MM` | Fuerza hora de check-out específica (única vía de ajuste manual de checkout) |
 | `checkin_flexible` | `true` / `false` | Activa o desactiva flexibilidad de check-in |
 | `checkout_flexible` | `true` / `false` | Activa o desactiva flexibilidad de check-out |
 | `minimo_noches` | Número entero | Sobreescribe mínimo de noches |
@@ -487,34 +441,47 @@ El motor ese día ignora todo el cálculo de escalonamiento y usa horarios base 
 
 Este es el algoritmo que n8n ejecuta cada vez que necesita calcular o recalcular disponibilidad para una combinación (cabaña, fecha).
 
-### 7.1 Consulta de disponibilidad para una reserva nueva
+> **v1.2 — Correcciones aplicadas:**
+> - **PASO 2 (bloqueos):** la condición anterior (`fecha_desde <= fecha_in AND fecha_hasta >= fecha_out`) solo detectaba bloqueos que cubrían el rango completo. La condición correcta detecta cualquier solapamiento parcial o total.
+> - **PASO 3 (ocupación):** el `BETWEEN fecha_in AND fecha_out` era incorrecto porque incluía `fecha_out`, impidiendo reservas encadenadas. La condición correcta usa el intervalo semiabierto `[fecha_in, fecha_out)`.
+> - **`checkout_disponible` no es conflicto:** este estado indica que hay un checkout ese día pero la noche de esa fecha está libre. No bloquea disponibilidad y no debe incluirse en la consulta de conflictos. Solo son conflicto los estados `ocupada`, `bloqueada` y `limite_escalonamiento`.
+
+### 8.1 Consulta de disponibilidad para una reserva nueva
 
 ```
-FUNCIÓN calcular_disponibilidad(id_cabana, fecha_in, fecha_out, personas):
+FUNCIÓN calcular_disponibilidad(id_cabana_solicitada, fecha_in, fecha_out, personas):
 
   // PASO 1: Verificar que la cabaña existe y está activa
-  cabana = CABAÑAS WHERE id = id_cabana AND activa = true
+  cabana = CABAÑAS WHERE id = id_cabana_solicitada AND activa = true
   SI cabana no existe: RETORNAR { disponible: false, motivo: "cabaña_inactiva" }
 
   // PASO 2: Verificar bloqueos
-  bloqueo = BLOQUEOS WHERE (id_cabana = id_cabana OR id_cabana IS NULL)
+  // Condición canónica de solapamiento: detecta cualquier intersección parcial o total
+  // entre el bloqueo y el rango solicitado, incluyendo bloqueos que empiezan en el medio.
+  // Un bloqueo que termina exactamente en fecha_in NO genera conflicto (intervalo semiabierto).
+  // BLOQUEOS.id_cabana IS NULL significa bloqueo total del complejo (todas las cabañas).
+  bloqueo = BLOQUEOS WHERE (BLOQUEOS.id_cabana = id_cabana_solicitada OR BLOQUEOS.id_cabana IS NULL)
                        AND activo = true
-                       AND fecha_desde <= fecha_in
-                       AND fecha_hasta >= fecha_out
+                       AND fecha_desde < fecha_out
+                       AND fecha_hasta > fecha_in
   SI bloqueo existe: RETORNAR { disponible: false, motivo: "bloqueada", detalle: bloqueo.motivo }
 
-  // PASO 3: Verificar ocupación (reservas y pre-reservas)
-  // Rango a verificar: desde fecha_in+1 hasta fecha_out-1 (los días intermedios)
-  // + verificar que fecha_in no sea checkout de otra reserva con nueva reserva encima
-  ocupacion = DISPONIBILIDAD_CACHE WHERE id_cabana = id_cabana
-                                    AND fecha BETWEEN fecha_in AND fecha_out
-                                    AND estado IN ('ocupada', 'bloqueada')
+  // PASO 3: Verificar ocupación usando DISPONIBILIDAD_CACHE
+  // Principio: una reserva ocupa noches en el intervalo semiabierto [fecha_in, fecha_out).
+  // → fecha_in está ocupada como noche.
+  // → fecha_out NO está ocupada como noche: es el día de salida y puede recibir un nuevo checkin.
+  // Por lo tanto: se verifica el rango [fecha_in, fecha_out - 1 día] inclusive,
+  // es decir, las fechas donde fecha >= fecha_in AND fecha < fecha_out.
+  //
+  // 'checkout_disponible' no bloquea disponibilidad porque la noche de esa fecha está libre.
+  // Indica movimiento operativo de salida, no ocupación nocturna. No se incluye en la consulta.
+  // Solo son conflicto: 'ocupada', 'bloqueada', 'limite_escalonamiento'.
+  ocupacion = DISPONIBILIDAD_CACHE WHERE DISPONIBILIDAD_CACHE.id_cabana = id_cabana_solicitada
+                                    AND fecha >= fecha_in
+                                    AND fecha < fecha_out
+                                    AND estado IN ('ocupada', 'bloqueada', 'limite_escalonamiento')
   SI ocupacion existe:
-    // Excepción: fecha_in puede coincidir con checkout de otra reserva (checkout_disponible)
-    SI ocupacion.fecha = fecha_in AND ocupacion.estado = 'checkout_disponible':
-      CONTINUAR (es válido)
-    SINO:
-      RETORNAR { disponible: false, motivo: "fechas_ocupadas" }
+    RETORNAR { disponible: false, motivo: "fechas_ocupadas", fechas_conflicto: [lista de fechas] }
 
   // PASO 4: Verificar mínimo de noches
   noches = dias entre fecha_in y fecha_out
@@ -524,11 +491,13 @@ FUNCIÓN calcular_disponibilidad(id_cabana, fecha_in, fecha_out, personas):
 
   // PASO 5: Calcular horario de check-in
   hora_checkin_base = calcular_hora_checkin_base(fecha_in)
-  hora_checkin_final = aplicar_escalonamiento_checkin(id_cabana, fecha_in, hora_checkin_base)
+  hora_checkin_final = aplicar_escalonamiento_checkin(id_cabana_solicitada, fecha_in, hora_checkin_base)
 
   // PASO 6: Calcular horario de check-out
-  hora_checkout_base = calcular_hora_checkout_base(fecha_out, fecha_in)
-  hora_checkout_final = aplicar_escalonamiento_checkout(id_cabana, fecha_out, hora_checkout_base)
+  // No existe escalonamiento automático de checkout.
+  // El horario lo determina exclusivamente calcular_hora_checkout_base.
+  // Cualquier ajuste especial de checkout solo puede provenir de OVERRIDES_OPERATIVOS.
+  hora_checkout_final = calcular_hora_checkout_base(fecha_out, fecha_in)
 
   // PASO 7: Verificar capacidad
   SI personas > cabana.capacidad_max:
@@ -545,7 +514,7 @@ FUNCIÓN calcular_disponibilidad(id_cabana, fecha_in, fecha_out, personas):
   }
 ```
 
-### 7.2 Función: calcular_hora_checkin_base
+### 8.2 Función: calcular_hora_checkin_base
 
 ```
 FUNCIÓN calcular_hora_checkin_base(fecha):
@@ -558,7 +527,7 @@ FUNCIÓN calcular_hora_checkin_base(fecha):
   RETORNAR hora_checkin_default (13:00)
 ```
 
-### 7.3 Función: calcular_hora_checkout_base
+### 8.3 Función: calcular_hora_checkout_base
 
 ```
 FUNCIÓN calcular_hora_checkout_base(fecha_checkout, fecha_checkin):
@@ -571,78 +540,66 @@ FUNCIÓN calcular_hora_checkout_base(fecha_checkout, fecha_checkin):
   RETORNAR hora_checkout_default (10:00)
 ```
 
-### 7.4 Función: aplicar_escalonamiento_checkin
+### 8.4 Función: aplicar_escalonamiento_checkin
 
 ```
 FUNCIÓN aplicar_escalonamiento_checkin(id_cabana, fecha, hora_base):
 
-  // ¿Está activo el escalonamiento?
-  SI escalonamiento_activo = false:
+  // ¿Está activo el escalonamiento? Verificar override primero.
+  activo = obtener_valor_con_override('escalonamiento_activo', id_cabana, fecha)
+  SI activo = false:
     RETORNAR hora_base
 
-  // Contar checkouts ese día (excluyendo la cabaña actual)
-  checkouts = contar RESERVAS WHERE fecha_checkout = fecha
-                                AND hora_checkout = hora_checkout_default
-                                AND id_cabana != id_cabana
-                                AND estado IN ('confirmada', 'activa')
+  // Calcular el orden de check-in de esta cabaña en el día.
+  // Se combinan RESERVAS confirmadas/activas y PRE_RESERVAS vigentes (pendientes de pago),
+  // porque ambas representan ingresos reales esperados para ese día.
+  // Las pre-reservas vencidas, canceladas y convertidas no cuentan.
+  checkins_del_dia = UNION(
+    RESERVAS WHERE fecha_checkin = fecha
+              AND estado IN ('confirmada', 'activa'),
 
-  SI checkouts <= escalonamiento_umbral_checkout:
+    PRE_RESERVAS WHERE fecha_in = fecha
+                  AND estado = 'pendiente_pago'
+                  AND expira_en > ahora
+  ) ORDENADAS POR created_at ASC
+
+  orden_checkin_dia = posicion_de(id_cabana, checkins_del_dia)
+  // Si esta cabaña no está en la lista aún (evaluación previa a escribir en PRE_RESERVAS),
+  // usar count(checkins_del_dia) + 1 como su orden tentativo.
+
+  umbral = obtener_valor_con_override('escalonamiento_umbral_checkins_dia', id_cabana, fecha)
+
+  SI orden_checkin_dia <= umbral:
     RETORNAR hora_base
 
-  // Calcular ajuste
-  cabanas_extra = checkouts - escalonamiento_umbral_checkout
-  minutos_extra = cabanas_extra * escalonamiento_minutos
+  // Calcular ajuste por posición sobre el umbral
+  posiciones_sobre_umbral = orden_checkin_dia - umbral
+  minutos_extra = posiciones_sobre_umbral × escalonamiento_minutos
   hora_ajustada = hora_base + minutos_extra
 
   // Verificar límite de seguridad
   SI hora_ajustada > escalonamiento_checkin_max:
-    // No puede absorber más → notificar al equipo
     disparar_notificacion("limite_escalonamiento_alcanzado", fecha, id_cabana)
-    RETORNAR null // Disponibilidad bloqueada
+    RETORNAR { estado: 'limite_escalonamiento' }
 
   RETORNAR hora_ajustada
 ```
 
-### 7.5 Función: aplicar_escalonamiento_checkout
+### 8.5 Función: aplicar_escalonamiento_checkout — eliminada en v1.3
 
-```
-FUNCIÓN aplicar_escalonamiento_checkout(id_cabana, fecha, hora_base):
+> Esta función fue eliminada. El checkout no tiene escalonamiento automático.
+> El horario de checkout lo determina `calcular_hora_checkout_base` (sección 8.3).
+> Cualquier ajuste puntual de checkout se realiza mediante `OVERRIDES_OPERATIVOS`.
 
-  // ¿Está activo el escalonamiento? Verificar override primero
-  activo = obtener_valor_con_override('escalonamiento_activo', id_cabana, fecha)
-  SI activo = false: RETORNAR hora_base
 
-  // Contar check-ins ese día (excluyendo la cabaña actual)
-  checkins = contar RESERVAS WHERE fecha_checkin = fecha
-                               AND hora_checkin IN (hora_checkin_default, hora_checkin_domingo)
-                               AND id_cabana != id_cabana
-                               AND estado IN ('confirmada', 'pre_reserva')
-
-  umbral = obtener_valor_con_override('escalonamiento_umbral_checkin', id_cabana, fecha)
-  SI checkins <= umbral: RETORNAR hora_base
-
-  // Calcular ajuste (tramos de 30 min, máximo 60 min = 2 tramos)
-  cabanas_extra = MIN(checkins - umbral, 2)  // cap en 2 tramos
-  minutos_menos = cabanas_extra * 30         // 30 min por tramo
-  hora_ajustada = hora_base - minutos_menos
-
-  // Verificar límite mínimo (09:00)
-  SI hora_ajustada < escalonamiento_checkout_min (09:00):
-    estado = 'limite_operativo'
-    disparar_notificacion("limite_operativo_checkout", fecha, id_cabana)
-    RETORNAR { estado: 'limite_operativo' }
-
-  // Marcar que requiere aceptación explícita del cliente
-  RETORNAR { hora: hora_ajustada, requiere_aceptacion_cliente: true }
-```
-
----
 
 ## 9. ESTRUCTURA DE DISPONIBILIDAD_CACHE
 
 Un registro por combinación (cabaña, fecha). Se mantiene para todas las fechas desde hoy hasta 18 meses adelante.
 
 **Principio:** La cache guarda resultados operativos finales, no inputs ni cálculos intermedios. El bot y la web solo necesitan saber qué puede hacer el huésped, no cómo se llegó a ese resultado.
+
+> **v1.2 — Columnas operativas agregadas:** se incorporan `tiene_checkout`, `id_reserva_checkout`, `tiene_checkin` e `id_reserva_checkin` para registrar movimientos del día independientemente del estado de disponibilidad. Esto permite que el estado principal (`ocupada` / `checkout_disponible`) sea correcto desde el punto de vista de reservas, mientras que el equipo operativo puede ver en un mismo registro si hay rotación ese día. Ver especificación completa en `ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md`.
 
 | Campo | Tipo | Descripción |
 |---|---|---|
@@ -651,33 +608,39 @@ Un registro por combinación (cabaña, fecha). Se mantiene para todas las fechas
 | estado | String | `disponible`, `ocupada`, `bloqueada`, `checkout_disponible`, `limite_escalonamiento` |
 | hora_checkin_minima | Time | Mínimo permitido considerando escalonamiento |
 | hora_checkin_maxima | Time | Máximo permitido (de CONFIGURACION_GENERAL) |
-| hora_checkout_maxima | Time | Máximo permitido considerando escalonamiento |
-| hora_checkout_minima | Time | Mínimo permitido (de CONFIGURACION_GENERAL) |
+| hora_checkout_maxima | Time | Hora límite de salida según regla base u override |
+| hora_checkout_minima | Time | Mínimo permitido por CONFIGURACION_GENERAL u override |
 | tipo_dia | String | `semana`, `finde`, `feriado`, `ano_nuevo` |
 | temporada | String | `alta`, `media`, `baja` |
 | es_ultimo_dia_bloque | Boolean | Si aplica la regla de checkout 16:00 |
 | minimo_noches | Integer | Mínimo de noches desde este día |
 | id_reserva_activa | Integer | FK → RESERVAS si está ocupada |
 | id_prereserva_activa | Integer | FK → PRE_RESERVAS si está en proceso |
+| tiene_checkout | Boolean | TRUE si una reserva confirmada/activa hace checkout ese día |
+| id_reserva_checkout | Integer | FK → RESERVAS. ID de la reserva que hace checkout ese día, si aplica |
+| tiene_checkin | Boolean | TRUE si una reserva confirmada/activa hace checkin ese día |
+| id_reserva_checkin | Integer | FK → RESERVAS. ID de la reserva que hace checkin ese día, si aplica |
 | recalculado_en | Timestamp | Última vez que se calculó |
 
 **Clave primaria compuesta:** (id_cabana, fecha)
+
+> **Nota sobre campos operativos:** `tiene_checkout`, `id_reserva_checkout`, `tiene_checkin` e `id_reserva_checkin` reflejan movimientos operativos confirmados asociados a RESERVAS confirmadas o activas. No se generan para PRE_RESERVAS. Una PRE_RESERVA vigente bloquea disponibilidad (via `id_prereserva_activa` y `estado = ocupada`), pero no representa todavía movimiento operativo real de limpieza: el equipo de limpieza no prepara ni limpia una cabaña hasta que la reserva esté confirmada. No se agregan columnas de pre-reserva en esta etapa.
 
 ### Estados de la cache
 
 | Estado | Descripción | El bot puede mostrar |
 |---|---|---|
-| `disponible` | Libre y sin restricciones | Sí |
-| `checkout_disponible` | Es el día de checkout de otra reserva — puede ser checkin nuevo | Sí, con nota |
-| `ocupada` | Reserva confirmada o pre-reserva activa | No |
-| `bloqueada` | Bloqueo manual activo | No |
-| `limite_escalonamiento` | El escalonamiento alcanzó el límite de seguridad | No (equipo decide) |
+| `disponible` | Libre y sin restricciones. La noche de esta fecha no está ocupada. | Sí |
+| `checkout_disponible` | Hay checkout de una reserva este día, pero la noche de esta fecha no está ocupada por ninguna otra reserva o pre-reserva. Puede recibir un nuevo checkin. | Sí, con nota |
+| `ocupada` | La noche de esta fecha está ocupada por una reserva confirmada/activa o por una pre-reserva pendiente. Puede haber también un checkout ese mismo día (ver `tiene_checkout`). | No |
+| `bloqueada` | Bloqueo manual activo para esta fecha. | No |
+| `limite_escalonamiento` | El escalonamiento alcanzó el límite de seguridad. | No (equipo decide) |
 
 ---
 
 ## 10. TRIGGERS DE RECÁLCULO
 
-### 9.1 Recálculo parcial (por evento)
+### 10.1 Recálculo parcial (por evento)
 
 Se ejecuta en n8n cada vez que ocurre un evento que modifica disponibilidad.
 
@@ -693,14 +656,14 @@ Se ejecuta en n8n cada vez que ocurre un evento que modifica disponibilidad.
 | Cambio de configuración de temporada | Todas las cabañas | Todo el rango afectado |
 | Cambio de umbral de escalonamiento | Todas las cabañas | Próximos 30 días |
 
-### 9.2 Recálculo masivo (programado)
+### 10.2 Recálculo masivo (programado)
 
 Se ejecuta todos los días a las 03:00am. Recalcula todas las combinaciones (cabaña, fecha) para el rango hoy + 18 meses. Sirve para:
 - Corregir cualquier inconsistencia acumulada
 - Aplicar cambios de configuración que no dispararon recálculo parcial
 - Extender el horizonte de la cache
 
-### 9.3 Workflow de recálculo en n8n
+### 10.3 Workflow de recálculo en n8n
 
 ```
 WORKFLOW: db_recalcular_disponibilidad
@@ -709,11 +672,11 @@ INPUT: { id_cabanas: [array], fechas: [array], source_event: string }
 
 PASOS:
   1. Para cada (id_cabana, fecha):
-     a. Ejecutar algoritmo completo (sección 7)
+     a. Ejecutar algoritmo completo (sección 8)
      b. Escribir resultado en DISPONIBILIDAD_CACHE
      c. Registrar en LOG_CAMBIOS si hubo cambio de estado
   2. Si alguna fecha alcanzó limite_escalonamiento:
-     a. Notificar a Franco y Rodrigo por WhatsApp
+     a. Notificar al equipo responsable definido en CONFIGURACION_GENERAL por WhatsApp
   3. Actualizar timestamp recalculado_en
 ```
 
@@ -736,14 +699,12 @@ Todos estos valores viven en CONFIGURACION_GENERAL y son modificables sin tocar 
 
 | Clave | Valor default | Descripción |
 |---|---|---|
-| `escalonamiento_activo` | true | Master switch del escalonamiento completo |
-| `escalonamiento_umbral_checkout` | 3 | Checkouts simultáneos que activan escalonamiento de checkin |
-| `escalonamiento_umbral_checkin` | 3 | Check-ins simultáneos que activan escalonamiento de checkout |
-| `escalonamiento_minutos` | 45 | Minutos de ajuste por cabaña adicional |
+| `escalonamiento_activo` | true | Master switch. Si es false, el motor usa horarios base puros |
+| `escalonamiento_umbral_checkins_dia` | 3 | Cantidad de check-ins del mismo día que mantienen horario base antes de escalonar |
+| `escalonamiento_minutos` | 45 | Minutos de retraso por cada check-in sobre el umbral |
 | `escalonamiento_checkin_max` | 22:00 | Límite máximo de check-in por escalonamiento |
-| `escalonamiento_checkout_min` | 09:00 | Límite mínimo de checkout por escalonamiento (nunca debajo de esto) |
-| `escalonamiento_checkout_max_minutos` | 60 | Máximo minutos de adelanto permitido en checkout |
-| `escalonamiento_checkout_tramo_minutos` | 30 | Minutos por tramo en escalonamiento de checkout |
+
+> **v1.3 — Claves eliminadas:** `escalonamiento_umbral_checkout`, `escalonamiento_umbral_checkin`, `escalonamiento_checkout_min`, `escalonamiento_checkout_max_minutos`, `escalonamiento_checkout_tramo_minutos`. No deben cargarse en CONFIGURACION_GENERAL.
 
 ### Flexibilidad del cliente
 
@@ -778,13 +739,21 @@ Todos estos valores viven en CONFIGURACION_GENERAL y son modificables sin tocar 
 
 **Situación:** Reserva A sale el día 15. Reserva B quiere entrar el día 15.
 
-**Regla:** Válido. El día 15 tiene estado `checkout_disponible` en DISPONIBILIDAD_CACHE.
+**Regla:** Válido. La noche del día 15 pertenece a la Reserva B, no a la Reserva A. La Reserva A ocupa en el intervalo `[fecha_in_A, 15)`, es decir, su última noche es el 14. El día 15 es solo el día de salida.
+
+**Estado en DISPONIBILIDAD_CACHE antes de confirmar Reserva B:**
+- El día 15 tiene `estado = checkout_disponible` (la Reserva A sale ese día, la noche no está ocupada).
+
+**Estado en DISPONIBILIDAD_CACHE después de confirmar Reserva B:**
+- El día 15 tiene `estado = ocupada` (la noche del 15 pertenece a la Reserva B).
+- `tiene_checkout = TRUE`, `id_reserva_checkout = id_Reserva_A` (el equipo de limpieza sabe que hay rotación ese día).
+- `tiene_checkin = TRUE`, `id_reserva_checkin = id_Reserva_B`.
 
 **Horarios:**
-- Checkout Reserva A: calculado normalmente (10:00 o ajustado)
-- Checkin Reserva B: calculado normalmente (13:00 o ajustado)
+- Checkout Reserva A: calculado normalmente según reglas base (10:00 o 16:00 último día de bloque). Sin escalonamiento automático.
+- Checkin Reserva B: calculado según su orden en el día. Si es el 4.º o posterior check-in, se aplica escalonamiento.
 
-**Escalonamiento:** El checkout de la Reserva A **cuenta** para el escalonamiento de checkin del día 15. Si ya hay 3 checkouts ese día, la Reserva B entra con +45 min.
+**Escalonamiento:** La Reserva B suma al conteo de check-ins del día 15. Si ya hay 3 check-ins ese día antes que ella, su horario de entrada se retrasa 45 minutos por cada posición adicional.
 
 ---
 
@@ -808,7 +777,7 @@ Todos estos valores viven en CONFIGURACION_GENERAL y son modificables sin tocar 
 
 **Comportamiento:**
 1. n8n detecta el conflicto al crear el bloqueo
-2. Notifica a Franco con el detalle: "Hay una pre-reserva activa (ID, cliente, fechas) que conflictúa con el bloqueo"
+2. Notifica al equipo responsable definido en CONFIGURACION_GENERAL con el detalle: "Hay una pre-reserva activa (ID, cliente, fechas) que conflictúa con el bloqueo"
 3. El bloqueo se crea igual (tiene prioridad sobre pre-reservas)
 4. La PRE_RESERVA pasa a estado `cancelada_por_bloqueo`
 5. n8n notifica al cliente que su pre-reserva fue cancelada y las fechas no están disponibles
@@ -827,15 +796,15 @@ Todos estos valores viven en CONFIGURACION_GENERAL y son modificables sin tocar 
 
 ---
 
-### Edge case 5 — Escalonamiento alcanza el límite
+### Edge case 5 — Escalonamiento de check-in alcanza el límite
 
-**Situación:** Un día tiene 7 cabañas con checkout a las 10:00. La 8va cabaña querría entrar ese día.
+**Situación:** Un día tiene 7 cabañas con check-in confirmado. La 8va cabaña quiere entrar ese mismo día.
 
-**Cálculo:** 7 checkouts > umbral (3). Cabanas extra = 4. Ajuste = 4 × 45 = 180 min = 16:00hs.
+**Cálculo:** orden_checkin_dia = 8. Umbral = 3. Posiciones sobre el umbral = 5. Ajuste = 5 × 45 = 225 min. Hora base 13:00 + 225 min = 16:45.
 
-**Si 16:00 < escalonamiento_checkin_max (22:00):** Se permite, check-in a las 16:00.
+**Si 16:45 ≤ escalonamiento_checkin_max (22:00):** Se permite, check-in a las 16:45.
 
-**Si el ajuste supera 22:00:** n8n bloquea esa fecha para esa cabaña y notifica al equipo. El equipo decide manualmente.
+**Si el ajuste supera 22:00:** n8n asigna estado `limite_escalonamiento` a esa combinación (cabaña, fecha), notifica al equipo responsable definido en CONFIGURACION_GENERAL por WhatsApp, y el equipo decide manualmente si confirmar, bloquear o reasignar.
 
 ---
 
@@ -878,7 +847,7 @@ PASO 3b: Si hay conflicto
   → Cambiar estado de la PRE_RESERVA a 'conflicto_pendiente'
   → Registrar conflicto en LOG_CAMBIOS con todos los detalles:
       { prereserva_original, prereserva_conflictante, timestamp, source_event }
-  → Notificar INMEDIATAMENTE a Franco y Vicky por WhatsApp:
+  → Notificar INMEDIATAMENTE al equipo responsable (definido en CONFIGURACION_GENERAL):
       "⚠️ Conflicto de reserva: [cabaña] [fechas]. Cliente [nombre] pagó pero hay conflicto.
        Revisar manualmente. ID: [id_prereserva]"
   → El pago queda registrado pero la reserva en estado manual
@@ -892,9 +861,8 @@ PASO 3b: Si hay conflicto
 - Reasignar a otra cabaña disponible (con acuerdo del cliente)
 
 ---
----
 
-## 13. PENDIENTES PARA ETAPA 3
+## 13. CONTINUIDAD HACIA ETAPA 3
 
 La Etapa 3 es el **Motor de Precios**. Incluye:
 
@@ -911,9 +879,9 @@ La Etapa 3 es el **Motor de Precios**. Incluye:
 - Precios actuales cargados (5 cabañas × tipos de día × temporadas)
 - Lógica de personas extra ($10.000/noche por persona sobre capacidad base)
 - Porcentaje de seña configurable (50%, en CONFIGURACION_GENERAL)
-- Recargo año nuevo (+20%, configurable)
+- Año Nuevo y fechas especiales se derivan a EVENTOS_ESPECIALES según Etapa 3 v3.0
 
 ---
 
 *Documento generado como parte del proceso de diseño del sistema Complejo Vita Delta.*  
-*Siguiente: ARQUITECTURA_ETAPA_3_VITA_DELTA.md — Motor de Precios*
+*Siguiente: ver ARQUITECTURA_ETAPA_3_VITA_DELTA.md v3.0 — Motor de Precios*

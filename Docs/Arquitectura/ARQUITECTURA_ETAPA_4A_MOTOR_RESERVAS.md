@@ -4,7 +4,7 @@
 **Versión:** 1.0
 **Fecha:** Mayo 2026
 **Estado:** Aprobado — CERRADO
-**Depende de:** ARQUITECTURA_ETAPA_1_VITA_DELTA.md v1.1 / ARQUITECTURA_ETAPA_2_VITA_DELTA.md v1.1 / ARQUITECTURA_ETAPA_3_VITA_DELTA.md v3.0
+**Depende de:** ARQUITECTURA_ETAPA_1_VITA_DELTA.md v1.1 / ARQUITECTURA_ETAPA_2_VITA_DELTA.md v1.3 / ARQUITECTURA_ETAPA_3_VITA_DELTA.md v3.0
 **Autores:** Franco (titular) + Claude (arquitecto)
 
 ---
@@ -28,7 +28,7 @@
 15. Actualización del calendario visual
 16. Mensajes automáticos al huésped
 17. Mensajes automáticos al grupo operativo
-18. Coordinación con Jennifer
+18. Coordinación con el equipo de limpieza
 19. Asignación del encargado semanal Franco/Rodrigo
 20. Cancelaciones y modificaciones post-confirmación
 21. Conflictos y resolución manual
@@ -55,7 +55,7 @@ El motor de reservas es el componente que convierte una consulta en una reserva 
 - Revalidación de disponibilidad antes de confirmar
 - Actualización de DISPONIBILIDAD_CACHE y calendario visual
 - Mensajes automáticos al huésped y al equipo operativo
-- Coordinación básica con Jennifer por WhatsApp
+- Coordinación básica con el equipo de limpieza por WhatsApp
 - Cancelaciones con intervención humana
 - Manejo de conflictos
 
@@ -64,7 +64,7 @@ El motor de reservas es el componente que convierte una consulta en una reserva 
 - El bot conversacional con IA (Etapa 4B)
 - La lógica de cómo el bot interpreta mensajes del cliente
 - Automatización completa de cancelaciones (intervención humana en esta versión)
-- App de tareas para Jennifer (prevista para etapa posterior)
+- App de tareas para el equipo de limpieza (prevista para etapa posterior)
 - Implementación real de webhooks de MercadoPago (solo arquitectura)
 - Contabilidad y distribución entre socios
 
@@ -84,7 +84,7 @@ El motor de reservas es el componente que convierte una consulta en una reserva 
 
 **6. Mínima persistencia nueva.** Antes de crear una tabla nueva, se evalúa si el concepto puede resolverse como paso de workflow, log auxiliar o campo en una tabla existente.
 
-**7. Degradación controlada.** Si n8n no está disponible, el sistema no colapsa. Vicky puede operar manualmente en Sheets. Al recuperarse n8n, se ejecuta recálculo masivo y se verifican inconsistencias.
+**7. Degradación controlada.** Si n8n no está disponible, el sistema no colapsa. El operador responsable puede operar manualmente en Sheets. Al recuperarse n8n, se ejecuta recálculo masivo y se verifican inconsistencias.
 
 ---
 
@@ -113,11 +113,11 @@ Los mensajes son pasos dentro de los workflows de n8n. Las plantillas de texto v
 
 Lo que sí queda registrado en LOG_CAMBIOS: que el mensaje fue enviado, a quién, en qué evento. Pero el mensaje en sí no necesita una tabla propia en esta etapa.
 
-**Tareas para Jennifer**
+**Tareas para el equipo de limpieza**
 
-Decisión: en Etapa 4A, la coordinación con Jennifer es un mensaje de WhatsApp automático enviado por n8n. No hay tabla TAREAS_OPERATIVAS en esta etapa.
+Decisión: en Etapa 4A, la coordinación con el equipo de limpieza es un mensaje de WhatsApp automático enviado por n8n. No hay tabla TAREAS_OPERATIVAS en esta etapa.
 
-La tabla TAREAS_OPERATIVAS prevista en Etapa 1 queda para una etapa posterior cuando sea necesario rastrear estado de tareas, asignación múltiple o checklist. En esta etapa, el mensaje saliente a Jennifer es suficiente y la tarea queda implícita.
+La tabla TAREAS_OPERATIVAS prevista en Etapa 1 queda para una etapa posterior cuando sea necesario rastrear estado de tareas, asignación múltiple o checklist. En esta etapa, el mensaje saliente al equipo de limpieza es suficiente y la tarea queda implícita.
 
 **Encargado semanal**
 
@@ -166,9 +166,9 @@ No es necesaria una tabla compleja con variables separadas. Las variables van em
 | `eligiendo_fechas` | Cliente está indicando fechas y cabaña | Bot guía, n8n registra |
 | `cotizando` | Sistema calculó precio, cliente evalúa | n8n al calcular cotización |
 | `esperando_pago` | Pre-reserva creada, aguardando pago | n8n al crear PRE_RESERVA |
-| `pago_en_proceso` | Pago detectado o comprobante enviado, pendiente de validar | n8n (webhook MP) o Vicky (manual) |
+| `pago_en_proceso` | Pago detectado o comprobante enviado, pendiente de validar | n8n (webhook MP) o operador responsable (manual) |
 | `cerrada` | Proceso terminado: reserva confirmada o sin interés | n8n al confirmar reserva |
-| `derivada_a_humano` | Requiere intervención de Vicky/Franco/Rodrigo | Bot o n8n según regla |
+| `derivada_a_humano` | Requiere intervención del operador responsable, Franco o Rodrigo | Bot o n8n según regla |
 
 ### 4.3 Condiciones de transición
 
@@ -264,9 +264,9 @@ Los campos ya definidos en Etapa 1 son suficientes. Se agrega un campo:
 | Transición | Disparador | Responsable |
 |---|---|---|
 | PRE_RESERVA → `confirmada` | Pago validado (auto o manual) | n8n workflow `db_confirmar_reserva` |
-| `confirmada` → `activa` | Check-in registrado | Vicky o Franco en Sheets / futuro formulario |
+| `confirmada` → `activa` | Check-in registrado | Operador responsable o Franco en Sheets / futuro formulario |
 | `activa` → `completada` | Checkout registrado | Ídem |
-| `confirmada` → `cancelada` | Solicitud validada por humano | Vicky o Franco → dispara workflow |
+| `confirmada` → `cancelada` | Solicitud validada por humano | Operador responsable o Franco → dispara workflow |
 | `confirmada` → `cancelada_con_cargo` | Ídem, con condición de cargo | Ídem |
 | cualquier estado → `conflicto_pendiente` | n8n detecta inconsistencia | n8n automático |
 
@@ -294,7 +294,7 @@ Los campos ya definidos en Etapa 1 son suficientes. Se agrega un campo:
 | Estado | Descripción | Acción siguiente |
 |---|---|---|
 | `pendiente` | Pago esperado, instrucciones enviadas al cliente | Esperar webhook o comprobante |
-| `en_revision` | Comprobante recibido de un pago manual, pendiente de validación humana | Vicky o Franco aprueban o rechazan |
+| `en_revision` | Comprobante recibido de un pago manual, pendiente de validación humana | Operador responsable o Franco aprueban o rechazan |
 | `confirmado` | Pago validado. Reserva puede confirmarse | n8n continúa flujo de confirmación |
 | `rechazado` | Pago fallido, comprobante apócrifo o monto incorrecto | Notificar cliente. PRE_RESERVA sigue activa si no venció |
 | `reembolsado` | Devolución procesada | Registrar en PAGOS. Notificar cliente y equipo |
@@ -341,7 +341,7 @@ Esto es importante: el pago y la confirmación de reserva son pasos secuenciales
                         ▼
                 [n8n ejecuta db_crear_prereserva]
                 [PRE_RESERVA creada en 'pendiente_pago']
-                [DISPONIBILIDAD_CACHE actualizada]
+                [db_recalcular_disponibilidad actualiza DISPONIBILIDAD_CACHE]
                 [CONSULTA → 'esperando_pago']
                 [Bot informa medio de pago y monto de seña]
                         │
@@ -366,18 +366,18 @@ Esto es importante: el pago y la confirmación de reserva son pasos secuenciales
                                         [PRE_RESERVA → 'convertida']
                                         [RESERVA creada en 'confirmada']
                                         [PAGO → 'confirmado']
-                                        [DISPONIBILIDAD_CACHE actualizada]
+                                        [db_recalcular_disponibilidad actualiza DISPONIBILIDAD_CACHE]
                                         [Calendario visual actualizado]
                                         [Mensajes al huésped]
                                         [Mensajes al equipo]
-                                        [Mensaje a Jennifer]
+                                        [Mensaje al equipo de limpieza]
                                         [CONSULTA → 'cerrada']
                                         [LOG_CAMBIOS registrado]
 ```
 
 ### 8.2 Quién hace qué
 
-| Paso | Bot | n8n | Vicky/Franco | Cliente |
+| Paso | Bot | n8n | Operador / Franco | Cliente |
 |---|---|---|---|---|
 | Recopilación de datos | ✓ | — | — | Responde |
 | Consulta disponibilidad | — | ✓ | — | — |
@@ -424,6 +424,8 @@ PASO 2: Para cada PRE_RESERVA encontrada:
 
 **Regla:** El workflow `db_confirmar_reserva` verifica el estado de la PRE_RESERVA en su Paso 1. Si está `vencida`, no confirma y notifica al equipo.
 
+> **Nota de actualización:** la lógica definitiva para pagos tardíos queda definida en Etapa 5B. Un pago sobre PRE_RESERVA vencida no debe descartarse automáticamente; debe registrarse con trazabilidad y revisión manual, sin confirmar la reserva automáticamente.
+
 ### 9.3 Reintento del cliente
 
 Si la PRE_RESERVA venció y el cliente quiere continuar:
@@ -461,12 +463,12 @@ El motor de reservas no debe depender de un único proveedor de pago. La tabla P
 | monto_esperado | Number | Sí | Monto que el sistema espera recibir |
 | monto_recibido | Number | No | Monto real recibido (puede diferir) |
 | moneda | String | Sí | `ARS`, `USD`, `USDT`, `BTC` |
-| estado | String | Sí | `pendiente`, `confirmado`, `rechazado`, `reembolsado` |
+| estado | String | Sí | `pendiente`, `en_revision`, `confirmado`, `rechazado`, `reembolsado` |
 | es_automatico | Boolean | Sí | Si la validación fue automática (webhook) o manual |
 | comprobante_url | String | No | Link a imagen o PDF del comprobante |
 | referencia_externa | String | No | ID de la transacción en MP u otro proveedor |
 | tx_hash | String | No | Hash de transacción para pagos cripto |
-| validado_por | String | No | `bot_mp`, `vicky`, `franco`, `rodrigo` |
+| validado_por | String | No | `bot_mp`, `operador`, `franco`, `rodrigo` |
 | validado_en | Timestamp | No | Cuándo se confirmó el pago |
 | motivo_rechazo | String | No | Por qué fue rechazado |
 | notas | Text | No | Observaciones adicionales |
@@ -481,7 +483,7 @@ El motor de reservas no debe depender de un único proveedor de pago. La tabla P
 | `transferencia_mp` | Transferencia a cuenta de MercadoPago | Manual (comprobante) |
 | `transferencia_bancaria` | CBU/CVU bancario | Manual (comprobante) |
 | `tarjeta` | Tarjeta via MP u otro procesador | Automática (futuro) |
-| `efectivo` | Efectivo en mano | Manual (registro por Vicky/Franco) |
+| `efectivo` | Efectivo en mano | Manual (registro por operador responsable o Franco) |
 | `cripto` | Criptomonedas | Manual (tx_hash + validación) |
 
 ### 10.4 Cuáles son automáticos y cuáles manuales
@@ -489,10 +491,10 @@ El motor de reservas no debe depender de un único proveedor de pago. La tabla P
 | Medio | Flujo | Automatizable ahora |
 |---|---|---|
 | `mp_link` | Webhook de MP notifica pago → n8n valida y confirma | Sí |
-| `transferencia_mp` | Cliente envía comprobante → Vicky valida → dispara workflow | No (manual) |
+| `transferencia_mp` | Cliente envía comprobante → operador responsable valida → dispara workflow | No (manual) |
 | `transferencia_bancaria` | Ídem | No (manual) |
 | `tarjeta` | Vía MP, mismo webhook | Sí (si usa link MP con tarjeta) |
-| `efectivo` | Franco/Vicky registra manualmente | No (siempre manual) |
+| `efectivo` | Operador responsable o Franco registra manualmente | No (siempre manual) |
 | `cripto` | Cliente envía tx_hash → validación manual | No (manual en esta etapa) |
 
 ### 10.5 Cuentas destino
@@ -542,7 +544,7 @@ PASO 4: Buscar el PAGO correspondiente por referencia_externa o id_prereserva
   → Si existe y ya está 'confirmado': ignorar (pago duplicado)
 
 PASO 5: Verificar que monto_recibido >= monto_esperado
-  → Si hay diferencia: notificar a Vicky para revisión manual
+  → Si hay diferencia: notificar al operador responsable para revisión manual
   → Si coincide: continuar
 
 PASO 6: Llamar a db_confirmar_reserva (Sección 13)
@@ -587,15 +589,15 @@ El link de MP se configura con `expiration_date_to` igual a `expira_en` de la PR
         ▼
 [Bot recibe el comprobante (imagen o PDF)]
 [Bot confirma recepción al cliente: "Recibimos tu comprobante, lo estamos revisando."]
-[n8n guarda el archivo y notifica a Vicky y Franco]
+[n8n guarda el archivo y notifica al operador responsable y a Franco]
         │
         ▼
-[Vicky o Franco revisan el comprobante]
+[Operador responsable o Franco revisan el comprobante]
         │
         ├── Comprobante inválido o monto incorrecto
         │        │
         │        ▼
-        │   [Vicky marca "rechazado" en formulario interno]
+        │   [Operador marca "rechazado" en formulario interno]
         │   [n8n actualiza PAGO → 'rechazado']
         │   [Bot notifica al cliente con motivo]
         │   [PRE_RESERVA sigue activa si no venció]
@@ -603,7 +605,7 @@ El link de MP se configura con `expiration_date_to` igual a `expira_en` de la PR
         └── Comprobante válido
                  │
                  ▼
-        [Vicky marca "aprobado" en formulario interno]
+        [Operador marca "aprobado" en formulario interno]
         [Completa: monto_recibido, cuenta_destino, referencia si tiene]
         [Formulario dispara webhook a n8n]
                  │
@@ -614,7 +616,7 @@ El link de MP se configura con `expiration_date_to` igual a `expira_en` de la PR
 
 ### 12.2 Formulario interno de validación manual
 
-El formulario para Vicky es un Google Form conectado a n8n via Apps Script (mismo patrón de la Etapa 1). Campos:
+El formulario para el operador responsable es un Google Form conectado a n8n via Apps Script (mismo patrón de la Etapa 1). Campos:
 
 - ID de pre-reserva (manual o búsqueda)
 - Decisión: Aprobar / Rechazar
@@ -627,7 +629,7 @@ El formulario para Vicky es un Google Form conectado a n8n via Apps Script (mism
 
 ### 12.3 Flujo para cripto
 
-Igual que transferencia bancaria, con campo adicional `tx_hash`. Vicky o Franco verifican la transacción en el explorador de la blockchain antes de aprobar. En esta etapa la verificación es 100% manual.
+Igual que transferencia bancaria, con campo adicional `tx_hash`. El operador responsable o Franco verifican la transacción en el explorador de la blockchain antes de aprobar. En esta etapa la verificación es 100% manual.
 
 ---
 
@@ -649,10 +651,12 @@ PASO 1: Verificar estado de la PRE_RESERVA
   → Buscar PRE_RESERVA WHERE id = id_prereserva
   → SI estado != 'pendiente_pago':
       SI estado = 'vencida':
-        → Disparar notificación al equipo: pago recibido pero PRE_RESERVA ya venció
-        → Actualizar PAGO → estado='rechazado', motivo='prereserva_vencida'
-        → Registrar en LOG_CAMBIOS
-        → RETORNAR { error: 'prereserva_vencida' }
+        → Registrar o mantener PAGO en estado='en_revision'
+        → Agregar PAGO.notas = 'pago_tardio_sobre_prereserva_vencida'
+        → Notificar al equipo responsable: "Pago recibido sobre PRE_RESERVA vencida. Requiere revisión manual."
+        → No confirmar reserva automáticamente
+        → Registrar en LOG_CAMBIOS con nivel 'warning'
+        → RETORNAR { requiere_revision_manual: true, motivo: 'prereserva_vencida' }
       SI estado = 'convertida':
         → Ignorar (pago duplicado, reserva ya confirmada)
         → RETORNAR { ok: true, nota: 'ya_confirmada' }
@@ -672,7 +676,7 @@ PASO 3a: Si hay conflicto
   → PRE_RESERVA → 'conflicto_pendiente'
   → PAGO → estado='pendiente' (queda registrado pero no confirmado)
   → Registrar en LOG_CAMBIOS con todos los detalles del conflicto
-  → Notificar INMEDIATAMENTE a Franco y Vicky por WhatsApp:
+  → Notificar INMEDIATAMENTE al equipo responsable (Franco / Rodrigo / operador) por WhatsApp:
       "⚠️ Conflicto de reserva: [cabaña] [fechas]. Cliente [nombre] pagó pero
        hay conflicto de disponibilidad. ID pre-reserva: [id]. Revisar manualmente."
   → RETORNAR { error: 'conflicto_disponibilidad' }
@@ -685,10 +689,14 @@ PASO 3b: Si disponibilidad OK
   → Actualizar calendario visual
   → Ejecutar mensajes al huésped (Sección 16)
   → Ejecutar mensajes al equipo (Sección 17)
-  → Ejecutar mensaje a Jennifer (Sección 18)
+  → Ejecutar mensaje al equipo de limpieza (Sección 18)
   → Registrar en LOG_CAMBIOS
   → RETORNAR { ok: true, id_reserva: nueva_reserva.id }
 ```
+
+> **Nota de actualización (idempotencia de convertida):** la lógica definitiva queda definida en Etapa 5B. Si `PRE_RESERVA.estado = convertida`, el workflow debe verificar que exista RESERVA asociada antes de retornar `ya_confirmada`. Si no existe RESERVA asociada, debe registrar `inconsistencia_convertida_sin_reserva`.
+
+> **Nota de actualización (pagos tardíos):** la lógica definitiva para pagos sobre PRE_RESERVA vencida queda definida en Etapa 5B. Un pago sobre PRE_RESERVA vencida no debe descartarse automáticamente; debe registrarse con trazabilidad y revisión manual, sin confirmar la reserva automáticamente.
 
 ### 13.3 Por qué la concurrencia = 1 es suficiente
 
@@ -732,6 +740,8 @@ Para cada (id_cabana, fecha):
   8. Registrar en LOG_CAMBIOS si el estado cambió
 ```
 
+> **Nota de actualización:** el orden definitivo de recálculo queda definido en `ARQUITECTURA_ETAPA_5B_IMPLEMENTACION_VERTICAL_MINIMA.md` v1.1, Sección 12. En particular, los movimientos operativos (`tiene_checkout`, `tiene_checkin`) se calculan antes de verificar PRE_RESERVAS, y `checkout_disponible` solo se asigna después de confirmar que ninguna PRE_RESERVA vigente ocupa la noche de esa fecha.
+
 El recálculo masivo nocturno (03:00am, definido en Etapa 2) sigue vigente como corrección de inconsistencias.
 
 ---
@@ -740,7 +750,7 @@ El recálculo masivo nocturno (03:00am, definido en Etapa 2) sigue vigente como 
 
 ### 15.1 Qué es el calendario visual
 
-El calendario visual operativo principal de esta etapa es una vista en Google Sheets utilizada por el equipo interno (Franco, Rodrigo, Vicky y Jennifer).
+El calendario visual operativo principal de esta etapa es una vista en Google Sheets utilizada por el equipo interno (Franco, Rodrigo, operador responsable y equipo de limpieza).
 
 La web pública y el frontend del cliente utilizan una representación visual independiente basada en DISPONIBILIDAD_CACHE y el motor de reservas.
 
@@ -847,7 +857,7 @@ Los mensajes al equipo van al grupo de WhatsApp operativo. Para notificaciones c
 | RESERVA confirmada | Grupo | Normal |
 | PRE_RESERVA vencida (monto > umbral) | Grupo | Normal |
 | Conflicto de reserva detectado | Grupo + Franco directo | ⚠️ Alta |
-| Pago rechazado | Vicky + Franco | Media |
+| Pago rechazado | Operador responsable + Franco | Media |
 | Límite de escalonamiento alcanzado | Franco + Rodrigo | ⚠️ Alta |
 | RESERVA cancelada | Grupo | Normal |
 | RESERVA completada (checkout) | Grupo | Normal |
@@ -883,11 +893,11 @@ Revisar manualmente y resolver.
 
 ---
 
-## 18. COORDINACIÓN CON JENNIFER
+## 18. COORDINACIÓN CON EL EQUIPO DE LIMPIEZA
 
 ### 18.1 Principio para esta etapa
 
-La coordinación con Jennifer en Etapa 4A es simple: mensaje automático de WhatsApp en dos momentos clave. No hay tabla de tareas, no hay app, no hay checklist en esta versión.
+La coordinación con el equipo de limpieza en Etapa 4A es simple: mensaje automático de WhatsApp en dos momentos clave. No hay tabla de tareas, no hay app, no hay checklist en esta versión.
 
 ### 18.2 Momentos de notificación
 
@@ -916,7 +926,7 @@ Por favor coordiná la limpieza para dejarla lista.
 
 La variable `{nota_proxima_reserva}` incluye, si existe, la información del próximo checkin en esa cabaña: "⚡ La próxima reserva entra el {fecha} a las {hora}hs."
 
-### 18.3 Número de Jennifer
+### 18.3 Número del equipo de limpieza
 
 Configurado en CONFIGURACION_GENERAL como `whatsapp_jennifer`. Si aún no existe, debe agregarse a CONFIGURACION_GENERAL.
 
@@ -953,7 +963,7 @@ La semana se asigna según la fecha de checkin. Si la reserva cruza el cambio de
 El encargado calculado se guarda en `RESERVAS.encargado_semana` al crear la reserva. Aparece en:
 - El mensaje al grupo operativo de confirmación
 - El evento del calendario visual
-- El mensaje a Jennifer (para que sepa a quién contactar si hay algo)
+- El mensaje al equipo de limpieza (para que sepa a quién contactar si hay algo)
 
 ---
 
@@ -974,7 +984,7 @@ Las cancelaciones y modificaciones post-confirmación requieren intervención hu
  en breve. Un momento."]
         │
         ▼
-[n8n notifica a Vicky y Franco]
+[n8n notifica al equipo responsable (Franco / Rodrigo / operador)]
 Mensaje: "⚠️ Solicitud de cancelación
   Reserva: [ID] | Cabaña: [nombre]
   Huésped: [nombre] | Fechas: [fechas]
@@ -982,9 +992,9 @@ Mensaje: "⚠️ Solicitud de cancelación
   Motivo indicado: [texto del cliente si lo dio]"
         │
         ▼
-[Vicky o Franco evalúan]
+[Operador responsable o Franco evalúan]
         │
-        ├── Sin cargo → Vicky usa formulario interno:
+        ├── Sin cargo → Operador usa formulario interno:
         │     → Acción: Cancelar sin cargo
         │     → n8n ejecuta db_cancelar_reserva(tipo='sin_cargo')
         │
@@ -1004,13 +1014,13 @@ PASO 1: Verificar estado de RESERVA (debe ser 'confirmada' o 'activa')
 PASO 2: Cambiar estado RESERVA → 'cancelada' o 'cancelada_con_cargo'
 PASO 3: Si hay PAGO confirmado y tipo = 'sin_cargo':
           Registrar PAGO de reembolso (tipo='reembolso', estado='pendiente')
-          Nota: el reembolso real lo procesa Vicky/Franco manualmente
+          Nota: el reembolso real lo procesa el operador responsable o Franco manualmente
 PASO 4: Si tipo = 'con_cargo':
           Registrar PAGO de reembolso parcial (monto = pagado - monto_retencion)
 PASO 5: Recalcular DISPONIBILIDAD_CACHE para las fechas afectadas
 PASO 6: Notificar al huésped: "Tu reserva fue cancelada. {detalle_reembolso}"
 PASO 7: Notificar al equipo
-PASO 8: Notificar a Jennifer si el checkin era en los próximos 7 días
+PASO 8: Notificar al equipo de limpieza si el checkin era en los próximos 7 días
 PASO 9: Registrar en LOG_CAMBIOS
 ```
 
@@ -1046,7 +1056,7 @@ Cuando n8n detecta cualquiera de las situaciones anteriores:
    - Timestamps
    - Estado en el que se encontraron las entidades
    - source_event de cada una
-4. Notificación inmediata a Franco y Vicky por WhatsApp
+4. Notificación inmediata al equipo responsable (Franco / Rodrigo / operador) por WhatsApp
 
 ### 21.3 Opciones de resolución manual
 
@@ -1054,7 +1064,7 @@ Una vez que el equipo revisa el conflicto:
 
 | Opción | Cuándo | Acción |
 |---|---|---|
-| Confirmar el primer pago | El primero fue el válido | Franco/Vicky ejecutan db_confirmar_reserva manualmente |
+| Confirmar el primer pago | El primero fue el válido | Operador responsable o Franco ejecutan db_confirmar_reserva manualmente |
 | Cancelar y reembolsar | Ambos pagos llegaron pero hay error | Cancelar ambas pre-reservas, registrar reembolsos |
 | Reasignar a otra cabaña | Hay disponibilidad en otra | Con acuerdo del cliente, crear nueva reserva en otra cabaña |
 | Escalar a caso especial | Situación no contemplada | Franco decide y registra manualmente en LOG_CAMBIOS |
@@ -1075,15 +1085,15 @@ Tabla completa de valores de `source_event` para esta etapa. Se agrega a los val
 | `bot_instagram` | Acción iniciada por bot en Instagram (ya existía) |
 | `web_publica` | Acción desde la web de reservas (ya existía) |
 | `admin_manual` | Acción manual de un socio (ya existía) |
-| `vicky_form` | Vicky completó el formulario interno (ya existía) |
+| `operador_form` | El operador responsable completó el formulario interno (ya existía) |
 | `webhook_mp` | Webhook automático de MercadoPago (ya existía) |
 | `n8n_scheduled` | Proceso automático programado (ya existía) |
 | `sistema_expiracion` | Vencimiento automático de PRE_RESERVA (ya existía) |
 | `sistema_correccion` | Corrección de inconsistencia (ya existía) |
 | `sistema_revalidacion` | Revalidación de disponibilidad en db_confirmar_reserva |
-| `vicky_validacion_pago` | Vicky aprobó un comprobante manualmente |
+| `operador_validacion_pago` | El operador responsable aprobó un comprobante manualmente |
 | `franco_validacion_pago` | Franco aprobó un comprobante manualmente |
-| `vicky_cancelacion` | Vicky ejecutó cancelación desde formulario |
+| `operador_cancelacion` | El operador responsable ejecutó cancelación desde formulario |
 | `franco_cancelacion` | Franco ejecutó cancelación |
 | `sistema_conflicto` | n8n detectó conflicto automáticamente |
 | `franco_resolucion_conflicto` | Franco resolvió un conflicto manualmente |
@@ -1096,7 +1106,7 @@ Tabla completa de valores de `source_event` para esta etapa. Se agrega a los val
 
 | Workflow | Concurrencia | Descripción |
 |---|---|---|
-| `db_crear_prereserva` | 1 | Crea PRE_RESERVA, actualiza disponibilidad, inicia timer |
+| `db_crear_prereserva` | 1 | Crea PRE_RESERVA y dispara db_recalcular_disponibilidad; no escribe cache manualmente |
 | `db_confirmar_reserva` | 1 | Revalida y convierte PRE_RESERVA en RESERVA |
 | `db_cancelar_reserva` | 1 | Cancela RESERVA, libera disponibilidad, registra reembolso |
 | `db_registrar_pago` | 1 | Registra un PAGO (manual o automático) |
@@ -1105,9 +1115,9 @@ Tabla completa de valores de `source_event` para esta etapa. Se agrega a los val
 | `generar_link_mp` | — | Genera preference en MP y devuelve link |
 | `enviar_mensaje_huesped` | — | Envía mensaje al huésped por WhatsApp/Instagram |
 | `enviar_mensaje_equipo` | — | Envía mensaje al grupo operativo |
-| `enviar_mensaje_jennifer` | — | Envía mensaje a Jennifer por WhatsApp |
+| `enviar_mensaje_limpieza` | — | Envía mensaje al equipo de limpieza por WhatsApp. El destinatario real se resuelve desde CONFIGURACION_GENERAL, por ejemplo `whatsapp_jennifer` u otra clave futura. |
 | `db_recalcular_disponibilidad` | 1 | Recalcula DISPONIBILIDAD_CACHE (ya definido Etapa 2) |
-| `actualizar_calendario_visual` | — | Crea/modifica evento en Google Calendar |
+| `actualizar_calendario_visual` | — | Actualiza la vista/calendario operativo en Google Sheets |
 | `calcular_encargado_semana` | — | Función auxiliar, retorna encargado para una fecha |
 | `procesar_solicitud_cancelacion` | — | Recibe solicitud del cliente y notifica al equipo |
 
@@ -1133,7 +1143,7 @@ INPUT:
 
 OUTPUT:
   { ok: true, id_reserva }
-  { error: 'prereserva_vencida' }
+  { requiere_revision_manual: true, motivo: 'prereserva_vencida' }
   { error: 'conflicto_disponibilidad' }
   { error: 'estado_inesperado', estado_actual }
   { ok: true, nota: 'ya_confirmada' }
@@ -1190,11 +1200,12 @@ OUTPUT:
 - `sistema_expirar_prereservas` ya marcó la PRE_RESERVA como `vencida`
 - El webhook llega → `recibir_webhook_mp` llama a `db_confirmar_reserva`
 - `db_confirmar_reserva` Paso 1: encuentra PRE_RESERVA en estado `vencida`
-- Notificación inmediata a Franco: "Pago recibido pero PRE_RESERVA ya venció"
-- PAGO se registra en estado `rechazado` con motivo `prereserva_vencida`
-- El equipo evalúa: si la cabaña sigue disponible, puede crear la reserva manualmente y confirmar el pago
+- PAGO se registra o mantiene en estado `en_revision` con nota `pago_tardio_sobre_prereserva_vencida`
+- Notificación inmediata al equipo responsable: "Pago recibido sobre PRE_RESERVA vencida. Requiere revisión manual."
+- No se confirma la reserva automáticamente
+- Registra en LOG_CAMBIOS con nivel `warning`
 
-**Resultado:** El pago del cliente no se pierde. Requiere intervención humana.
+**Resultado:** El pago queda trazado y requiere revisión humana. El equipo decide si crea nueva reserva, reasigna, mantiene el pago o reembolsa.
 
 ---
 
@@ -1216,12 +1227,12 @@ OUTPUT:
 
 ### Edge case 4 — Pago confirmado pero disponibilidad cambió entre el pago y la confirmación
 
-**Situación:** Entre que el cliente pagó y que el webhook llegó a n8n, otra reserva (manual de Vicky) ocupó las mismas fechas.
+**Situación:** Entre que el cliente pagó y que el webhook llegó a n8n, otra reserva (manual del operador responsable) ocupó las mismas fechas.
 
 **Comportamiento:**
 - `db_confirmar_reserva` Paso 2: encuentra reserva confirmada para esas fechas
 - Conflicto detectado → PRE_RESERVA → `conflicto_pendiente`
-- Notificación urgente a Franco y Vicky con todos los detalles
+- Notificación urgente al equipo responsable (Franco / Rodrigo / operador) con todos los detalles
 - PAGO queda en `pendiente` (el cliente pagó, no se le rechaza automáticamente)
 - El equipo resuelve: reasigna a otra cabaña o coordina reembolso
 
@@ -1231,7 +1242,7 @@ OUTPUT:
 
 ### Edge case 5 — Comprobante apócrifo validado por error
 
-**Situación:** Vicky aprueba un comprobante que resulta ser falso o de otro cliente.
+**Situación:** El operador responsable aprueba un comprobante que resulta ser falso o de otro cliente.
 
 **Comportamiento:**
 - La reserva se confirma normalmente
@@ -1254,20 +1265,20 @@ OUTPUT:
 - Franco evalúa: la reserva está en estado `activa`
 - `db_cancelar_reserva` acepta `activa` como estado válido para cancelar
 - Se calcula el cargo según política (configurable: puede ser el saldo total o una fracción)
-- Jennifer es notificada para preparar la cabaña si hay otra reserva entrante
+- El equipo de limpieza es notificado para preparar la cabaña si hay otra reserva entrante
 
 **Resultado:** El flujo maneja el caso aunque es atípico.
 
 ---
 
-### Edge case 7 — Jennifer no está disponible cuando llega la notificación
+### Edge case 7 — El equipo de limpieza no está disponible cuando llega la notificación
 
-**Situación:** El mensaje a Jennifer falla (WhatsApp no disponible, número incorrecto, etc.).
+**Situación:** El mensaje al equipo de limpieza falla (WhatsApp no disponible, número incorrecto, etc.).
 
 **Comportamiento:**
 - n8n detecta el error de envío (timeout o error de la API)
 - Registra el fallo en LOG_CAMBIOS
-- Notifica a Franco/Rodrigo: "No pude notificar a Jennifer para la reserva [ID]. Coordinar manualmente."
+- Notifica al equipo responsable definido en CONFIGURACION_GENERAL: "No pude notificar al equipo de limpieza para la reserva [ID]. Coordinar manualmente."
 - No reintenta automáticamente (para evitar spam si el número está mal)
 
 ---
@@ -1278,7 +1289,7 @@ OUTPUT:
 
 **Comportamiento actual:** El recálculo masivo nocturno no resuelve este caso por sí solo porque RESERVAS tiene la reserva en `activa` hasta que alguien la cambie.
 
-**Mitigación en esta etapa:** El mensaje a Jennifer al día del checkout incluye hora esperada. Si pasó la hora de checkout y la reserva sigue `activa`, n8n puede enviar un recordatorio al encargado de semana para que registre el checkout.
+**Mitigación en esta etapa:** El mensaje al equipo de limpieza al día del checkout incluye hora esperada. Si pasó la hora de checkout y la reserva sigue `activa`, n8n puede enviar un recordatorio al encargado de semana para que registre el checkout.
 
 **Configuración:**
 | Clave | Valor default | Descripción |
@@ -1292,7 +1303,7 @@ OUTPUT:
 **Situación:** El cliente transfirió $174.000 en vez de $175.000 (redondeo, error, o envío de otra cuenta con comisión).
 
 **Comportamiento:**
-- Vicky detecta la diferencia al validar el comprobante
+- El operador responsable detecta la diferencia al validar el comprobante
 - Si la diferencia es menor al umbral configurable (`diferencia_pago_tolerancia`, default: $5.000): puede aprobar igualmente y registrar la diferencia en `notas`
 - Si la diferencia supera el umbral: debe consultar a Franco antes de aprobar
 - El PAGO se registra con `monto_esperado` y `monto_recibido` distintos para trazabilidad
@@ -1326,7 +1337,7 @@ Los workflows internos de n8n tienen inputs y outputs documentados (Sección 23)
 
 - [ ] Cómo el bot gestiona el contexto conversacional entre múltiples mensajes (estructura de `contexto_json` en CONSULTAS)
 - [ ] Cuándo el bot llama a Claude API vs cuándo responde con plantillas fijas (FAQ sin IA)
-- [ ] Reglas de derivación a Vicky/Franco/Rodrigo
+- [ ] Reglas de derivación al operador responsable, Franco o Rodrigo
 - [ ] Tono, personalidad y límites del bot
 - [ ] Cómo el bot presenta el desglose de precios al cliente
 - [ ] Manejo de eventos especiales (Año Nuevo, etc.) en el flujo conversacional
