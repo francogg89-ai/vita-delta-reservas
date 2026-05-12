@@ -5,7 +5,7 @@
 **Fecha:** Mayo 2026
 **Estado:** Aprobado — activo
 **Tipo de documento:** Plan de ejecución (no arquitectura)
-**Depende de:** ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md v1.0 y ARQUITECTURA_ETAPA_5B_IMPLEMENTACION_VERTICAL_MINIMA.md v1.1
+**Depende de:** ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md v1.1 y ARQUITECTURA_ETAPA_5B_IMPLEMENTACION_VERTICAL_MINIMA.md v1.1
 **Autores:** Franco (titular) + Claude (copiloto técnico)
 
 ---
@@ -92,7 +92,8 @@ Los nombres deben ser exactamente iguales, incluyendo mayúsculas y guiones bajo
 Compartir cada Sheets con:
 - Cuenta personal de Franco: editor
 - Cuenta de Rodrigo: editor
-- Cuenta de Vicky: editor (con restricciones según permisos de Etapa 5A)
+- Cuenta del operador responsable de reservas: editor, si participa de la carga operativa o revisión inicial
+- Cuenta de Remo: editor, si participa de la carga operativa o revisión inicial
 
 La cuenta de servicio de n8n se agrega cuando se configura n8n en la jornada siguiente.
 
@@ -218,8 +219,10 @@ id_pago | id_prereserva | id_reserva | tipo | medio_pago | proveedor | cuenta_de
 
 #### DISPONIBILIDAD_CACHE
 ```
-id_cabana | fecha | estado | hora_checkin_minima | hora_checkin_maxima | hora_checkout_maxima | hora_checkout_minima | tipo_dia | temporada | es_ultimo_dia_bloque | minimo_noches | id_reserva_activa | id_prereserva_activa | recalculado_en
+id_cabana | fecha | estado | hora_checkin_minima | hora_checkin_maxima | hora_checkout_maxima | hora_checkout_minima | tipo_dia | temporada | es_ultimo_dia_bloque | minimo_noches | id_reserva_activa | id_prereserva_activa | tiene_checkout | id_reserva_checkout | tiene_checkin | id_reserva_checkin | recalculado_en
 ```
+
+> 18 columnas exactas. Las columnas `tiene_checkout`, `id_reserva_checkout`, `tiene_checkin` e `id_reserva_checkin` son operativas: reflejan movimientos confirmados del día para el equipo de limpieza. Se agregaron en 5A v1.1.
 
 #### BLOQUEOS
 ```
@@ -337,6 +340,45 @@ Los conceptos de TARIFAS que no están cargados en esta fase simplemente no se u
 
 ---
 
+### EVENTOS_ESPECIALES — 1 fila inicial
+
+Igual en DEV y TEST.
+
+| id_evento | nombre | fecha_desde | fecha_hasta | modo_precio | reglas_especiales | activa | source_event | created_at |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Año Nuevo 2026/2027 | 2026-12-30 | 2027-01-02 | paquetes_fijos | `{"minimo_noches":1,"checkout_maximo":"2027-01-02","nota":"Precios por paquete según combinación de noches"}` | TRUE | carga_inicial | |
+
+---
+
+### PAQUETES_EVENTO — filas iniciales (Año Nuevo, cabañas grandes)
+
+Cargar con `precio_total = 0` como placeholder. Con ese valor el motor retorna `paquete_sin_precio` y no los vende automáticamente. Franco carga los precios reales antes de la temporada.
+
+| id_paquete | id_evento | tipo_cabana | nombre_paquete | fecha_in | fecha_out | precio_total | personas_max | incluye | notas | activo | created_at |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 1 | grande | Solo 31 dic | 2026-12-31 | 2027-01-01 | 0 | | | | TRUE | |
+| 2 | 1 | grande | 30+31 dic | 2026-12-30 | 2027-01-01 | 0 | | | | TRUE | |
+| 3 | 1 | grande | 31 dic + 1 ene | 2026-12-31 | 2027-01-02 | 0 | | | | TRUE | |
+| 4 | 1 | grande | 30+31+1 | 2026-12-30 | 2027-01-02 | 0 | | | | TRUE | |
+
+Agregar las filas equivalentes para `tipo_cabana = chica` cuando Franco defina los paquetes para cabañas chicas.
+
+> **Nota operativa:** Los paquetes existen en el Sheets pero no son vendibles hasta que `precio_total > 0`. El sistema los ignora automáticamente para cotización y derivación automática. No requieren ninguna acción adicional hasta que se acerque la temporada.
+
+---
+
+### FERIADOS — carga mínima inicial
+
+Cargar al menos los feriados necesarios para el período de prueba.
+
+- **En DEV:** cargar los feriados que caigan dentro del rango de fechas usado en los casos de prueba. Pueden ser ficticios pero con fechas reales.
+- **En TEST:** cargar los feriados nacionales del año en curso para el período de prueba.
+- Para Año Nuevo, cargar 31/12 y 01/01 con `tipo = ano_nuevo` si se quiere probar la clasificación operativa de esos días en DISPONIBILIDAD_CACHE.
+
+> **Importante:** La carga en FERIADOS no define precios. Solo clasifica el `tipo_dia` en la cache (`feriado`, `ano_nuevo`). Los precios de Año Nuevo viven exclusivamente en EVENTOS_ESPECIALES y PAQUETES_EVENTO.
+
+---
+
 ### TEMPORADAS — 2 filas iniciales
 
 Aplican igual en DEV y TEST. Revisar que las fechas cubran el período en el que se van a ejecutar las pruebas.
@@ -369,14 +411,12 @@ Esta hoja tiene exactamente 3 columnas: `clave`, `valor`, `descripcion`. Cargar 
 
 | clave | valor | descripcion |
 |---|---|---|
-| escalonamiento_activo | true | Master switch del escalonamiento |
-| escalonamiento_umbral_checkout | 3 | Checkouts simultáneos que activan escalonamiento de checkin |
-| escalonamiento_umbral_checkin | 3 | Checkins simultáneos que activan escalonamiento de checkout |
-| escalonamiento_minutos | 45 | Minutos de ajuste por cabaña adicional |
+| escalonamiento_activo | true | Master switch del escalonamiento de check-in |
+| escalonamiento_umbral_checkins_dia | 3 | Cantidad de check-ins del mismo día que mantienen horario base antes de escalonar |
+| escalonamiento_minutos | 45 | Minutos de retraso por cada check-in sobre el umbral |
 | escalonamiento_checkin_max | 22:00 | Límite máximo de check-in por escalonamiento |
-| escalonamiento_checkout_min | 09:00 | Límite mínimo de checkout por escalonamiento |
-| escalonamiento_checkout_max_minutos | 60 | Máximo minutos de adelanto en checkout |
-| escalonamiento_checkout_tramo_minutos | 30 | Minutos por tramo en escalonamiento de checkout |
+
+> **Claves eliminadas en 5A v1.1 — NO cargar:** `escalonamiento_umbral_checkout`, `escalonamiento_umbral_checkin`, `escalonamiento_checkout_min`, `escalonamiento_checkout_max_minutos`, `escalonamiento_checkout_tramo_minutos`. El escalonamiento automático de checkout no existe en esta versión.
 
 **Flexibilidad del cliente:**
 
@@ -421,7 +461,7 @@ Esta hoja tiene exactamente 3 columnas: `clave`, `valor`, `descripcion`. Cargar 
 | prereserva_expiracion_minutos | 60 | Tiempo de vida de una PRE_RESERVA sin pago |
 | prereserva_notificacion_vencimiento_umbral | 200000 | Monto desde el que se notifica al vencer |
 | prereserva_recordatorio_minutos_antes | 15 | Minutos antes del vencimiento para recordatorio |
-| prereserva_pago_en_revision_alerta_horas | 2 | Horas con pago en revisión antes de escalar alerta a Franco/Rodrigo |
+| prereserva_pago_en_revision_alerta_horas | 2 | Horas con pago en revisión antes de escalar alerta al equipo responsable |
 | diferencia_pago_tolerancia | 5000 | Diferencia máxima de monto aceptable sin consultar |
 
 **Checkout tardío:**
@@ -469,7 +509,7 @@ Esta hoja tiene exactamente 3 columnas: `clave`, `valor`, `descripcion`. Cargar 
 
 | clave | valor | descripcion |
 |---|---|---|
-| alerta_derivacion_tasa_umbral | 0.40 | Tasa de derivación que dispara alerta a Franco |
+| alerta_derivacion_tasa_umbral | 0.40 | Tasa de derivación que dispara alerta al equipo responsable |
 | alerta_errores_api_por_hora | 5 | Errores técnicos por hora que disparan alerta |
 | alerta_costo_diario_usd | 5 | Costo diario estimado que dispara alerta |
 
@@ -517,12 +557,14 @@ Los porcentajes deben sumar 100. Decisión de Franco antes de cargar.
 Las siguientes hojas deben existir pero no tener datos al arrancar:
 
 ```
-HUÉSPEDES · FERIADOS · EVENTOS_ESPECIALES · PAQUETES_EVENTO
+HUÉSPEDES
 CONSULTAS · PRE_RESERVAS · RESERVAS · PAGOS
 DISPONIBILIDAD_CACHE · BLOQUEOS · OVERRIDES_OPERATIVOS
 GASTOS · DESCUENTOS · LOG_CAMBIOS
 VISTA_CALENDARIO · VISTA_PRERESERVAS_ACTIVAS · VISTA_OCUPACION
 ```
+
+> **EVENTOS_ESPECIALES y PAQUETES_EVENTO no están en la lista de vacías.** Según 5A (Checklist Fase 2) y 5B (Sección 4), deben cargarse con el evento Año Nuevo 2026/2027 y sus paquetes respectivos. Los paquetes se cargan con `precio_total = 0` como placeholder. Con ese valor el motor no puede cotizarlos ni venderlos automáticamente (retorna `paquete_sin_precio`), pero la estructura queda lista para que Franco cargue los precios reales antes de la temporada. Ver datos de Fase 3 arriba.
 
 `DISPONIBILIDAD_CACHE` y `LOG_CAMBIOS` se poblan exclusivamente con el primer workflow de n8n. Si tienen datos cargados manualmente antes de eso, el primer recálculo va a producir resultados inconsistentes.
 
@@ -556,7 +598,7 @@ Configurar validaciones de lista en las siguientes columnas. En Google Sheets: s
 | PAGOS | `es_automatico` | `TRUE, FALSE` |
 | BLOQUEOS | `motivo` | `mantenimiento, uso_propio, tormenta, overbooking, otro` |
 | BLOQUEOS | `activo` | `TRUE, FALSE` |
-| OVERRIDES_OPERATIVOS | `tipo_override` | `escalonamiento_activo, escalonamiento_umbral_checkout, escalonamiento_umbral_checkin, hora_checkin, hora_checkout, checkin_flexible, checkout_flexible, minimo_noches, disponibilidad_bloqueada` |
+| OVERRIDES_OPERATIVOS | `tipo_override` | `escalonamiento_activo, escalonamiento_umbral_checkins_dia, hora_checkin, hora_checkout, checkin_flexible, checkout_flexible, minimo_noches, disponibilidad_bloqueada` |
 | OVERRIDES_OPERATIVOS | `activo` | `TRUE, FALSE` |
 | CONSULTAS | `canal` | `whatsapp, instagram, web, manual` |
 | CONSULTAS | `estado_conversacion` | `inicio, eligiendo_fechas, cotizando, esperando_pago, pago_en_proceso, cerrada, derivada_a_humano` |
@@ -564,12 +606,18 @@ Configurar validaciones de lista en las siguientes columnas. En Google Sheets: s
 | DISPONIBILIDAD_CACHE | `tipo_dia` | `semana, finde, feriado, ano_nuevo` |
 | DISPONIBILIDAD_CACHE | `temporada` | `alta, media, baja` |
 | DISPONIBILIDAD_CACHE | `es_ultimo_dia_bloque` | `TRUE, FALSE` |
+| DISPONIBILIDAD_CACHE | `tiene_checkout` | `TRUE, FALSE` |
+| DISPONIBILIDAD_CACHE | `tiene_checkin` | `TRUE, FALSE` |
 | FERIADOS | `tipo` | `nacional, ano_nuevo, local` |
 | FERIADOS | `activo` | `TRUE, FALSE` |
+| EVENTOS_ESPECIALES | `modo_precio` | `paquetes_fijos, precio_por_noche, consultar` |
+| EVENTOS_ESPECIALES | `activa` | `TRUE, FALSE` |
+| PAQUETES_EVENTO | `tipo_cabana` | `grande, chica, todas` |
+| PAQUETES_EVENTO | `activo` | `TRUE, FALSE` |
 | CUENTAS_COBRO | `medio` | `transferencia_bancaria, transferencia_mp, cripto, efectivo` |
 | CUENTAS_COBRO | `activa` | `TRUE, FALSE` |
 | PLANTILLAS_MENSAJES | `canal` | `whatsapp, instagram, todos` |
-| PLANTILLAS_MENSAJES | `destinatario` | `huesped, equipo, jennifer, franco` |
+| PLANTILLAS_MENSAJES | `destinatario` | `huesped, equipo, limpieza, franco` |
 | PLANTILLAS_MENSAJES | `activa` | `TRUE, FALSE` |
 | GASTOS | `categoria` | `limpieza, mantenimiento, servicios, marketing, otro` |
 | GASTOS | `reembolsable` | `TRUE, FALSE` |
@@ -646,7 +694,7 @@ PROD no se configura en esta jornada. Se documenta aquí como referencia para cu
 
 **Excepción documentada en PROD:**
 
-Las transiciones manuales permitidas por la arquitectura (RESERVAS: `confirmada → activa` y `activa → completada`) las ejecutan Franco o Vicky con acceso de editor. Cualquier otra modificación manual en PROD debe documentarse en LOG_CAMBIOS con el campo `modificado_por` = nombre del operador y `source_event` = `correccion_manual`.
+Las transiciones manuales permitidas por la arquitectura (RESERVAS: `confirmada → activa` y `activa → completada`) las ejecutan Franco, Rodrigo u operador responsable autorizado con acceso de editor. Cualquier otra modificación manual en PROD debe documentarse en LOG_CAMBIOS con el campo `modificado_por` = nombre del operador y `source_event` = `correccion_manual`.
 
 ---
 
@@ -680,7 +728,7 @@ Antes de declarar los Sheets listos para n8n, verificar manualmente cada punto d
 - [ ] CABAÑAS tiene exactamente 5 filas con `activa = TRUE` y `bloqueada = FALSE`
 - [ ] TARIFAS tiene al menos 10-11 filas, todas con `activa = TRUE` y precio mayor a 0
 - [ ] TEMPORADAS cubre la fecha de hoy (sin gaps entre rangos)
-- [ ] CONFIGURACION_GENERAL tiene todas las claves de la Fase 3 (contar: deben ser al menos 40 filas)
+- [ ] CONFIGURACION_GENERAL tiene todas las claves de la Fase 3, alineadas con 5A v1.1
 - [ ] La clave `sheets_url` en CONFIGURACION_GENERAL tiene la URL del Sheets TEST cargada
 - [ ] La clave `encargado_ciclo_inicio_fecha` tiene la fecha real de inicio del ciclo
 - [ ] Los números de WhatsApp en CONFIGURACION_GENERAL tienen el formato internacional (+549...)
@@ -693,6 +741,11 @@ Antes de declarar los Sheets listos para n8n, verificar manualmente cada punto d
 - [ ] DISPONIBILIDAD_CACHE está vacía (sin ninguna fila de datos)
 - [ ] LOG_CAMBIOS está vacío
 - [ ] CONSULTAS, PRE_RESERVAS, RESERVAS, PAGOS están vacías
+
+### Verificaciones de datos iniciales especiales
+
+- [ ] EVENTOS_ESPECIALES tiene 1 fila (Año Nuevo 2026/2027)
+- [ ] PAQUETES_EVENTO tiene al menos 4 filas con `precio_total = 0` y `activo = TRUE`
 
 ### Verificaciones de validaciones
 
@@ -714,7 +767,7 @@ Antes de declarar los Sheets listos para n8n, verificar manualmente cada punto d
 
 **No usar tildes en nombres de columnas.** La columna `id_huésped` va a romper las queries de n8n. La correcta es `id_huesped`. Lo mismo aplica a todas las columnas: `numero` no `número`, `cabana` no `cabaña`.
 
-**No dejar precios en 0 en TARIFAS en DEV ni TEST.** El precio 0 está reservado exclusivamente para `PAQUETES_EVENTO`. En cualquier otra hoja, el motor de precios retorna error `paquete_sin_precio` al calcular una estadía, lo que bloquea la creación de PRE_RESERVAS.
+**No dejar precios en 0 en TARIFAS en DEV ni TEST.** El precio 0 está reservado exclusivamente para `PAQUETES_EVENTO` (paquetes cargados como placeholder antes de definir precios reales de temporada). En TARIFAS, el precio 0 produce errores silenciosos o comportamientos inesperados en el motor de precios, que bloqueará la creación de PRE_RESERVAS con el error `paquete_sin_precio`.
 
 **No cargar datos en DISPONIBILIDAD_CACHE ni en LOG_CAMBIOS antes del primer workflow.** Esas hojas las pobla exclusivamente n8n. Cualquier dato manual ahí produce inconsistencias en el primer recálculo.
 
@@ -740,11 +793,33 @@ Este workflow se implementa antes que los demás porque todos los otros lo llama
 
 **Alcance del primer workflow:**
 - Input: lista de cabañas y lista de fechas (o vacío para scope total)
-- Lógica: consulta BLOQUEOS → RESERVAS → PRE_RESERVAS → determina estado → upsert en DISPONIBILIDAD_CACHE
 - Output: `{ ok: true, filas_actualizadas: N, duracion_ms: N }`
 - Primera ejecución manual: scope total (todas las cabañas, próximos 60 días)
 
-**Condición para considerar el Sheets listo:** Todos los checks de la Fase 6 están marcados, y al ejecutar `db_recalcular_disponibilidad` con scope total, DISPONIBILIDAD_CACHE queda poblada con filas para las 5 cabañas × 60 días sin errores en LOG_CAMBIOS.
+**Orden interno aprobado del workflow (5B, Sección 12):**
+
+Para cada par `(id_cabana, fecha)` del producto cartesiano de inputs:
+
+1. **Inicializar** todos los campos de la fila en vacío antes de calcular. El upsert final siempre escribe todos los campos; nunca deja valores residuales.
+2. **PASO 1 — Detectar movimientos operativos confirmados del día:** calcular `tiene_checkout` / `id_reserva_checkout` y `tiene_checkin` / `id_reserva_checkin` a partir de RESERVAS confirmadas/activas. Se calculan siempre primero, independientemente del estado final de la noche; son señales para el equipo de limpieza y deben conservarse incluso si hay bloqueo.
+3. **PASO 2 — Verificar si la noche está ocupada por una RESERVA** (intervalo `[fecha_checkin, fecha_checkout)`). Si sí: `estado = ocupada`, `id_reserva_activa` = ID de la reserva → ir a PASO 3.
+4. **PASO 3 — Verificar BLOQUEOS activos** (`fecha_desde <= fecha_actual < fecha_hasta`):
+   - Si hay BLOQUEO **y** `estado = ocupada` (hay RESERVA): RESERVAS prevalece. La noche sigue `ocupada`, `id_reserva_activa` se conserva. Registrar warning en LOG_CAMBIOS. → ir a PASO 5.
+   - Si hay BLOQUEO **y** no hay RESERVA: verificar si existe PRE_RESERVA vigente afectada por el bloqueo:
+     - Si existe PRE_RESERVA vigente: `estado = bloqueada`, conservar `id_prereserva_activa`. Registrar warning, notificar al equipo responsable. → ir a PASO 5.
+     - Si no existe PRE_RESERVA: `estado = bloqueada`, `id_prereserva_activa` vacío. → ir a PASO 5.
+5. **PASO 4 — Verificar PRE_RESERVAS vigentes** (solo si llegó hasta aquí: sin RESERVA ocupando la noche, sin BLOQUEO). Si existe PRE_RESERVA en `pendiente_pago` con `expira_en > now()` que cubra la noche: `estado = ocupada`, `id_prereserva_activa` = ID. → ir a PASO 5.
+6. **PASO 4B — Determinar estado final** (llegó hasta aquí: sin bloqueo, sin RESERVA, sin PRE_RESERVA vigente). Si `tiene_checkout = TRUE`: `estado = checkout_disponible`. Si no: `estado = disponible`. En ambos casos calcular horarios y restricciones base.
+7. **PASO 5 — Upsert en DISPONIBILIDAD_CACHE.** Siempre escribir explícitamente todos los 18 campos; nunca parciales.
+8. **PASO FINAL — Un único registro en LOG_CAMBIOS** por ejecución del workflow (no por fila).
+
+**Puntos críticos de implementación:**
+- `sistema_expirar_prereservas` usa `expira_en <= NOW()` para detectar PRE_RESERVAS vencidas.
+- Pagos tardíos sobre PRE_RESERVAS vencidas quedan en `en_revision` para revisión manual; nunca se confirman automáticamente.
+- Si el Formulario B (aprobación del operador) detecta rechazo de pago: actualizar `PAGOS.estado = rechazado`, completar `motivo_rechazo`, registrar LOG_CAMBIOS, y **no** llamar a `db_confirmar_reserva`.
+- El Caso 15 (intentar confirmar una PRE_RESERVA ya vencida) debe estar contemplado en las pruebas de TEST: retorna `{ requiere_revision_manual: true, motivo: 'prereserva_vencida' }`, no crea RESERVA, mantiene el PAGO en `en_revision`.
+
+**Condición para considerar el Sheets listo:** Todos los checks de la Fase 6 están marcados, y al ejecutar `db_recalcular_disponibilidad` con scope total, DISPONIBILIDAD_CACHE queda poblada con filas para las 5 cabañas × 60 días (300 filas) sin errores en LOG_CAMBIOS.
 
 La especificación completa del workflow está en `ARQUITECTURA_ETAPA_5B_IMPLEMENTACION_VERTICAL_MINIMA.md`, Sección 12.
 
@@ -762,9 +837,9 @@ Este checklist se completa al final de la jornada de implementación del Sheets.
 
 ### Hojas creadas
 
-- [ ] Las 21 hojas fuente existen en DEV con nombre exacto en MAYUSCULAS_GUION_BAJO
+- [ ] Las 21 hojas fuente existen en DEV con el nombre exacto definido en Fase 2
 - [ ] Las 3 hojas de vista existen en DEV (VISTA_CALENDARIO, VISTA_PRERESERVAS_ACTIVAS, VISTA_OCUPACION)
-- [ ] Las 21 hojas fuente existen en TEST con nombre exacto en MAYUSCULAS_GUION_BAJO
+- [ ] Las 21 hojas fuente existen en TEST con el nombre exacto definido en Fase 2
 - [ ] Las 3 hojas de vista existen en TEST
 
 ### Encabezados cargados
@@ -780,7 +855,10 @@ Este checklist se completa al final de la jornada de implementación del Sheets.
 - [ ] TARIFAS: mínimo 10 filas cargadas en DEV (precios ficticios > 0)
 - [ ] TARIFAS: mínimo 10 filas cargadas en TEST (precios reales > 0)
 - [ ] TEMPORADAS: 2 filas cargadas, cubre la fecha actual, en DEV y TEST
-- [ ] CONFIGURACION_GENERAL: todas las claves cargadas en DEV y TEST (mínimo 40 filas)
+- [ ] FERIADOS: cargados los feriados necesarios para el período de prueba en DEV y TEST
+- [ ] EVENTOS_ESPECIALES: 1 fila (Año Nuevo 2026/2027) cargada en DEV y TEST
+- [ ] PAQUETES_EVENTO: al menos 4 filas con `precio_total = 0` cargadas en DEV y TEST
+- [ ] CONFIGURACION_GENERAL: todas las claves de la Fase 3 cargadas en DEV y TEST, alineadas con 5A v1.1
 - [ ] CONFIGURACION_GENERAL: clave `sheets_url` tiene la URL de cada Sheets correspondiente
 - [ ] CONFIGURACION_GENERAL: claves de WhatsApp tienen números reales
 - [ ] CUENTAS_COBRO: al menos 1 fila activa en DEV y TEST
@@ -795,7 +873,7 @@ Este checklist se completa al final de la jornada de implementación del Sheets.
 - [ ] Validaciones de lista configuradas en PAGOS (tipo, medio_pago, estado, es_automatico)
 - [ ] Validaciones de lista configuradas en TARIFAS (tipo_cabana, concepto, activa)
 - [ ] Validaciones de lista configuradas en BLOQUEOS (motivo, activo)
-- [ ] Validaciones de lista configuradas en DISPONIBILIDAD_CACHE (estado, tipo_dia, temporada)
+- [ ] Validaciones de lista configuradas en DISPONIBILIDAD_CACHE (estado, tipo_dia, temporada, tiene_checkout, tiene_checkin)
 - [ ] Validaciones de lista configuradas en LOG_CAMBIOS (nivel)
 - [ ] Validaciones de lista configuradas en las demás hojas de la Fase 4
 
@@ -814,6 +892,8 @@ Este checklist se completa al final de la jornada de implementación del Sheets.
 - [ ] DISPONIBILIDAD_CACHE está vacía (sin datos)
 - [ ] LOG_CAMBIOS está vacío
 - [ ] CONSULTAS, PRE_RESERVAS, RESERVAS, PAGOS están vacías
+- [ ] EVENTOS_ESPECIALES tiene 1 fila con `activa = TRUE`
+- [ ] PAQUETES_EVENTO tiene al menos 4 filas con `precio_total = 0` y `activo = TRUE`
 - [ ] TEMPORADAS no tiene gaps que dejen fechas sin cobertura
 - [ ] TARIFAS no tiene ningún precio igual a 0
 
