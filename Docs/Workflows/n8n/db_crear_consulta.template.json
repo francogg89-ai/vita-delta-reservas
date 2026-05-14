@@ -1,0 +1,544 @@
+{
+  "name": "db_crear_consulta",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "0b001372-f01e-4ee7-b509-e446942a1195",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1536,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 1 — Resolver Input\n// ═══════════════════════════════════════════════════════════════\n// ALCANCE: db_crear_consulta solo registra o recupera una consulta.\n// NO consulta disponibilidad.\n// NO bloquea fechas.\n// NO crea pre-reservas.\n// Esas responsabilidades son de db_crear_prereserva.\n//\n// ⚠️  SHEETS_ID — reemplazar __SHEETS_ID__ con el ID real del Sheets\n// Si el Sheet cambia, actualizar aquí y en todos los nodos\n// Google Sheets del workflow.\n// Valor actual: __SHEETS_ID__\n//\n// ⚠️  CREDENCIALES\n// credential id (__CREDENTIAL_ID__) específico de esta instancia n8n.\n// NO portable. Sanitizar antes de subir a GitHub:\n//   - \"id\" en cada bloque credentials → \"__CREDENTIAL_ID__\"\n//   - SHEETS_ID → \"__SHEETS_ID__\"\n//\n// ⚠️  ID_CONSULTA — estrategia actual: max + 1\n// Para DEV y baja concurrencia esto es suficiente.\n// Para alta concurrencia o producción con múltiples ejecuciones\n// simultáneas, migrar a id tipo CON-<timestamp> o UUID para\n// eliminar la race condition entre lectura del max y escritura.\n// ═══════════════════════════════════════════════════════════════\n\nconst SHEETS_ID      = '__SHEETS_ID__'; // __ENTORNO__\nconst CANALES_VALIDOS = ['whatsapp', 'instagram', 'web', 'manual'];\n\n// ── DEV_INPUT ─────────────────────────────────────────────────\n// Editar estos valores para cada prueba en DEV.\n// Se usan SOLO si el Manual Trigger viene vacío (sin payload).\n// En producción el input vendrá del Webhook con datos reales.\nconst DEV_INPUT = {\n  canal:               'whatsapp',\n  id_contacto_externo: '__TELEFONO_EJEMPLO__',\n  id_huesped:          null,\n  fecha_in_tentativa:  '2026-07-01',\n  fecha_out_tentativa: '2026-07-03',\n  personas_tentativa:  2,\n  source_event:        'manual_dev'\n};\n// ─────────────────────────────────────────────────────────────\n\n// Leer input real del trigger; si viene vacío usar DEV_INPUT\nconst raw            = $input.first()?.json ?? {};\nconst usandoDEVInput = !raw.canal && !raw.id_contacto_externo;\nconst input          = usandoDEVInput ? DEV_INPUT : raw;\n\nconst canal               = String(input.canal               ?? '').trim();\nconst id_contacto_externo = String(input.id_contacto_externo ?? '').trim();\nconst id_huesped          = input.id_huesped          ?? null;\nconst fecha_in_tentativa  = input.fecha_in_tentativa  ?? null;\nconst fecha_out_tentativa = input.fecha_out_tentativa ?? null;\nconst personas_tentativa  = input.personas_tentativa  ?? null;\nconst source_event        = String(input.source_event ?? 'manual_dev').trim();\n\n// ── PASO 1: Validaciones ─────────────────────────────────────\nconst errores = [];\n\nif (!CANALES_VALIDOS.includes(canal)) {\n  errores.push(`canal inválido: '${canal}'. Valores aceptados: ${CANALES_VALIDOS.join(', ')}`);\n}\n\nif (!id_contacto_externo) {\n  errores.push('id_contacto_externo es obligatorio y no puede estar vacío');\n}\n\nif (fecha_in_tentativa && fecha_out_tentativa) {\n  const fi = new Date(fecha_in_tentativa  + 'T12:00:00Z');\n  const fo = new Date(fecha_out_tentativa + 'T12:00:00Z');\n  if (isNaN(fi.getTime()))  errores.push('fecha_in_tentativa inválida');\n  if (isNaN(fo.getTime()))  errores.push('fecha_out_tentativa inválida');\n  if (!isNaN(fi.getTime()) && !isNaN(fo.getTime()) && fo <= fi) {\n    errores.push('fecha_out_tentativa debe ser posterior a fecha_in_tentativa');\n  }\n}\n\nif (errores.length > 0) {\n  // Retornar error sin _validado:true para que el IF lo corte\n  return [{ json: {\n    ok:       false,\n    error:    'input_invalido',\n    detalle:  errores,\n    _validado: false\n  }}];\n}\n\n// ── Normalizar ────────────────────────────────────────────────\nconst id_contacto_normalizado = id_contacto_externo.includes('@')\n  ? id_contacto_externo.toLowerCase()\n  : id_contacto_externo;\n\nreturn [{ json: {\n  SHEETS_ID,\n  canal,\n  id_contacto_externo: id_contacto_normalizado,\n  id_huesped,\n  fecha_in_tentativa:  fecha_in_tentativa  ?? '',\n  fecha_out_tentativa: fecha_out_tentativa ?? '',\n  personas_tentativa:  personas_tentativa  ?? '',\n  source_event,\n  ts_inicio:         new Date().toISOString(),\n  _validado:         true,\n  _usando_dev_input: usandoDEVInput\n}}];"
+      },
+      "id": "3e9edc74-8202-4dd0-96ed-eab65378ebfa",
+      "name": "Resolver Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1328,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-validado",
+              "leftValue": "={{ $json._validado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2bd9bc17-5868-4714-9eb5-5b9921e9cb7c",
+      "name": "IF: input válido",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input inválido — devolver output final consistente.\n// NO escribe LOG_CAMBIOS.\nconst data = $input.first().json;\nreturn [{ json: {\n  ok:      data.ok,\n  error:   data.error,\n  detalle: data.detalle\n}}];"
+      },
+      "id": "1fdfe2a2-590d-4034-9908-005e6e68d5c5",
+      "name": "Error: input inválido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "CONSULTAS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "6984d1cc-c318-4c65-b3dd-7e52dab7b205",
+      "name": "Leer CONSULTAS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -880,
+        144
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "c9b6703a-9454-45dd-b291-c5a882681896",
+      "name": "Agg CONSULTAS",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -656,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 2 — Verificar Idempotencia\n// ═══════════════════════════════════════════════════════════════\n// PASO 2: Buscar si existe una CONSULTA activa RECIENTE para\n// este id_contacto_externo.\n//\n// Condiciones para reutilizar una consulta existente:\n//   1. id_contacto_externo coincide\n//   2. estado_conversacion NOT IN ('cerrada', 'derivada_a_humano')\n//   3. updated_at o ultimo_mensaje_at o created_at dentro de 24 hs\n//\n// Si existe consulta activa reciente → retornarla (idempotencia)\n// Si existe consulta activa pero vieja → crear nueva de todas formas\n// Si no existe ninguna → crear nueva\n//\n// PASO 3: Calcular próximo id_consulta = max + 1\n// ⚠️  Race condition posible en alta concurrencia.\n// Para producción con carga alta, migrar a CON-<timestamp> o UUID.\n//\n// ROBUSTEZ — hoja CONSULTAS vacía:\n// Agg CONSULTAS puede devolver cualquiera de estos casos:\n//   - .json.data inexistente  → tratado como []\n//   - .json.data = []         → sin filas\n//   - .json.data = [{}]       → fila vacía por alwaysOutputData\n//   - .json.data = [{...}]    → filas reales\n// En todos los casos, consultas queda como array limpio de filas\n// con al menos un campo no vacío (id_consulta o id_contacto_externo).\n// Resultado cuando hoja vacía: consultas = [], maxId = 0, nuevo_id = 1.\n// ═══════════════════════════════════════════════════════════════\n\nconst inputData = $('Resolver Input').first().json;\n\n// ── Normalizar el output de Agg CONSULTAS ────────────────────\n// Defensivo ante todos los casos posibles de hoja vacía.\nconst aggJson = $('Agg CONSULTAS').first()?.json ?? {};\nconst rawData = aggJson.data;\n\nconst consultas = (Array.isArray(rawData) ? rawData : [])\n  .filter(c => {\n    // Descartar nulls, undefined y objetos completamente vacíos\n    if (!c || typeof c !== 'object') return false;\n    const keys = Object.keys(c);\n    if (keys.length === 0) return false;\n    // Descartar filas sin ningún campo identificable\n    // (caso: alwaysOutputData inyecta {} que puede tener keys vacías)\n    const tieneContenido = keys.some(k => {\n      const v = c[k];\n      return v !== null && v !== undefined && String(v).trim() !== '';\n    });\n    return tieneContenido;\n  });\n\n// ── Idempotencia con ventana de 24 horas ─────────────────────\nconst ESTADOS_INACTIVOS = ['cerrada', 'derivada_a_humano'];\nconst VENTANA_MS        = 24 * 60 * 60 * 1000;\nconst ahora             = new Date();\nconst limite            = new Date(ahora.getTime() - VENTANA_MS);\n\nconst consultaExistente = consultas.find(c => {\n  // Condición 1: mismo contacto\n  if (String(c.id_contacto_externo ?? '').trim() !== inputData.id_contacto_externo) return false;\n\n  // Condición 2: estado activo\n  if (ESTADOS_INACTIVOS.includes(String(c.estado_conversacion ?? '').trim())) return false;\n\n  // Condición 3: reciente (dentro de 24 horas)\n  const tsStr = c.updated_at || c.ultimo_mensaje_at || c.created_at || '';\n  if (!tsStr || String(tsStr).trim() === '') return false;\n  const ts = new Date(String(tsStr).trim());\n  if (isNaN(ts.getTime())) return false;\n  return ts >= limite;\n});\n\nif (consultaExistente) {\n  return [{ json: {\n    _accion:             'reutilizar_existente',\n    id_consulta:         parseInt(String(consultaExistente.id_consulta), 10),\n    estado_conversacion: consultaExistente.estado_conversacion,\n    canal:               consultaExistente.canal,\n    id_contacto_externo: consultaExistente.id_contacto_externo,\n    source_event:        inputData.source_event\n  }}];\n}\n\n// ── Calcular próximo id_consulta ──────────────────────────────\nconst ids = consultas\n  .map(c => parseInt(String(c.id_consulta ?? ''), 10))\n  .filter(n => !isNaN(n) && n > 0);\nconst maxId             = ids.length > 0 ? Math.max(...ids) : 0;\nconst nuevo_id_consulta = maxId + 1;\n\nreturn [{ json: {\n  _accion:            'crear_nueva',\n  inputData,\n  nuevo_id_consulta\n}}];"
+      },
+      "id": "7257a947-4ace-4642-b23a-8467bb7d92a7",
+      "name": "Verificar Idempotencia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-crear",
+              "leftValue": "={{ $json._accion }}",
+              "rightValue": "crear_nueva",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b9a1dc5c-21a0-48de-855b-5bbe1cce9694",
+      "name": "IF: crear nueva",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Rama: consulta existente reutilizada ─────────────────────\n// Preparar LOG y output unificado.\nconst data  = $input.first().json;\nconst ahora = new Date();\n\nreturn [{ json: {\n  _para_log: {\n    id_log:           `LOG-CONSULTA-${ahora.getTime()}`,\n    fecha_hora:        ahora.toISOString(),\n    tabla_afectada:   'CONSULTAS',\n    id_registro:      String(data.id_consulta),\n    campo_modificado: 'consulta_reutilizada',\n    valor_anterior:   '',\n    valor_nuevo:      String(data.id_consulta),\n    modificado_por:   'n8n',\n    source_event:     data.source_event,\n    nivel:            'info',\n    detalle: JSON.stringify({\n      id_consulta:         data.id_consulta,\n      canal:               data.canal,\n      id_contacto_externo: data.id_contacto_externo,\n      motivo:              'consulta_activa_reciente_existente'\n    })\n  },\n  _output: {\n    ok:                  true,\n    es_nueva:            false,\n    id_consulta:         data.id_consulta,\n    estado_conversacion: data.estado_conversacion,\n    accion:              'existente_reutilizada',\n    source_event:        data.source_event\n  }\n}}];"
+      },
+      "id": "b8224840-a534-4a62-a993-0cfd1585fe72",
+      "name": "Prep Reutilizar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "LOG_CAMBIOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_log": "={{ $json._para_log.id_log }}",
+            "fecha_hora": "={{ $json._para_log.fecha_hora }}",
+            "tabla_afectada": "={{ $json._para_log.tabla_afectada }}",
+            "id_registro": "={{ $json._para_log.id_registro }}",
+            "campo_modificado": "={{ $json._para_log.campo_modificado }}",
+            "valor_anterior": "={{ $json._para_log.valor_anterior }}",
+            "valor_nuevo": "={{ $json._para_log.valor_nuevo }}",
+            "modificado_por": "={{ $json._para_log.modificado_por }}",
+            "source_event": "={{ $json._para_log.source_event }}",
+            "nivel": "={{ $json._para_log.nivel }}",
+            "detalle": "={{ $json._para_log.detalle }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "9a8c71fe-c272-4565-8329-d7b00b7855c4",
+      "name": "LOG Reutilizar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        304
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Output final — rama reutilización\nconst data = $('Prep Reutilizar').first().json;\nreturn [{ json: data._output }];"
+      },
+      "id": "602086c4-415b-49ad-9c04-2ef2b1a7f5ca",
+      "name": "Output Reutilizar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Rama: crear consulta nueva ───────────────────────────────\nconst data  = $input.first().json;\nconst { inputData, nuevo_id_consulta } = data;\nconst ahora = new Date().toISOString();\n\nreturn [{ json: {\n  id_consulta:          nuevo_id_consulta,\n  canal:                inputData.canal,\n  id_contacto_externo:  inputData.id_contacto_externo,\n  id_huesped:           inputData.id_huesped ?? '',\n  estado_conversacion:  'inicio',\n  id_cabana_tentativa:  '',\n  fecha_in_tentativa:   inputData.fecha_in_tentativa  ?? '',\n  fecha_out_tentativa:  inputData.fecha_out_tentativa ?? '',\n  personas_tentativa:   inputData.personas_tentativa  ?? '',\n  ultimo_mensaje_at:    ahora,\n  contexto_json:        '',\n  tokens_json:          '',\n  motivo_derivacion:    '',\n  source_event:         inputData.source_event,\n  created_at:           ahora,\n  updated_at:           ahora\n}}];"
+      },
+      "id": "65434df8-cbbf-4cbf-b438-fb02dbddfad8",
+      "name": "Preparar Fila CONSULTAS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "CONSULTAS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_consulta": "={{ $json.id_consulta }}",
+            "canal": "={{ $json.canal }}",
+            "id_contacto_externo": "={{ $json.id_contacto_externo }}",
+            "id_huesped": "={{ $json.id_huesped }}",
+            "estado_conversacion": "={{ $json.estado_conversacion }}",
+            "id_cabana_tentativa": "={{ $json.id_cabana_tentativa }}",
+            "fecha_in_tentativa": "={{ $json.fecha_in_tentativa }}",
+            "fecha_out_tentativa": "={{ $json.fecha_out_tentativa }}",
+            "personas_tentativa": "={{ $json.personas_tentativa }}",
+            "ultimo_mensaje_at": "={{ $json.ultimo_mensaje_at }}",
+            "contexto_json": "={{ $json.contexto_json }}",
+            "tokens_json": "={{ $json.tokens_json }}",
+            "motivo_derivacion": "={{ $json.motivo_derivacion }}",
+            "source_event": "={{ $json.source_event }}",
+            "created_at": "={{ $json.created_at }}",
+            "updated_at": "={{ $json.updated_at }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "dcf8f826-2de1-419f-86b8-15929b74c306",
+      "name": "Escribir CONSULTAS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar LOG para consulta nueva\nconst fila  = $('Preparar Fila CONSULTAS').first().json;\nconst ahora = new Date();\n\nreturn [{ json: {\n  id_log:           `LOG-CONSULTA-${ahora.getTime()}`,\n  fecha_hora:        ahora.toISOString(),\n  tabla_afectada:   'CONSULTAS',\n  id_registro:      String(fila.id_consulta),\n  campo_modificado: 'estado_conversacion',\n  valor_anterior:   '',\n  valor_nuevo:      'inicio',\n  modificado_por:   'n8n',\n  source_event:     fila.source_event,\n  nivel:            'info',\n  detalle: JSON.stringify({\n    id_consulta:         fila.id_consulta,\n    canal:               fila.canal,\n    id_contacto_externo: fila.id_contacto_externo,\n    fecha_in_tentativa:  fila.fecha_in_tentativa,\n    fecha_out_tentativa: fila.fecha_out_tentativa,\n    personas_tentativa:  fila.personas_tentativa\n  })\n}}];"
+      },
+      "id": "b6b6c7ff-7f1e-445c-9f9c-01e179e67e77",
+      "name": "Preparar LOG Nueva",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "LOG_CAMBIOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_log": "={{ $json.id_log }}",
+            "fecha_hora": "={{ $json.fecha_hora }}",
+            "tabla_afectada": "={{ $json.tabla_afectada }}",
+            "id_registro": "={{ $json.id_registro }}",
+            "campo_modificado": "={{ $json.campo_modificado }}",
+            "valor_anterior": "={{ $json.valor_anterior }}",
+            "valor_nuevo": "={{ $json.valor_nuevo }}",
+            "modificado_por": "={{ $json.modificado_por }}",
+            "source_event": "={{ $json.source_event }}",
+            "nivel": "={{ $json.nivel }}",
+            "detalle": "={{ $json.detalle }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "820d4d24-b44f-4b66-8fb1-5b58e7e01b12",
+      "name": "LOG Nueva",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        672,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Output final — rama nueva.\n// Mismo formato que la rama de reutilización.\nconst fila = $('Preparar Fila CONSULTAS').first().json;\nreturn [{ json: {\n  ok:                  true,\n  es_nueva:            true,\n  id_consulta:         fila.id_consulta,\n  estado_conversacion: fila.estado_conversacion,\n  accion:              'creada',\n  source_event:        fila.source_event\n}}];"
+      },
+      "id": "c47d1a31-18b9-4a27-a39a-201b41d6d6d1",
+      "name": "Output Nueva",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Resolver Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Input": {
+      "main": [
+        [
+          {
+            "node": "IF: input válido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: input válido": {
+      "main": [
+        [
+          {
+            "node": "Leer CONSULTAS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: input inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer CONSULTAS": {
+      "main": [
+        [
+          {
+            "node": "Agg CONSULTAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg CONSULTAS": {
+      "main": [
+        [
+          {
+            "node": "Verificar Idempotencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar Idempotencia": {
+      "main": [
+        [
+          {
+            "node": "IF: crear nueva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: crear nueva": {
+      "main": [
+        [
+          {
+            "node": "Preparar Fila CONSULTAS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prep Reutilizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Fila CONSULTAS": {
+      "main": [
+        [
+          {
+            "node": "Escribir CONSULTAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escribir CONSULTAS": {
+      "main": [
+        [
+          {
+            "node": "Preparar LOG Nueva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar LOG Nueva": {
+      "main": [
+        [
+          {
+            "node": "LOG Nueva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG Nueva": {
+      "main": [
+        [
+          {
+            "node": "Output Nueva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Reutilizar": {
+      "main": [
+        [
+          {
+            "node": "LOG Reutilizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG Reutilizar": {
+      "main": [
+        [
+          {
+            "node": "Output Reutilizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "__WORKFLOW_VERSION_ID__",
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "id": "__WORKFLOW_ID__",
+  "tags": []
+}
