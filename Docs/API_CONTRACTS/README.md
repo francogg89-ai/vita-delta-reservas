@@ -14,49 +14,54 @@ y convertible a OpenAPI/Swagger más adelante cuando se expongan como webhooks r
 
 | Workflow | Archivo | Estado | DEV | TEST |
 |---|---|---|---|---|
-| `db_recalcular_disponibilidad` | [db_recalcular_disponibilidad.md](./db_recalcular_disponibilidad.md) | ✅ validado | ✅ | ✅ |
-| `db_crear_consulta` | [db_crear_consulta.md](./db_crear_consulta.md) | ✅ validado | ✅ | ✅ |
-| `db_crear_prereserva` | — | ⬜ pendiente | — | — |
-| `db_registrar_pago` | — | ⬜ pendiente | — | — |
-| `db_confirmar_reserva` | — | ⬜ pendiente | — | — |
-| `sistema_expirar_prereservas` | — | ⬜ pendiente | — | — |
+| `db_recalcular_disponibilidad` | [db_recalcular_disponibilidad.md](./db_recalcular_disponibilidad.md) | validado | Si | Si |
+| `db_crear_consulta` | [db_crear_consulta.md](./db_crear_consulta.md) | validado | Si | Si |
+| `db_crear_prereserva` | [db_crear_prereserva.md](./db_crear_prereserva.md) | validado | Si | Si |
+| `db_registrar_pago` | pendiente | pendiente | — | — |
+| `db_confirmar_reserva` | pendiente | pendiente | — | — |
+| `sistema_expirar_prereservas` | pendiente | pendiente | — | — |
 
 ## Convenciones
 
 - **Fechas:** siempre `YYYY-MM-DD` como texto plano en Google Sheets.
 - **Timestamps:** ISO 8601 (`2026-06-05T14:23:00Z`).
 - **Booleanos en Sheets:** `TRUE` / `FALSE` en mayúsculas.
-- **IDs:** en workflows actuales de DEV/TEST se usan enteros positivos calculados como `max + 1` cuando aplica.
-  Para producción con alta concurrencia migrar a IDs tipo `CON-<timestamp>` o UUID según entidad.
+- **IDs:** enteros positivos, calculados como `max + 1` en DEV/TEST.
+  Para producción con alta concurrencia migrar a UUID o DB transaccional.
 - **fecha_in / fecha_out:** intervalo semiabierto `[fecha_in, fecha_out)`.
-  `fecha_in` es inclusive, `fecha_out` es exclusive (día de salida, no ocupa noche).
+  `fecha_in` es inclusive, `fecha_out` es exclusive.
 - **SHEETS_ID:** no incluido en este repositorio. Ver `.env.example`.
 - **Credenciales n8n:** no portables entre instancias. Sanitizar antes de commitear.
-- **Entornos:** los contratos describen el comportamiento funcional. Los `SHEETS_ID`, credenciales y URLs reales no se documentan en estos archivos.
 
 ## Cómo leer los contratos
 
 Cada contrato tiene estas secciones:
 
-1. **Propósito** — qué hace y qué NO hace
-2. **Estado** — versión validada y entornos
-3. **Input** — campos esperados con tipo y obligatoriedad
-4. **Output exitoso** — estructura JSON de respuesta ok
-5. **Output de error** — estructura JSON de respuesta con error
-6. **Hojas que lee** — fuentes de datos
-7. **Hojas que escribe** — efectos en Sheets
-8. **LOG_CAMBIOS** — qué registra y cuándo
-9. **Efectos secundarios** — qué más ocurre al ejecutar
-10. **Restricciones** — límites, concurrencia, idempotencia
-11. **Notas para frontend/bot** — cómo consumir este workflow
-12. **Casos de prueba validados** — escenarios probados en DEV y TEST
+1. Propósito — que hace y que NO hace
+2. Estado — version validada y entornos
+3. Input — campos esperados con tipo y obligatoriedad
+4. Output exitoso — estructura JSON de respuesta ok
+5. Output de error — estructura JSON de respuesta con error
+6. Hojas que lee — fuentes de datos
+7. Hojas que escribe — efectos en Sheets
+8. Subworkflows llamados — dependencias de ejecución
+9. LOG_CAMBIOS — que registra y cuando
+10. Reglas de negocio — disponibilidad, vencimiento, etc.
+11. Fuera de alcance — que no esta implementado todavia
+12. Riesgos conocidos — limitaciones técnicas documentadas
+13. Casos de prueba validados — escenarios probados en DEV y TEST
+14. Notas para frontend/bot — como consumir este workflow
 
-## Sanitización antes de commitear
+## Sanitizacion antes de commitear
 
-Reemplazar en los JSON de workflow antes de subir:
+Reemplazar en los JSON de workflow antes de subir a GitHub:
 
 ```
-SHEETS_ID de DEV  → __SHEETS_ID_DEV__
-SHEETS_ID de TEST → __SHEETS_ID_TEST__
+SHEETS_ID de DEV  → __SHEETS_ID__
+SHEETS_ID de TEST → __SHEETS_ID__
 credential id     → __CREDENTIAL_ID__
+workflow id       → __WORKFLOW_ID__
+instanceId        → __N8N_INSTANCE_ID__
+versionId         → __WORKFLOW_VERSION_ID__
+subworkflow IDs   → __RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__ (u otros placeholders segun el caso)
 ```

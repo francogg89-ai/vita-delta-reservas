@@ -1,0 +1,1118 @@
+{
+  "name": "db_crear_prereserva",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "90e5edc5-db36-4779-9325-c1dc137286be",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -4384,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// TEMPLATE SANITIZADO — db_crear_prereserva v2\n// ═══════════════════════════════════════════════════════════════\n// Este JSON es un template genérico para importar en n8n.\n// No contiene credenciales, IDs de Sheet ni IDs de workflow reales.\n//\n// Antes de importar, reemplazar los siguientes placeholders:\n//   __SHEETS_ID__                         → ID del Google Sheet del entorno\n//   __CREDENTIAL_ID__                     → ID de la credencial OAuth en n8n\n//   __CREDENTIAL_NAME__                   → Nombre de la credencial OAuth en n8n\n//   __RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__ → ID del workflow db_recalcular_disponibilidad\n//\n// El mismo template sirve para DEV, TEST y PROD.\n// Solo cambia SHEETS_ID y las credenciales.\n//\n// DEPENDENCIA CRÍTICA:\n// db_crear_prereserva llama a db_recalcular_disponibilidad como subworkflow.\n// db_recalcular_disponibilidad DEBE tener un trigger\n// 'When Executed by Another Workflow' conectado al nodo inicial.\n// db_recalcular_disponibilidad v8 ejecuta recálculo COMPLETO:\n// limpia DISPONIBILIDAD_CACHE!A2:R y reescribe las 300 filas.\n// Por eso NO se envían id_cabanas ni fechas al subworkflow.\n// Cuando exista una versión de recálculo parcial real (que no borre\n// la cache completa antes de escribir), actualizar Prep Recalcular.\n// ═══════════════════════════════════════════════════════════════\n\n// ═══════════════════════════════════════════════════════════════\n// NODO 1 — Resolver Input\n// ═══════════════════════════════════════════════════════════════\n// ALCANCE v2:\n// ✅ Valida input completo\n// ✅ Verifica disponibilidad en dos capas (cache + fuentes directas)\n// ✅ Valida cabaña: existe, activa, no bloqueada, capacidad OK\n// ✅ Horario checkin domingo: usa hora_checkin_domingo o fallback 18:00\n// ✅ Crea PRE_RESERVA con estado pendiente_pago\n// ✅ Calcula expira_en desde CONFIGURACION_GENERAL\n// ✅ Escribe LOG_CAMBIOS en ambas ramas (éxito y conflicto)\n// ✅ Llama db_recalcular_disponibilidad síncrono (recálculo completo)\n// ✅ continueOnFail en nodo Execute Workflow para manejar fallo post-escritura\n//\n// ❌ FUERA DE ALCANCE en v2 (diferido explícitamente):\n//    - Validación de id_consulta contra hoja CONSULTAS\n//      (se acepta como dato del input; agregar en v3 cuando sea necesario)\n//    - Motor de precios — monto_total y monto_sena son input opcional\n//      (precio_pendiente = true en output si no vienen)\n//    - MercadoPago, WhatsApp, pagos, confirmación de reserva\n//    - OVERRIDES_OPERATIVOS, escalonamiento de check-in, bot\n//    - Recálculo parcial por cabaña/fechas — se usa recálculo completo\n//      hasta que exista una versión de db_recalcular_disponibilidad\n//      que soporte scope parcial sin borrar el resto de la cache\n//\n// ⚠️  SHEETS_ID — __ENTORNO__\n// Si el Sheet cambia, actualizar aquí y en todos los nodos Google Sheets.\n// Valor actual: __SHEETS_ID__\n//\n// ⚠️  WORKFLOW ID — Ejecutar db_recalcular_disponibilidad\n// Antes de ejecutar este workflow, reemplazar en el nodo\n// 'Ejecutar db_recalcular_disponibilidad' el valor:\n//   __RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__\n// por el ID real del workflow __RECALCULAR_DISPONIBILIDAD_WORKFLOW_NAME__.\n// El ID está en la URL del workflow: /workflow/<ID>\n//\n// ⚠️  CONCURRENCIA = 1\n// Configurar en n8n → Settings del workflow → Max Concurrency = 1.\n// Nunca ejecutar en paralelo.\n//\n// ⚠️  id_prereserva — estrategia: max + 1\n// Race condition posible si dos ejecuciones leen el max simultáneamente.\n// Con concurrencia = 1 el riesgo es mínimo.\n// Solución definitiva para alta concurrencia: UUID o DB transaccional.\n//\n// ⚠️  RIESGO TÉCNICO — fallo post-escritura sin rollback\n// Si db_recalcular_disponibilidad falla DESPUÉS de que PRE_RESERVAS\n// fue escrita, la pre-reserva existe pero la cache no refleja el bloqueo.\n// No hay rollback automático en Google Sheets.\n// El workflow devuelve recalculo_cache='warning' en ese caso.\n// Acción correctiva: ejecutar db_recalcular_disponibilidad manualmente.\n// ═══════════════════════════════════════════════════════════════\n\nconst SHEETS_ID = '__SHEETS_ID__'; // __ENTORNO__\n\nconst CANALES_ORIGEN_VALIDOS = ['whatsapp', 'instagram', 'web', 'manual'];\nconst CANALES_PAGO_VALIDOS   = ['mp_link', 'transferencia_bancaria', 'transferencia_mp', 'cripto', 'efectivo'];\nconst CANAL_PAGO_DEFAULT     = 'transferencia_bancaria';\n\n// ── MANUAL_INPUT ─────────────────────────────────────────────────\n// Editar estos valores para pruebas manuales del entorno correspondiente.\n// Se usan SOLO si el Manual Trigger viene vacío (sin payload).\n// En producción el input vendrá del Webhook o del bot.\nconst MANUAL_INPUT = {\n  id_consulta:         1,\n  id_cabana:           1,\n  id_huesped:          null,\n  fecha_in:            '2026-07-05',\n  fecha_out:           '2026-07-06',\n  hora_checkin:        '',          // vacío = calcular según día y config\n  hora_checkout:       '',          // vacío = usar hora_checkout_default\n  personas:            5,\n  monto_total:         null,        // null = precio_pendiente\n  monto_sena:          null,        // null = precio_pendiente\n  canal_pago_esperado: '',          // vacío = usar default transferencia_bancaria\n  canal_origen:        'manual',\n  notas:               '',\n  source_event:        'manual_test'   // editar según entorno\n};\n// ─────────────────────────────────────────────────────────────\n\nconst raw            = $input.first()?.json ?? {};\nconst usandoManualInput = !raw.id_cabana && !raw.fecha_in;\nconst input          = usandoManualInput ? MANUAL_INPUT : raw;\n\nconst id_consulta         = input.id_consulta         ?? null;\nconst id_cabana           = parseInt(String(input.id_cabana ?? ''), 10);\nconst id_huesped          = input.id_huesped          ?? null;\nconst fecha_in            = String(input.fecha_in     ?? '').trim();\nconst fecha_out           = String(input.fecha_out    ?? '').trim();\nconst hora_checkin_input  = String(input.hora_checkin  ?? '').trim();\nconst hora_checkout_input = String(input.hora_checkout ?? '').trim();\nconst personas            = parseInt(String(input.personas ?? ''), 10);\nconst monto_total         = (input.monto_total !== null && input.monto_total !== undefined && input.monto_total !== '')\n                              ? parseFloat(String(input.monto_total)) : null;\nconst monto_sena          = (input.monto_sena !== null && input.monto_sena !== undefined && input.monto_sena !== '')\n                              ? parseFloat(String(input.monto_sena)) : null;\nconst canal_origen        = String(input.canal_origen        ?? '').trim();\nconst canal_pago_esperado = String(input.canal_pago_esperado ?? '').trim() || CANAL_PAGO_DEFAULT;\nconst notas               = String(input.notas        ?? '').trim();\nconst source_event        = String(input.source_event ?? 'manual').trim();\n\n// ── Validaciones ─────────────────────────────────────────────\nconst errores = [];\n\nif (isNaN(id_cabana) || id_cabana <= 0)\n  errores.push('id_cabana es obligatorio y debe ser entero positivo');\nif (isNaN(personas) || personas <= 0)\n  errores.push('personas es obligatorio y debe ser entero positivo');\nif (!fecha_in)\n  errores.push('fecha_in es obligatorio (YYYY-MM-DD)');\nif (!fecha_out)\n  errores.push('fecha_out es obligatorio (YYYY-MM-DD)');\nif (!CANALES_ORIGEN_VALIDOS.includes(canal_origen))\n  errores.push(`canal_origen inválido: '${canal_origen}'. Válidos: ${CANALES_ORIGEN_VALIDOS.join(', ')}`);\nif (!CANALES_PAGO_VALIDOS.includes(canal_pago_esperado))\n  errores.push(`canal_pago_esperado inválido: '${canal_pago_esperado}'. Válidos: ${CANALES_PAGO_VALIDOS.join(', ')}`);\n\nif (fecha_in && fecha_out) {\n  const fi = new Date(fecha_in  + 'T12:00:00Z');\n  const fo = new Date(fecha_out + 'T12:00:00Z');\n  if (isNaN(fi.getTime())) errores.push('fecha_in inválida');\n  if (isNaN(fo.getTime())) errores.push('fecha_out inválida');\n  if (!isNaN(fi.getTime()) && !isNaN(fo.getTime()) && fo <= fi)\n    errores.push('fecha_out debe ser posterior a fecha_in (intervalo semiabierto [fecha_in, fecha_out))');\n}\n\n// Generar lista de fechas [fecha_in, fecha_out)\nfunction generarFechasRango(fIn, fOut) {\n  const fechas = [];\n  const d = new Date(fIn + 'T12:00:00Z');\n  const o = new Date(fOut + 'T12:00:00Z');\n  while (d < o) {\n    fechas.push(d.toISOString().split('T')[0]);\n    d.setUTCDate(d.getUTCDate() + 1);\n  }\n  return fechas;\n}\n\nconst fechas_rango = (fecha_in && fecha_out && errores.length === 0)\n  ? generarFechasRango(fecha_in, fecha_out)\n  : [];\n\nif (errores.length > 0) {\n  return [{ json: { ok: false, error: 'input_invalido', detalle: errores, _validado: false } }];\n}\n\nreturn [{ json: {\n  SHEETS_ID,\n  id_consulta,\n  id_cabana,\n  id_huesped,\n  fecha_in,\n  fecha_out,\n  hora_checkin_input,\n  hora_checkout_input,\n  personas,\n  monto_total,\n  monto_sena,\n  precio_pendiente: (monto_total === null || monto_sena === null),\n  canal_origen,\n  canal_pago_esperado,\n  notas,\n  source_event,\n  fechas_rango,\n  ts_inicio: new Date().toISOString(),\n  _validado: true,\n  _usando_manual_input: usandoManualInput\n}}];"
+      },
+      "id": "f4227b95-0d2d-4924-b8be-dfb3f4874615",
+      "name": "Resolver Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4160,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-validado",
+              "leftValue": "={{ $json._validado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "feb5e87f-ac73-4e47-8790-965f885798ff",
+      "name": "IF: input válido",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -3936,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nreturn [{ json: { ok: d.ok, error: d.error, detalle: d.detalle } }];"
+      },
+      "id": "c13841ff-3fcf-4dfe-82da-7a6294a1f2de",
+      "name": "Error: input inválido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3728,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "CABAÑAS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "9dfb52cc-86d3-4e8b-a688-eba23896af53",
+      "name": "Leer CABAÑAS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -3728,
+        192
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "3f499913-f2b9-4c99-b650-75baa18ab58e",
+      "name": "Agg CABAÑAS",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -3520,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "CONFIGURACION_GENERAL",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "d817762a-d90e-40c5-9b4f-a7069594e140",
+      "name": "Leer CONFIGURACION_GENERAL",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -3328,
+        192
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "fed7982a-562a-4914-9f61-0ece3e8f7189",
+      "name": "Agg CONFIG",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -3120,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "DISPONIBILIDAD_CACHE",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "9cd19a1a-d3fb-4f3a-bbaa-586e4fba9b22",
+      "name": "Leer DISPONIBILIDAD_CACHE",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -2928,
+        192
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "0f98f9cd-069e-4539-8f31-71b7940614aa",
+      "name": "Agg CACHE",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -2720,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PRE_RESERVAS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "7b584393-2737-42de-9708-593dfb1df993",
+      "name": "Leer PRE_RESERVAS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -2528,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "9ff5bf3b-7cd1-47c3-81a1-78a643d750d5",
+      "name": "Agg PRE_RESERVAS",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -2320,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "RESERVAS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "52c407c8-fc1c-436f-bf78-d0b8bbc78d60",
+      "name": "Leer RESERVAS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -2128,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "b4aef507-52be-443e-b25d-18e59b3ade59",
+      "name": "Agg RESERVAS",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -1920,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "BLOQUEOS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "a58ab9bd-2d95-4eb5-b3f7-18722058444f",
+      "name": "Leer BLOQUEOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -1728,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "b36fb13a-53dc-463d-9a42-c6f3909e1e08",
+      "name": "Agg BLOQUEOS",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -1520,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 2 — Verificar Cabaña + Calcular horarios base\n// ═══════════════════════════════════════════════════════════════\n// Valida:\n//   1. id_cabana existe en CABAÑAS\n//   2. activa = TRUE\n//   3. bloqueada = FALSE (bloqueo operativo de la cabaña,\n//      distinto de los BLOQUEOS por fecha)\n//   4. personas <= capacidad_max\n//\n// Calcula hora_checkin_base:\n//   - Si hora_checkin_input no está vacío → usar ese valor\n//   - Si fecha_in es domingo (UTC day = 0) → usar hora_checkin_domingo\n//     de CONFIGURACION_GENERAL, o fallback '18:00'\n//   - En cualquier otro día → usar hora_checkin_default\n//     de CONFIGURACION_GENERAL, o fallback '13:00'\n//\n// Calcula hora_checkout_base:\n//   - Si hora_checkout_input no está vacío → usar ese valor\n//   - Si no → usar hora_checkout_default de CONFIGURACION_GENERAL,\n//     o fallback '10:00'\n// ═══════════════════════════════════════════════════════════════\n\nconst inputData = $('Resolver Input').first().json;\n\nfunction normBool(v) {\n  if (v === true || v === 1) return true;\n  if (typeof v === 'string') return v.trim().toUpperCase() === 'TRUE' || v.trim() === '1';\n  return false;\n}\n\nfunction esDomingo(fechaStr) {\n  if (!fechaStr) return false;\n  const d = new Date(fechaStr + 'T12:00:00Z');\n  return !isNaN(d.getTime()) && d.getUTCDay() === 0;\n}\n\n// Cabañas\nconst cabanas = ($('Agg CABAÑAS').first()?.json?.data ?? [])\n  .filter(c => c && Object.keys(c).some(k => String(c[k]).trim() !== ''));\n\nconst cabana = cabanas.find(c => parseInt(String(c.id_cabana), 10) === inputData.id_cabana);\n\nif (!cabana) {\n  return [{ json: {\n    ok: false, error: 'input_invalido',\n    detalle: [`id_cabana ${inputData.id_cabana} no existe en CABAÑAS`],\n    _verificacion_cabana: false\n  }}];\n}\n\nif (!normBool(cabana.activa)) {\n  return [{ json: {\n    ok: false, error: 'cabana_no_disponible',\n    detalle: [`Cabaña ${inputData.id_cabana} no está activa`],\n    _verificacion_cabana: false\n  }}];\n}\n\nif (normBool(cabana.bloqueada)) {\n  return [{ json: {\n    ok: false, error: 'cabana_no_disponible',\n    detalle: [`Cabaña ${inputData.id_cabana} está bloqueada operativamente (campo CABAÑAS.bloqueada)`],\n    _verificacion_cabana: false\n  }}];\n}\n\nconst capacidad_max = parseInt(String(cabana.capacidad_max ?? '0'), 10);\nif (inputData.personas > capacidad_max) {\n  return [{ json: {\n    ok: false, error: 'capacidad_excedida',\n    detalle: [`personas=${inputData.personas} excede capacidad_max=${capacidad_max} de la cabaña ${inputData.id_cabana}`],\n    _verificacion_cabana: false\n  }}];\n}\n\n// Config → objeto plano\nconst configRows = ($('Agg CONFIG').first()?.json?.data ?? [])\n  .filter(r => r && Object.keys(r).some(k => String(r[k]).trim() !== ''));\nconst config = {};\nfor (const row of configRows) {\n  if (row.clave && String(row.clave).trim())\n    config[String(row.clave).trim()] = String(row.valor ?? '').trim();\n}\n\n// Calcular hora_checkin_base con lógica de domingo\nlet hora_checkin_base;\nif (inputData.hora_checkin_input) {\n  hora_checkin_base = inputData.hora_checkin_input;\n} else if (esDomingo(inputData.fecha_in)) {\n  hora_checkin_base = config.hora_checkin_domingo ?? '18:00';\n} else {\n  hora_checkin_base = config.hora_checkin_default ?? '13:00';\n}\n\n// Calcular hora_checkout_base\nconst hora_checkout_base = inputData.hora_checkout_input\n  ? inputData.hora_checkout_input\n  : (config.hora_checkout_default ?? '10:00');\n\nconst prereserva_expiracion_minutos = (() => {\n  const v = parseInt(config.prereserva_expiracion_minutos ?? '60', 10);\n  return isNaN(v) ? 60 : v;\n})();\n\nreturn [{ json: {\n  inputData,\n  cabana,\n  config,\n  hora_checkin_base,\n  hora_checkout_base,\n  prereserva_expiracion_minutos,\n  _verificacion_cabana: true\n}}];"
+      },
+      "id": "b60a1666-27f1-4bdd-8dc9-6f4c40f09b09",
+      "name": "Verificar Cabaña",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1328,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-cabana",
+              "leftValue": "={{ $json._verificacion_cabana }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "daba464c-f895-4dee-83d5-335afafa9a45",
+      "name": "IF: cabaña OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nreturn [{ json: { ok: d.ok, error: d.error, detalle: d.detalle } }];"
+      },
+      "id": "b34a14da-e357-45d7-9e44-765731a37642",
+      "name": "Error: cabaña",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 3 — Verificación Capa 1: DISPONIBILIDAD_CACHE\n// ═══════════════════════════════════════════════════════════════\n// Verifica el rango [fecha_in, fecha_out) contra DISPONIBILIDAD_CACHE.\n//\n// Estados que BLOQUEAN:\n//   - 'ocupada'\n//   - 'bloqueada'\n//   - 'limite_escalonamiento'\n//\n// Estados que NO bloquean (noche libre):\n//   - 'disponible'\n//   - 'checkout_disponible' (hay checkout ese día pero la noche queda libre)\n//\n// Si alguna fecha del rango no aparece en cache, se trata como\n// dato faltante y se pasa a Capa 2 para verificación directa.\n// Esto cubre el caso de cache desactualizada o rango fuera del ciclo.\n// ═══════════════════════════════════════════════════════════════\n\nconst ctx       = $input.first().json;\nconst inputData = ctx.inputData;\n\nconst cacheRows = ($('Agg CACHE').first()?.json?.data ?? [])\n  .filter(r => r && Object.keys(r).some(k => String(r[k]).trim() !== ''));\n\nconst ESTADOS_BLOQUEANTES = ['ocupada', 'bloqueada', 'limite_escalonamiento'];\n\nconst cacheMap = {};\nfor (const row of cacheRows) {\n  if (row.id_cabana && row.fecha)\n    cacheMap[`${row.id_cabana}__${row.fecha}`] = String(row.estado ?? '').trim();\n}\n\nconst conflictos         = [];\nconst fechas_sin_cache   = [];\n\nfor (const fecha of inputData.fechas_rango) {\n  const estado = cacheMap[`${inputData.id_cabana}__${fecha}`];\n  if (!estado) {\n    fechas_sin_cache.push(fecha);\n    continue;\n  }\n  if (ESTADOS_BLOQUEANTES.includes(estado))\n    conflictos.push({ fecha, estado, fuente: 'DISPONIBILIDAD_CACHE' });\n}\n\nif (conflictos.length > 0) {\n  return [{ json: {\n    ok: false,\n    error: 'no_disponible',\n    motivo: 'Fechas bloqueadas según DISPONIBILIDAD_CACHE',\n    conflictos,\n    _capa1_ok: false\n  }}];\n}\n\nreturn [{ json: { ctx, fechas_sin_cache, _capa1_ok: true } }];"
+      },
+      "id": "560f980c-8955-45b4-9d7a-7a0f2c929646",
+      "name": "Capa 1: Cache",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-capa1",
+              "leftValue": "={{ $json._capa1_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e3c986d6-5902-4b7a-bf73-5eb73a46e83f",
+      "name": "IF: Capa 1 OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nreturn [{ json: { ok: d.ok, error: d.error, motivo: d.motivo, conflictos: d.conflictos } }];"
+      },
+      "id": "156042d8-f243-44ad-82b8-1d04fbfaf6d3",
+      "name": "Error: no disponible",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 4 — Verificación Capa 2: Fuentes directas\n// ═══════════════════════════════════════════════════════════════\n// Segunda verificación justo antes de escribir.\n// Verifica directamente RESERVAS, PRE_RESERVAS y BLOQUEOS.\n//\n// Si Capa 1 pasó pero Capa 2 detecta conflicto:\n//   → no escribir PRE_RESERVA\n//   → retornar {_capa2_ok: false} para que el IF dispare\n//     el nodo de LOG warning + error controlado\n//\n// ⚠️  RIESGO TÉCNICO residual:\n// Con concurrencia = 1 el riesgo de race condition es mínimo.\n// Solución definitiva: DB transaccional con SELECT FOR UPDATE.\n// Documentado como deuda técnica.\n//\n// Lógica de solapamiento de rangos (intervalo semiabierto):\n//   Dos rangos [A, B) y [C, D) se solapan si: A < D && B > C\n// ═══════════════════════════════════════════════════════════════\n\nconst prevCtx   = $input.first().json;\nconst ctx       = prevCtx.ctx;\nconst inputData = ctx.inputData;\nconst ahora     = new Date();\n\nfunction toYMD(val) {\n  if (!val && val !== 0) return null;\n  if (val instanceof Date) return isNaN(val.getTime()) ? null : val.toISOString().split('T')[0];\n  if (typeof val === 'number') {\n    const d = new Date(Date.UTC(1899, 11, 30) + val * 86400000);\n    return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];\n  }\n  const s = String(val).trim();\n  if (!s) return null;\n  const p = s.split('T')[0];\n  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(p)) return p;\n  const d = new Date(s);\n  return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];\n}\n\nfunction parseTimestamp(val) {\n  if (!val && val !== 0) return null;\n  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;\n  if (typeof val === 'number') {\n    const d = val < 200000\n      ? new Date(Date.UTC(1899, 11, 30) + val * 86400000)\n      : new Date(val);\n    return isNaN(d.getTime()) ? null : d;\n  }\n  const s = String(val).trim();\n  if (!s) return null;\n  const d = new Date(s);\n  return isNaN(d.getTime()) ? null : d;\n}\n\nfunction parseFechaMs(val) {\n  const ymd = toYMD(val);\n  if (!ymd) return null;\n  const [y, m, d] = ymd.split('-').map(Number);\n  return Date.UTC(y, m - 1, d, 12, 0, 0);\n}\n\nfunction normBool(v) {\n  if (v === true || v === 1) return true;\n  if (typeof v === 'string') return v.trim().toUpperCase() === 'TRUE' || v.trim() === '1';\n  return false;\n}\n\nconst reservas    = ($('Agg RESERVAS').first()?.json?.data    ?? []).filter(r => r && Object.keys(r).some(k => String(r[k]).trim() !== ''));\nconst prereservas = ($('Agg PRE_RESERVAS').first()?.json?.data ?? []).filter(p => p && Object.keys(p).some(k => String(p[k]).trim() !== ''));\nconst bloqueos    = ($('Agg BLOQUEOS').first()?.json?.data    ?? []).filter(b => b && Object.keys(b).some(k => String(b[k]).trim() !== ''));\n\nconst id_cabana = inputData.id_cabana;\nconst msIn      = parseFechaMs(inputData.fecha_in);\nconst msOut     = parseFechaMs(inputData.fecha_out);\nconst conflictos = [];\n\n// ── RESERVAS: estado IN ('confirmada', 'activa') ──────────────\nfor (const r of reservas) {\n  if (parseInt(String(r.id_cabana), 10) !== id_cabana) continue;\n  if (!['confirmada', 'activa'].includes(String(r.estado ?? ''))) continue;\n  const rIn  = parseFechaMs(r.fecha_checkin);\n  const rOut = parseFechaMs(r.fecha_checkout);\n  if (rIn === null || rOut === null) continue;\n  if (rIn < msOut && rOut > msIn)\n    conflictos.push({ fuente: 'RESERVAS', id_reserva: r.id_reserva, fecha_checkin: r.fecha_checkin, fecha_checkout: r.fecha_checkout, estado: r.estado });\n}\n\n// ── PRE_RESERVAS: pendiente_pago y no vencida ─────────────────\nfor (const p of prereservas) {\n  if (parseInt(String(p.id_cabana), 10) !== id_cabana) continue;\n  if (String(p.estado ?? '') !== 'pendiente_pago') continue;\n  const expiraTs = parseTimestamp(p.expira_en);\n  if (!expiraTs || expiraTs <= ahora) continue;\n  const pIn  = parseFechaMs(p.fecha_in);\n  const pOut = parseFechaMs(p.fecha_out);\n  if (pIn === null || pOut === null) continue;\n  if (pIn < msOut && pOut > msIn)\n    conflictos.push({ fuente: 'PRE_RESERVAS', id_prereserva: p.id_prereserva, fecha_in: p.fecha_in, fecha_out: p.fecha_out, expira_en: p.expira_en });\n}\n\n// ── BLOQUEOS: activo = TRUE, rango [fecha_desde, fecha_hasta) ─\nfor (const b of bloqueos) {\n  const aplicaCabana = !b.id_cabana || String(b.id_cabana).trim() === '' || parseInt(String(b.id_cabana), 10) === id_cabana;\n  if (!aplicaCabana) continue;\n  if (!normBool(b.activo)) continue;\n  const bIn  = parseFechaMs(b.fecha_desde);\n  const bOut = parseFechaMs(b.fecha_hasta);\n  if (bIn === null || bOut === null) continue;\n  if (bIn < msOut && bOut > msIn)\n    conflictos.push({ fuente: 'BLOQUEOS', id_bloqueo: b.id_bloqueo, fecha_desde: b.fecha_desde, fecha_hasta: b.fecha_hasta });\n}\n\nif (conflictos.length > 0) {\n  return [{ json: {\n    _capa2_ok:   false,\n    conflictos,\n    inputData,\n    source_event: inputData.source_event\n  }}];\n}\n\nreturn [{ json: {\n  _capa2_ok:    true,\n  inputData,\n  prereservas,\n  ctx\n}}];"
+      },
+      "id": "375b2da4-76fc-4342-ab8f-cd8e37b010e2",
+      "name": "Capa 2: Fuentes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-capa2",
+              "leftValue": "={{ $json._capa2_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a0a04dda-4981-4b30-b166-fb0a53b59f5c",
+      "name": "IF: Capa 2 OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Capa 2 detectó conflicto que Capa 1 no vio.\n// Indica race condition o cache desactualizada.\n// Prepara LOG warning + output de error controlado.\nconst d     = $input.first().json;\nconst ahora = new Date();\n\nreturn [{ json: {\n  _log: {\n    id_log:           `LOG-PRERESERVA-CONFLICTO-${ahora.getTime()}`,\n    fecha_hora:        ahora.toISOString(),\n    tabla_afectada:   'PRE_RESERVAS',\n    id_registro:      'N/A',\n    campo_modificado: 'verificacion_capa2',\n    valor_anterior:   '',\n    valor_nuevo:      '',\n    modificado_por:   'n8n',\n    source_event:     d.inputData?.source_event ?? 'db_crear_prereserva',\n    nivel:            'warning',\n    detalle: JSON.stringify({\n      motivo:    'no_disponible_conflicto_detectado',\n      id_cabana: d.inputData?.id_cabana,\n      fecha_in:  d.inputData?.fecha_in,\n      fecha_out: d.inputData?.fecha_out,\n      conflictos: d.conflictos\n    })\n  },\n  _output: {\n    ok:         false,\n    error:      'no_disponible_conflicto_detectado',\n    conflictos: d.conflictos\n  }\n}}];"
+      },
+      "id": "056741fe-3c99-4b88-94ee-b017f4716a74",
+      "name": "Prep LOG Conflicto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "LOG_CAMBIOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_log": "={{ $json._log.id_log }}",
+            "fecha_hora": "={{ $json._log.fecha_hora }}",
+            "tabla_afectada": "={{ $json._log.tabla_afectada }}",
+            "id_registro": "={{ $json._log.id_registro }}",
+            "campo_modificado": "={{ $json._log.campo_modificado }}",
+            "valor_anterior": "={{ $json._log.valor_anterior }}",
+            "valor_nuevo": "={{ $json._log.valor_nuevo }}",
+            "modificado_por": "={{ $json._log.modificado_por }}",
+            "source_event": "={{ $json._log.source_event }}",
+            "nivel": "={{ $json._log.nivel }}",
+            "detalle": "={{ $json._log.detalle }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "e94868ae-5b67-45c9-9711-9a7ffbc89670",
+      "name": "LOG Conflicto",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        272
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Prep LOG Conflicto').first().json;\nreturn [{ json: d._output }];"
+      },
+      "id": "8f96beed-e638-421e-8895-c660b4c106f3",
+      "name": "Error: conflicto detectado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 5 — Preparar Fila PRE_RESERVAS\n// ═══════════════════════════════════════════════════════════════\n// Calcula id_prereserva (max + 1), expira_en, y construye la fila.\n//\n// ⚠️  PRECIO — fuera de alcance en v2:\n// monto_total y monto_sena son input opcional.\n// Si no vienen → quedan vacíos y precio_pendiente = true.\n// La obligatoriedad del precio antes de confirmar la reserva\n// quedará en db_confirmar_reserva o cuando se implemente\n// db_calcular_precio (motor de precios, Etapa 3).\n// ═══════════════════════════════════════════════════════════════\n\nconst d          = $input.first().json;\nconst inputData  = d.inputData;\nconst prereservas = d.prereservas;\nconst ctx        = d.ctx;\nconst ahora      = new Date();\n\n// id_prereserva = max + 1\n// ⚠️  Race condition posible. Ver comentario en Resolver Input.\nconst ids = prereservas\n  .map(p => parseInt(String(p.id_prereserva ?? ''), 10))\n  .filter(n => !isNaN(n) && n > 0);\nconst id_prereserva = (ids.length > 0 ? Math.max(...ids) : 0) + 1;\n\n// expira_en = ahora + prereserva_expiracion_minutos\nconst minutos   = ctx.prereserva_expiracion_minutos ?? 60;\nconst expira_en = new Date(ahora.getTime() + minutos * 60 * 1000).toISOString();\n\nconst fila = {\n  id_prereserva,\n  id_consulta:         inputData.id_consulta   ?? '',\n  id_cabana:           inputData.id_cabana,\n  id_huesped:          inputData.id_huesped    ?? '',\n  fecha_in:            inputData.fecha_in,\n  fecha_out:           inputData.fecha_out,\n  hora_checkin:        ctx.hora_checkin_base,\n  hora_checkout:       ctx.hora_checkout_base,\n  personas:            inputData.personas,\n  monto_total:         inputData.monto_total   ?? '',\n  monto_sena:          inputData.monto_sena    ?? '',\n  estado:              'pendiente_pago',\n  expira_en,\n  canal_pago_esperado: inputData.canal_pago_esperado,\n  canal_origen:        inputData.canal_origen,\n  intentos_pago:       0,\n  referencia_mp:       '',\n  notas:               inputData.notas         ?? '',\n  source_event:        inputData.source_event,\n  created_at:          ahora.toISOString(),\n  updated_at:          ahora.toISOString()\n};\n\nreturn [{ json: {\n  fila,\n  inputData,\n  precio_pendiente:   inputData.precio_pendiente,\n  minutos_expiracion: minutos\n}}];"
+      },
+      "id": "833bad9a-a955-4255-8381-cd80e77d6018",
+      "name": "Preparar Fila PRE_RESERVAS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PRE_RESERVAS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_prereserva": "={{ $json.fila.id_prereserva }}",
+            "id_consulta": "={{ $json.fila.id_consulta }}",
+            "id_cabana": "={{ $json.fila.id_cabana }}",
+            "id_huesped": "={{ $json.fila.id_huesped }}",
+            "fecha_in": "={{ $json.fila.fecha_in }}",
+            "fecha_out": "={{ $json.fila.fecha_out }}",
+            "hora_checkin": "={{ $json.fila.hora_checkin }}",
+            "hora_checkout": "={{ $json.fila.hora_checkout }}",
+            "personas": "={{ $json.fila.personas }}",
+            "monto_total": "={{ $json.fila.monto_total }}",
+            "monto_sena": "={{ $json.fila.monto_sena }}",
+            "estado": "={{ $json.fila.estado }}",
+            "expira_en": "={{ $json.fila.expira_en }}",
+            "canal_pago_esperado": "={{ $json.fila.canal_pago_esperado }}",
+            "canal_origen": "={{ $json.fila.canal_origen }}",
+            "intentos_pago": "={{ $json.fila.intentos_pago }}",
+            "referencia_mp": "={{ $json.fila.referencia_mp }}",
+            "notas": "={{ $json.fila.notas }}",
+            "source_event": "={{ $json.fila.source_event }}",
+            "created_at": "={{ $json.fila.created_at }}",
+            "updated_at": "={{ $json.fila.updated_at }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "c387d29b-e5f5-4c07-8f7e-124447121030",
+      "name": "Escribir PRE_RESERVAS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d     = $('Preparar Fila PRE_RESERVAS').first().json;\nconst ahora = new Date();\n\nreturn [{ json: {\n  id_log:           `LOG-PRERESERVA-${ahora.getTime()}`,\n  fecha_hora:        ahora.toISOString(),\n  tabla_afectada:   'PRE_RESERVAS',\n  id_registro:      String(d.fila.id_prereserva),\n  campo_modificado: 'estado',\n  valor_anterior:   '',\n  valor_nuevo:      'pendiente_pago',\n  modificado_por:   'n8n',\n  source_event:     d.fila.source_event,\n  nivel:            'info',\n  detalle: JSON.stringify({\n    id_prereserva:      d.fila.id_prereserva,\n    id_cabana:          d.fila.id_cabana,\n    fecha_in:           d.fila.fecha_in,\n    fecha_out:          d.fila.fecha_out,\n    hora_checkin:       d.fila.hora_checkin,\n    hora_checkout:      d.fila.hora_checkout,\n    personas:           d.fila.personas,\n    expira_en:          d.fila.expira_en,\n    precio_pendiente:   d.precio_pendiente,\n    minutos_expiracion: d.minutos_expiracion\n  })\n}}];"
+      },
+      "id": "94cc5c85-5417-4cf8-b597-d0337b72296a",
+      "name": "Preparar LOG PRE_RESERVA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "LOG_CAMBIOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_log": "={{ $json.id_log }}",
+            "fecha_hora": "={{ $json.fecha_hora }}",
+            "tabla_afectada": "={{ $json.tabla_afectada }}",
+            "id_registro": "={{ $json.id_registro }}",
+            "campo_modificado": "={{ $json.campo_modificado }}",
+            "valor_anterior": "={{ $json.valor_anterior }}",
+            "valor_nuevo": "={{ $json.valor_nuevo }}",
+            "modificado_por": "={{ $json.modificado_por }}",
+            "source_event": "={{ $json.source_event }}",
+            "nivel": "={{ $json.nivel }}",
+            "detalle": "={{ $json.detalle }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "240a857f-71ee-4dfe-8862-f6a472bdc882",
+      "name": "LOG PRE_RESERVA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        672,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Preparar input para db_recalcular_disponibilidad ─────────\n// v2: recálculo COMPLETO (sin scope parcial).\n// Se envía solo source_event — sin id_cabanas ni fechas.\n//\n// ¿Por qué recálculo completo?\n// db_recalcular_disponibilidad v8 borra DISPONIBILIDAD_CACHE!A2:R\n// antes de escribir. Si se le pasan fechas/cabañas parciales,\n// el riesgo es que escriba solo esas filas y borre el resto.\n// Hasta que exista una versión de recálculo parcial real\n// (que NO borre la cache completa antes de escribir),\n// se usa recálculo completo para garantizar integridad.\nreturn [{ json: { source_event: 'prereserva_creada' } }];"
+      },
+      "id": "27023673-eeea-49f0-bea5-a0d2bbf4188e",
+      "name": "Prep Recalcular",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO FINAL — Resumen\n// ═══════════════════════════════════════════════════════════════\n// Este nodo recibe directamente como input el output del subworkflow\n// db_recalcular_disponibilidad.\n// No referenciar el nodo Execute Workflow por nombre, porque si se\n// reemplaza o renombra, rompe el resumen final.\n// ═══════════════════════════════════════════════════════════════\n\nconst fila = $('Preparar Fila PRE_RESERVAS').first().json;\n\n// Output directo del nodo anterior: db_recalcular_disponibilidad\nconst recalculoOutput = $input.first()?.json ?? {};\n\nconst recalculo_fallo =\n  !!recalculoOutput.error ||\n  recalculoOutput.ok === false;\n\nreturn [{\n  json: {\n    ok: true,\n    id_prereserva: fila.fila.id_prereserva,\n    estado: 'pendiente_pago',\n    expira_en: fila.fila.expira_en,\n    id_consulta: fila.fila.id_consulta,\n    id_cabana: fila.fila.id_cabana,\n    fecha_in: fila.fila.fecha_in,\n    fecha_out: fila.fila.fecha_out,\n    personas: fila.fila.personas,\n    hora_checkin: fila.fila.hora_checkin,\n    hora_checkout: fila.fila.hora_checkout,\n    precio_pendiente: fila.precio_pendiente,\n    monto_total: fila.fila.monto_total || null,\n    monto_sena: fila.fila.monto_sena || null,\n    source_event: fila.fila.source_event,\n\n    recalculo_cache: recalculo_fallo ? 'warning' : 'ok',\n    recalculo_error: recalculo_fallo\n      ? 'db_recalcular_disponibilidad falló después de crear PRE_RESERVA. Cache puede estar desactualizada. Ejecutar recálculo manual.'\n      : null,\n\n    recalculo_resultado: recalculoOutput\n  }\n}];"
+      },
+      "id": "1abe95db-88a8-4a8a-bd34-05a98c7bd6fd",
+      "name": "Resumen Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "__RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__",
+          "mode": "list",
+          "cachedResultName": "__RECALCULAR_DISPONIBILIDAD_WORKFLOW_NAME__"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "b9e8ee7b-4769-400a-9965-19cfecad91f6",
+      "name": "Ejecutar db_recalcular_disponibilidad1",
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Resolver Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Input": {
+      "main": [
+        [
+          {
+            "node": "IF: input válido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: input válido": {
+      "main": [
+        [
+          {
+            "node": "Leer CABAÑAS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: input inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer CABAÑAS": {
+      "main": [
+        [
+          {
+            "node": "Agg CABAÑAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg CABAÑAS": {
+      "main": [
+        [
+          {
+            "node": "Leer CONFIGURACION_GENERAL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer CONFIGURACION_GENERAL": {
+      "main": [
+        [
+          {
+            "node": "Agg CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Leer DISPONIBILIDAD_CACHE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer DISPONIBILIDAD_CACHE": {
+      "main": [
+        [
+          {
+            "node": "Agg CACHE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg CACHE": {
+      "main": [
+        [
+          {
+            "node": "Leer PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Agg PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Leer RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Agg RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Leer BLOQUEOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer BLOQUEOS": {
+      "main": [
+        [
+          {
+            "node": "Agg BLOQUEOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg BLOQUEOS": {
+      "main": [
+        [
+          {
+            "node": "Verificar Cabaña",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar Cabaña": {
+      "main": [
+        [
+          {
+            "node": "IF: cabaña OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: cabaña OK": {
+      "main": [
+        [
+          {
+            "node": "Capa 1: Cache",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: cabaña",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capa 1: Cache": {
+      "main": [
+        [
+          {
+            "node": "IF: Capa 1 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Capa 1 OK": {
+      "main": [
+        [
+          {
+            "node": "Capa 2: Fuentes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: no disponible",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capa 2: Fuentes": {
+      "main": [
+        [
+          {
+            "node": "IF: Capa 2 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Capa 2 OK": {
+      "main": [
+        [
+          {
+            "node": "Preparar Fila PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prep LOG Conflicto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep LOG Conflicto": {
+      "main": [
+        [
+          {
+            "node": "LOG Conflicto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG Conflicto": {
+      "main": [
+        [
+          {
+            "node": "Error: conflicto detectado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Fila PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Escribir PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escribir PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Preparar LOG PRE_RESERVA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar LOG PRE_RESERVA": {
+      "main": [
+        [
+          {
+            "node": "LOG PRE_RESERVA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG PRE_RESERVA": {
+      "main": [
+        [
+          {
+            "node": "Prep Recalcular",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Recalcular": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar db_recalcular_disponibilidad1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar db_recalcular_disponibilidad1": {
+      "main": [
+        [
+          {
+            "node": "Resumen Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "__WORKFLOW_VERSION_ID__",
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "id": "__WORKFLOW_ID__",
+  "tags": []
+}
