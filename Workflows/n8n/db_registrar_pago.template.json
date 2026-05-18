@@ -1,0 +1,681 @@
+{
+  "name": "db_registrar_pago",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// TEMPLATE SANITIZADO — db_registrar_pago v1\n// ═══════════════════════════════════════════════════════════════\n// Este JSON es un template genérico para importar en n8n.\n// No contiene credenciales, IDs de Sheet ni IDs de workflow reales.\n//\n// Antes de importar, reemplazar:\n//   __SHEETS_ID__                              → ID del Google Sheet del entorno\n//   __CREDENTIAL_ID__                          → ID de la credencial OAuth en n8n\n//   __CREDENTIAL_NAME__                        → Nombre de la credencial OAuth en n8n\n//   __RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__  → ID de db_recalcular_disponibilidad\n//   __RECALCULAR_DISPONIBILIDAD_WORKFLOW_NAME__ → Nombre de db_recalcular_disponibilidad\n//\n// El mismo template sirve para DEV, TEST y PROD.\n// Solo cambia __SHEETS_ID__ y las credenciales.\n// ═══════════════════════════════════════════════════════════════\n\n// ═══════════════════════════════════════════════════════════════\n// NODO 1 — Resolver Input\n// ═══════════════════════════════════════════════════════════════\n// ALCANCE v1:\n// ✅ Registra un pago reportado manualmente por el huésped.\n// ✅ Crea fila en PAGOS con estado = en_revision.\n// ✅ Actualiza PRE_RESERVAS: estado → pago_en_revision,\n//    intentos_pago +1, referencia_mp, updated_at.\n// ✅ Escribe LOG_CAMBIOS.\n// ✅ Recalcula DISPONIBILIDAD_CACHE al final.\n//\n// ❌ FUERA DE ALCANCE en v1:\n//    - MercadoPago automático\n//    - Confirmación de reserva definitiva\n//    - Creación de RESERVA\n//    - WhatsApp / notificaciones\n//    - IA\n//    - Bypass de pago duplicado\n//\n// ⚠️  SHEETS_ID — __ENTORNO__\n// Valor actual: __SHEETS_ID__\n//\n// ⚠️  WORKFLOW ID — db_recalcular_disponibilidad\n// El nodo 'Ejecutar Recalculo Final' apunta a:\n// __RECALCULAR_DISPONIBILIDAD_WORKFLOW_NAME__ → ID: __RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__\n//\n// ⚠️  id_pago usa max + 1. Race condition posible en alta\n// concurrencia. Para producción con carga alta, migrar a UUID.\n// ═══════════════════════════════════════════════════════════════\n\nconst SHEETS_ID = '__SHEETS_ID__'; // __ENTORNO__\n\nconst METODOS_PAGO_VALIDOS = ['mp_link', 'transferencia_mp', 'transferencia_bancaria', 'tarjeta', 'efectivo', 'cripto'];\n\n// ── MANUAL_INPUT ──────────────────────────────────────────────\n// Editar estos valores para pruebas manuales del entorno correspondiente.\n// Se usan SOLO si el Manual Trigger viene vacío.\nconst MANUAL_INPUT = {\n  id_prereserva:        1,\n  monto_reportado:      50000,\n  metodo_pago:          'transferencia_mp',\n  referencia_pago:      'TEST-TRANSFERENCIA-001',\n  comprobante_url:      'https://example.com/comprobante-test.jpg',\n  fecha_pago_reportada: '',\n  notas:                'Pago de prueba',\n  source_event:         'manual'  // editar según entorno\n};\n// ─────────────────────────────────────────────────────────────\n\nconst raw             = $input.first()?.json ?? {};\nconst usandoManualInput = !raw.id_prereserva && !raw.monto_reportado;\nconst input           = usandoManualInput ? MANUAL_INPUT : raw;\n\nconst id_prereserva       = parseInt(String(input.id_prereserva ?? ''), 10);\nconst monto_reportado     = parseFloat(String(input.monto_reportado ?? ''));\nconst metodo_pago         = String(input.metodo_pago        ?? '').trim();\nconst referencia_pago     = String(input.referencia_pago    ?? '').trim();\nconst comprobante_url     = String(input.comprobante_url    ?? '').trim();\nconst fecha_pago_str      = String(input.fecha_pago_reportada ?? '').trim();\nconst notas               = String(input.notas              ?? '').trim();\nconst source_event        = String(input.source_event       ?? 'manual').trim();\n\n// Si fecha_pago_reportada viene vacía o no viene, usar now\nconst fecha_pago_reportada = (fecha_pago_str && fecha_pago_str !== '')\n  ? fecha_pago_str\n  : new Date().toISOString();\n\n// ── Validaciones ─────────────────────────────────────────────\nconst errores = [];\n\nif (isNaN(id_prereserva) || id_prereserva <= 0)\n  errores.push('id_prereserva es obligatorio y debe ser entero positivo');\nif (isNaN(monto_reportado) || monto_reportado <= 0)\n  errores.push('monto_reportado debe ser mayor a 0');\nif (!METODOS_PAGO_VALIDOS.includes(metodo_pago))\n  errores.push(`metodo_pago inválido: '${metodo_pago}'. Válidos: ${METODOS_PAGO_VALIDOS.join(', ')}`);\n\nif (errores.length > 0) {\n  return [{ json: { ok: false, error: 'input_invalido', detalle: errores, _validado: false } }];\n}\n\nreturn [{ json: {\n  SHEETS_ID,\n  id_prereserva,\n  monto_reportado,\n  metodo_pago,\n  referencia_pago,\n  comprobante_url,\n  fecha_pago_reportada,\n  notas,\n  source_event,\n  ts_inicio: new Date().toISOString(),\n  _validado: true,\n  _usando_manual_input: usandoManualInput\n}}];"
+      },
+      "id": "resolver-input",
+      "name": "Resolver Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-validado",
+              "leftValue": "={{ $json._validado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-input-valido",
+      "name": "IF: input válido",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nreturn [{ json: { ok: d.ok, error: d.error, detalle: d.detalle } }];"
+      },
+      "id": "error-input",
+      "name": "Error: input inválido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PRE_RESERVAS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "leer-prereservas",
+      "name": "Leer PRE_RESERVAS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        660,
+        260
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "data",
+        "options": {}
+      },
+      "id": "agg-prereservas",
+      "name": "Agg PRE_RESERVAS",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        880,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PAGOS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "leer-pagos",
+      "name": "Leer PAGOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        260
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "data",
+        "options": {}
+      },
+      "id": "agg-pagos",
+      "name": "Agg PAGOS",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 2 — Verificar PRE_RESERVA\n// ═══════════════════════════════════════════════════════════════\n// Validaciones en orden:\n//   1. PRE_RESERVA existe\n//   2. estado = pendiente_pago\n//   3. no está vencida (expira_en > now)\n//   4. no hay pago duplicado (PAGOS con mismo id_prereserva\n//      y estado IN ('en_revision', 'confirmado'))\n//\n// Si todo OK:\n//   - extrae monto_sena como monto_esperado\n//   - calcula id_pago = max + 1\n//   - devuelve _verificacion_ok: true\n// ═══════════════════════════════════════════════════════════════\n\nconst inputData = $('Resolver Input').first().json;\nconst ahora     = new Date();\n\nfunction parseTimestamp(val) {\n  if (!val && val !== 0) return null;\n  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;\n  if (typeof val === 'number') {\n    const d = val < 200000\n      ? new Date(Date.UTC(1899, 11, 30) + val * 86400000)\n      : new Date(val);\n    return isNaN(d.getTime()) ? null : d;\n  }\n  const s = String(val).trim();\n  if (!s) return null;\n  const d = new Date(s);\n  return isNaN(d.getTime()) ? null : d;\n}\n\n// Normalizar arrays de Sheets\nconst prereservas = ($('Agg PRE_RESERVAS').first()?.json?.data ?? [])\n  .filter(r => r && Object.keys(r).some(k => String(r[k]).trim() !== ''));\nconst pagos       = ($('Agg PAGOS').first()?.json?.data ?? [])\n  .filter(r => r && Object.keys(r).some(k => String(r[k]).trim() !== ''));\n\n// 1. Buscar PRE_RESERVA\nconst prereserva = prereservas.find(\n  p => parseInt(String(p.id_prereserva), 10) === inputData.id_prereserva\n);\n\nif (!prereserva) {\n  return [{ json: {\n    ok: false, error: 'prereserva_no_encontrada',\n    detalle: [`id_prereserva ${inputData.id_prereserva} no existe en PRE_RESERVAS`],\n    _verificacion_ok: false\n  }}];\n}\n\n// 2. Verificar estado\nconst estadoPR = String(prereserva.estado ?? '').trim();\nif (estadoPR !== 'pendiente_pago') {\n  return [{ json: {\n    ok: false, error: 'prereserva_estado_invalido',\n    detalle: [`PRE_RESERVA ${inputData.id_prereserva} tiene estado '${estadoPR}'. Se requiere 'pendiente_pago'.`],\n    estado_actual: estadoPR,\n    _verificacion_ok: false\n  }}];\n}\n\n// 3. Verificar vencimiento\nconst expiraTs = parseTimestamp(prereserva.expira_en);\nif (!expiraTs || expiraTs <= ahora) {\n  return [{ json: {\n    ok: false, error: 'prereserva_vencida',\n    detalle: [`PRE_RESERVA ${inputData.id_prereserva} está vencida. expira_en: ${prereserva.expira_en}`],\n    expira_en: prereserva.expira_en,\n    _verificacion_ok: false\n  }}];\n}\n\n// 4. Detectar pago duplicado\n// Estados bloqueantes: en_revision (esperando revisión) o confirmado (ya procesado)\nconst ESTADOS_DUPLICADO = ['en_revision', 'confirmado'];\nconst pagoDuplicado = pagos.find(p =>\n  parseInt(String(p.id_prereserva), 10) === inputData.id_prereserva &&\n  ESTADOS_DUPLICADO.includes(String(p.estado ?? '').trim())\n);\n\nif (pagoDuplicado) {\n  return [{ json: {\n    ok: false, error: 'pago_duplicado_posible',\n    detalle: [`Ya existe un pago para id_prereserva ${inputData.id_prereserva} con estado '${pagoDuplicado.estado}'.`],\n    pago_existente: {\n      id_pago:   pagoDuplicado.id_pago,\n      estado:    pagoDuplicado.estado,\n      medio_pago: pagoDuplicado.medio_pago,\n      created_at: pagoDuplicado.created_at\n    },\n    _verificacion_ok: false\n  }}];\n}\n\n// 5. Calcular id_pago = max + 1\nconst ids_pago = pagos\n  .map(p => parseInt(String(p.id_pago ?? ''), 10))\n  .filter(n => !isNaN(n) && n > 0);\nconst nuevo_id_pago = (ids_pago.length > 0 ? Math.max(...ids_pago) : 0) + 1;\n\n// 6. Extraer monto_esperado de la pre-reserva\nconst monto_esperado = parseFloat(String(prereserva.monto_sena ?? '0')) || 0;\nconst intentos_pago_actual = parseInt(String(prereserva.intentos_pago ?? '0'), 10) || 0;\n\nreturn [{ json: {\n  _verificacion_ok: true,\n  inputData,\n  prereserva,\n  nuevo_id_pago,\n  monto_esperado,\n  intentos_pago_actual\n}}];"
+      },
+      "id": "verificar-prereserva",
+      "name": "Verificar PRE_RESERVA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-verif",
+              "leftValue": "={{ $json._verificacion_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-verificacion-ok",
+      "name": "IF: verificación OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Retornar error controlado — sin escribir nada en Sheets\nconst d = $input.first().json;\nreturn [{ json: {\n  ok:     d.ok,\n  error:  d.error,\n  detalle: d.detalle,\n  ...(d.estado_actual    ? { estado_actual: d.estado_actual }       : {}),\n  ...(d.expira_en        ? { expira_en: d.expira_en }               : {}),\n  ...(d.pago_existente   ? { pago_existente: d.pago_existente }     : {})\n}}];"
+      },
+      "id": "error-controlado",
+      "name": "Error: controlado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 3 — Preparar Fila PAGOS\n// ═══════════════════════════════════════════════════════════════\n// Construye la fila completa de 22 columnas para PAGOS.\n//\n// Mapeo:\n//   tipo        = 'sena' (default v1)\n//   medio_pago  = input.metodo_pago\n//   monto_esperado = PRE_RESERVAS.monto_sena\n//   monto_recibido = input.monto_reportado\n//   moneda      = 'ARS' (default v1)\n//   estado      = 'en_revision'\n//   es_automatico = FALSE (siempre manual en v1)\n//   referencia_externa = input.referencia_pago\n//   Campos vacíos en v1: id_reserva, proveedor, cuenta_destino,\n//     tx_hash, validado_por, validado_en, motivo_rechazo\n// ═══════════════════════════════════════════════════════════════\n\nconst d     = $input.first().json;\nconst { inputData, nuevo_id_pago, monto_esperado } = d;\nconst ahora = new Date().toISOString();\n\nreturn [{ json: {\n  // ── Datos para Escribir PAGOS ────────────────────────────\n  fila_pagos: {\n    id_pago:            nuevo_id_pago,\n    id_prereserva:      inputData.id_prereserva,\n    id_reserva:         '',\n    tipo:               'sena',\n    medio_pago:         inputData.metodo_pago,\n    proveedor:          '',\n    cuenta_destino:     '',\n    monto_esperado:     monto_esperado,\n    monto_recibido:     inputData.monto_reportado,\n    moneda:             'ARS',\n    estado:             'en_revision',\n    es_automatico:      false,\n    comprobante_url:    inputData.comprobante_url,\n    referencia_externa: inputData.referencia_pago,\n    tx_hash:            '',\n    validado_por:       '',\n    validado_en:        '',\n    motivo_rechazo:     '',\n    notas:              inputData.notas,\n    source_event:       inputData.source_event,\n    created_at:         ahora,\n    updated_at:         ahora\n  },\n  // ── Datos para Actualizar PRE_RESERVAS ───────────────────\n  update_prereserva: {\n    id_prereserva:  inputData.id_prereserva,\n    estado:         'pago_en_revision',\n    intentos_pago:  d.intentos_pago_actual + 1,\n    referencia_mp:  inputData.referencia_pago,\n    updated_at:     ahora\n  },\n  // ── Metadata para LOG y Resumen ──────────────────────────\n  nuevo_id_pago,\n  monto_esperado,\n  inputData\n}}];"
+      },
+      "id": "preparar-fila-pagos",
+      "name": "Preparar Fila PAGOS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PAGOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_pago": "={{ $json.fila_pagos.id_pago }}",
+            "id_prereserva": "={{ $json.fila_pagos.id_prereserva }}",
+            "id_reserva": "={{ $json.fila_pagos.id_reserva }}",
+            "tipo": "={{ $json.fila_pagos.tipo }}",
+            "medio_pago": "={{ $json.fila_pagos.medio_pago }}",
+            "proveedor": "={{ $json.fila_pagos.proveedor }}",
+            "cuenta_destino": "={{ $json.fila_pagos.cuenta_destino }}",
+            "monto_esperado": "={{ $json.fila_pagos.monto_esperado }}",
+            "monto_recibido": "={{ $json.fila_pagos.monto_recibido }}",
+            "moneda": "={{ $json.fila_pagos.moneda }}",
+            "estado": "={{ $json.fila_pagos.estado }}",
+            "es_automatico": "={{ $json.fila_pagos.es_automatico }}",
+            "comprobante_url": "={{ $json.fila_pagos.comprobante_url }}",
+            "referencia_externa": "={{ $json.fila_pagos.referencia_externa }}",
+            "tx_hash": "={{ $json.fila_pagos.tx_hash }}",
+            "validado_por": "={{ $json.fila_pagos.validado_por }}",
+            "validado_en": "={{ $json.fila_pagos.validado_en }}",
+            "motivo_rechazo": "={{ $json.fila_pagos.motivo_rechazo }}",
+            "notas": "={{ $json.fila_pagos.notas }}",
+            "source_event": "={{ $json.fila_pagos.source_event }}",
+            "created_at": "={{ $json.fila_pagos.created_at }}",
+            "updated_at": "={{ $json.fila_pagos.updated_at }}"
+          }
+        },
+        "options": {
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "escribir-pagos",
+      "name": "Escribir PAGOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2200,
+        260
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar los campos a actualizar en PRE_RESERVAS\nconst d = $('Preparar Fila PAGOS').first().json;\nreturn [{ json: d.update_prereserva }];"
+      },
+      "id": "preparar-update-pr",
+      "name": "Preparar Update PRE_RESERVAS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PRE_RESERVAS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "id_prereserva"
+          ],
+          "value": {
+            "id_prereserva": "={{ $json.id_prereserva }}",
+            "estado": "={{ $json.estado }}",
+            "intentos_pago": "={{ $json.intentos_pago }}",
+            "referencia_mp": "={{ $json.referencia_mp }}",
+            "updated_at": "={{ $json.updated_at }}"
+          }
+        },
+        "options": {
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "actualizar-prereserva",
+      "name": "Actualizar PRE_RESERVAS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2640,
+        260
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 4 — Preparar LOG_CAMBIOS\n// ═══════════════════════════════════════════════════════════════\nconst d     = $('Preparar Fila PAGOS').first().json;\nconst ahora = new Date();\n\nreturn [{ json: {\n  id_log:           `LOG-PAGO-${ahora.getTime()}`,\n  fecha_hora:        ahora.toISOString(),\n  tabla_afectada:   'PRE_RESERVAS',\n  id_registro:      String(d.inputData.id_prereserva),\n  campo_modificado: 'estado',\n  valor_anterior:   'pendiente_pago',\n  valor_nuevo:      'pago_en_revision',\n  modificado_por:   'n8n',\n  source_event:     d.inputData.source_event,\n  nivel:            'info',\n  detalle: JSON.stringify({\n    id_pago:                d.nuevo_id_pago,\n    id_prereserva:          d.inputData.id_prereserva,\n    medio_pago:             d.inputData.metodo_pago,\n    monto_recibido:         d.inputData.monto_reportado,\n    monto_esperado:         d.monto_esperado,\n    referencia_externa:     d.inputData.referencia_pago,\n    requiere_revision_manual: true\n  })\n}}];"
+      },
+      "id": "preparar-log",
+      "name": "Preparar LOG",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "LOG_CAMBIOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_log": "={{ $json.id_log }}",
+            "fecha_hora": "={{ $json.fecha_hora }}",
+            "tabla_afectada": "={{ $json.tabla_afectada }}",
+            "id_registro": "={{ $json.id_registro }}",
+            "campo_modificado": "={{ $json.campo_modificado }}",
+            "valor_anterior": "={{ $json.valor_anterior }}",
+            "valor_nuevo": "={{ $json.valor_nuevo }}",
+            "modificado_por": "={{ $json.modificado_por }}",
+            "source_event": "={{ $json.source_event }}",
+            "nivel": "={{ $json.nivel }}",
+            "detalle": "={{ $json.detalle }}"
+          }
+        },
+        "options": {
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "escribir-log",
+      "name": "Escribir LOG_CAMBIOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        3080,
+        260
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar llamada a db_recalcular_disponibilidad\n// Recálculo completo — sin scope parcial.\n// source_event identifica que el trigger fue un pago reportado.\nreturn [{ json: { source_event: 'pago_reportado' } }];"
+      },
+      "id": "prep-recalcular",
+      "name": "Prep Recalcular",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "__RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__",
+          "mode": "list",
+          "cachedResultName": "__RECALCULAR_DISPONIBILIDAD_WORKFLOW_NAME__"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "ejecutar-recalcular",
+      "name": "Ejecutar Recalculo Final",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3520,
+        260
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO FINAL — Resumen\n// ═══════════════════════════════════════════════════════════════\n// continueOnFail = true en Ejecutar Recalculo Final garantiza\n// que este nodo siempre se ejecuta.\n//\n// Si el recálculo falló:\n//   - El pago ya fue registrado en PAGOS.\n//   - PRE_RESERVAS ya fue actualizada a pago_en_revision.\n//   - LOG_CAMBIOS ya fue escrito.\n//   - Solo la cache puede estar desactualizada.\n//   - Acción: ejecutar db_recalcular_disponibilidad manualmente.\n// ═══════════════════════════════════════════════════════════════\n\nconst d = $('Preparar Fila PAGOS').first().json;\n\n// Detectar si el recálculo falló\nconst recalculoOutput = $('Ejecutar Recalculo Final').first()?.json ?? {};\nconst recalculo_fallo = !!recalculoOutput.error || recalculoOutput.ok === false;\n\nreturn [{ json: {\n  ok:                       true,\n  id_pago:                  d.nuevo_id_pago,\n  id_prereserva:            d.inputData.id_prereserva,\n  estado_pago:              'en_revision',\n  estado_prereserva:        'pago_en_revision',\n  requiere_revision_manual: true,\n  recalculo_cache:          recalculo_fallo ? 'warning' : 'ok',\n  recalculo_error:          recalculo_fallo\n    ? 'db_recalcular_disponibilidad falló después de registrar el pago. Cache puede estar desactualizada. Ejecutar recálculo manual.'\n    : null,\n  mensaje: 'Pago registrado para revisión manual'\n}}];"
+      },
+      "id": "resumen-final",
+      "name": "Resumen Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Resolver Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Input": {
+      "main": [
+        [
+          {
+            "node": "IF: input válido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: input válido": {
+      "main": [
+        [
+          {
+            "node": "Leer PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: input inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Agg PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Leer PAGOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Agg PAGOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Verificar PRE_RESERVA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar PRE_RESERVA": {
+      "main": [
+        [
+          {
+            "node": "IF: verificación OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: verificación OK": {
+      "main": [
+        [
+          {
+            "node": "Preparar Fila PAGOS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: controlado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Fila PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Escribir PAGOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escribir PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Preparar Update PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Update PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Actualizar PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Preparar LOG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar LOG": {
+      "main": [
+        [
+          {
+            "node": "Escribir LOG_CAMBIOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escribir LOG_CAMBIOS": {
+      "main": [
+        [
+          {
+            "node": "Prep Recalcular",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Recalcular": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar Recalculo Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Recalculo Final": {
+      "main": [
+        [
+          {
+            "node": "Resumen Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "pinData": {},
+  "id": "__WORKFLOW_ID__",
+  "versionId": "__WORKFLOW_VERSION_ID__"
+}

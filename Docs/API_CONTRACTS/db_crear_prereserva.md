@@ -192,16 +192,27 @@ la disponibilidad de forma provisional hasta que se confirme el pago.
 
 ## 8. Subworkflows llamados
 
-| Workflow | Cuando | Modo |
-|---|---|---|
-| db_recalcular_disponibilidad | Despues de escribir PRE_RESERVAS exitosamente | Sincrono (waitForSubWorkflow: true) |
+| Workflow | Cuando | Modo | continueOnFail |
+|---|---|---|---|
+| `db_recalcular_disponibilidad` | Al inicio, antes de leer DISPONIBILIDAD_CACHE | Sincrono | Si — si falla, no se crea la PRE_RESERVA |
+| `db_recalcular_disponibilidad` | Al final, despues de escribir PRE_RESERVAS y LOG_CAMBIOS | Sincrono | Si — si falla, PRE_RESERVA ya fue creada; output retorna `recalculo_cache = warning` |
 
-Notas criticas:
+**Recalculo inicial (antes de verificar disponibilidad):**
+El workflow recalcula la cache antes de consultarla. Esto garantiza que pre-reservas
+vencidas en `pendiente_pago` ya no bloquen disponibilidad al momento de la verificacion.
+Si el recalculo inicial falla, el workflow retorna `error: recalculo_inicial_fallido`
+y no crea la PRE_RESERVA — no se verifica contra cache potencialmente desactualizada.
 
-- db_recalcular_disponibilidad debe tener un trigger "When Executed by Another Workflow" conectado al mismo nodo inicial que el Manual Trigger. Sin este trigger n8n no puede llamarlo como subworkflow.
+**Recalculo final (despues de crear la PRE_RESERVA):**
+Actualiza la cache para que refleje el nuevo bloqueo de la PRE_RESERVA recien creada.
+Si falla, la PRE_RESERVA ya existe correctamente en Sheets, pero la cache puede estar
+desactualizada. Output retorna `recalculo_cache = warning`.
+
+**Notas criticas:**
+- `db_recalcular_disponibilidad` debe tener un trigger "When Executed by Another Workflow" conectado al mismo nodo inicial que el Manual Trigger. Sin este trigger n8n no puede llamarlo como subworkflow.
 - La version actual v8 ejecuta recalculo COMPLETO: limpia DISPONIBILIDAD_CACHE!A2:R y reescribe las 300 filas.
-- Por eso db_crear_prereserva NO envia id_cabanas ni fechas al subworkflow. Enviarlo con scope parcial borraria todas las filas y escribiria solo las del rango solicitado.
-- Cuando exista una version de db_recalcular_disponibilidad con recalculo parcial real (que no borre la cache completa), actualizar el nodo Prep Recalcular para enviar scope especifico.
+- `db_crear_prereserva` NO envia `id_cabanas` ni `fechas` al subworkflow. Enviarlo con scope parcial borraria todas las filas y escribiria solo las del rango solicitado.
+- Cuando exista una version de `db_recalcular_disponibilidad` con recalculo parcial real, actualizar ambos nodos de recalculo para enviar scope especifico.
 
 ---
 
@@ -232,7 +243,8 @@ Fuentes directas que bloquean en Capa 2:
 | Fuente | Condicion |
 |---|---|
 | RESERVAS | estado IN (confirmada, activa) + solapamiento de rango |
-| PRE_RESERVAS | estado = pendiente_pago + expira_en mayor que ahora + solapamiento de rango |
+| PRE_RESERVAS | estado = `pendiente_pago` + expira_en > ahora + solapamiento de rango |
+| PRE_RESERVAS | estado = `pago_en_revision` + solapamiento de rango (bloquea siempre, sin verificar expira_en) |
 | BLOQUEOS | activo = TRUE + solapamiento de rango [fecha_desde, fecha_hasta) |
 
 Deteccion de solapamiento: rangoA_in menor que rangoB_out AND rangoA_out mayor que rangoB_in.
@@ -270,9 +282,10 @@ Deteccion de solapamiento: rangoA_in menor que rangoB_out AND rangoA_out mayor q
 | Riesgo | Severidad | Mitigacion actual |
 |---|---|---|
 | id_prereserva usa max + 1 con posible race condition | Media | Concurrencia = 1. Solucion definitiva: UUID o DB transaccional. |
-| No hay rollback si falla el recalculo post-escritura | Media | continueOnFail = true en Execute Workflow. Output retorna recalculo_cache = warning. Accion: ejecutar recalculo manual. |
+| Fallo del recalculo inicial — no crea la PRE_RESERVA | Baja | `continueOnFail: true` + IF evalua error. Output retorna `recalculo_inicial_fallido`. Accion: reintentar o ejecutar recalculo manual. |
+| No hay rollback si falla el recalculo final post-escritura | Media | `continueOnFail: true`. Output retorna `recalculo_cache = warning`. Accion: ejecutar recalculo manual. |
 | Google Sheets no es transaccional | Alta a escala | Aceptado para DEV/TEST. Solucion definitiva: DB relacional. |
-| Capa 1 puede estar desactualizada hasta el proximo recalculo exitoso | Baja | Capa 2 verifica directamente contra RESERVAS, PRE_RESERVAS y BLOQUEOS antes de escribir. |
+| Capa 1 puede estar desactualizada hasta el proximo recalculo exitoso | Baja | El recalculo inicial al comienzo del workflow reduce este riesgo. Capa 2 verifica directamente contra RESERVAS, PRE_RESERVAS y BLOQUEOS antes de escribir. |
 
 ---
 
@@ -288,6 +301,7 @@ Deteccion de solapamiento: rangoA_in menor que rangoB_out AND rangoA_out mayor q
 | 6 | Fecha invalida (out anterior a in) | ok: false, error: input_invalido |
 | 7 | Domingo con hora_checkin vacia | hora_checkin = 18:00 en PRE_RESERVAS |
 | 8 | Recalculo post-creacion | DISPONIBILIDAD_CACHE refleja ocupada en fechas del rango |
+| 9 | PRE_RESERVA con pago_en_revision y expira_en vencido en las fechas solicitadas | ok: false, error: no_disponible — pago_en_revision bloquea siempre |
 
 Todos los casos validados en DEV y TEST.
 
@@ -299,5 +313,5 @@ Todos los casos validados en DEV y TEST.
 - expira_en indica hasta cuando esta reservado el slot. Mostrar cuenta regresiva si aplica.
 - Si precio_pendiente = true, el precio aun no fue calculado. No mostrar monto al usuario hasta tener precio real.
 - Si recalculo_cache = warning, la cache puede estar desactualizada por un tiempo breve. Para el usuario final no cambia nada — la pre-reserva existe y bloquea. El warning es operativo, no de negocio.
-- El siguiente paso en el flujo es db_registrar_pago (pendiente de implementacion). No avanzar a confirmacion sin pasar por el registro de pago.
-- No comunicar al usuario que la reserva esta confirmada hasta que db_confirmar_reserva complete exitosamente.
+- El siguiente paso en el flujo es `db_registrar_pago` (validado en DEV y TEST). Llamarlo cuando el huesped reporte haber enviado el pago.
+- No comunicar al usuario que la reserva esta confirmada hasta que `db_confirmar_reserva` complete exitosamente.

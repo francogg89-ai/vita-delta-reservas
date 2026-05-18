@@ -25,7 +25,7 @@ Regenera completamente la hoja `DISPONIBILIDAD_CACHE` para un conjunto de cabañ
 | Campo | Valor |
 |---|---|
 | Versión validada | v8 |
-| Archivo n8n | `dev_db_recalcular_disponibilidad_v8_final.json` / `test_db_recalcular_disponibilidad_v8_final.json` |
+| Archivo template | `Workflows/n8n/db_recalcular_disponibilidad.template.json` |
 | DEV | ✅ validado |
 | TEST | ✅ validado |
 | Concurrencia configurada | 1 (nunca en paralelo) |
@@ -41,22 +41,22 @@ El input se pasa como JSON al nodo Execute Workflow.
 
 ```json
 {
-  "id_cabanas": [1, 2, 3],
-  "fechas": ["2026-06-20", "2026-06-21"],
   "source_event": "string"
 }
 ```
 
 | Campo | Tipo | Obligatorio | Descripción |
 |---|---|---|---|
-| `id_cabanas` | `integer[]` | No | IDs de cabañas a recalcular. Vacío = todas las cabañas activas |
-| `fechas` | `string[]` | No | Fechas `YYYY-MM-DD` a recalcular. Vacío = próximos 60 días desde hoy |
 | `source_event` | `string` | No | Origen del llamado. Default: `recalculo_manual` |
 
-**Defaults cuando viene vacío:**
-- `id_cabanas = []` → recalcula las 5 cabañas activas
-- `fechas = []` → genera las próximas 60 fechas desde hoy (UTC)
-- Resultado típico: 300 filas (5 cabañas × 60 días)
+> **⚠️ Scope parcial no soportado en v8.**
+> Los campos `id_cabanas` y `fechas` son ignorados aunque vengan en el input.
+> v8 realiza siempre recálculo completo: limpia `DISPONIBILIDAD_CACHE!A2:R` antes de escribir.
+> Si se permitiera scope parcial, se borrarían las 300 filas y se reescribirían solo
+> las del rango solicitado, dejando el resto de la cache vacío.
+> Cuando exista una versión con recálculo parcial real, este campo se habilitará.
+
+**Resultado típico:** 300 filas (5 cabañas × 60 días desde hoy UTC).
 
 ---
 
@@ -164,10 +164,23 @@ de cada conflicto detectado.
 |---|---|
 | Concurrencia | 1. Nunca ejecutar en paralelo. |
 | Fuente de verdad | DISPONIBILIDAD_CACHE es derivada, no editable manualmente. |
+| Scope parcial | No soportado en v8. `id_cabanas` y `fechas` del input son ignorados. Ver sección 3. |
 | OVERRIDES_OPERATIVOS | No implementados en v8. Diferido para iteración posterior. |
 | `es_ultimo_dia_bloque` | Siempre `FALSE` en v8. Requiere lookahead al día siguiente. |
 | Escalonamiento de check-in | No implementado. Diferido por arquitectura (Etapa 2 v1.3). |
 | Conflicto RESERVA vs RESERVA | No genera warning en v8. Issue documentado en GitHub. |
+
+**Regla de PRE_RESERVAS bloqueantes (actualización mayo 2026):**
+
+Una PRE_RESERVA bloquea disponibilidad si se cumple alguna de estas condiciones:
+
+| Estado | Condición de bloqueo |
+|---|---|
+| `pendiente_pago` | `expira_en > ahora` — vence si no se paga |
+| `pago_en_revision` | Siempre — sin verificar `expira_en` |
+
+Una PRE_RESERVA en `pago_en_revision` sigue bloqueando aunque `expira_en` esté vencido,
+porque hay un pago reportado pendiente de verificación manual.
 
 ---
 
@@ -198,12 +211,14 @@ de cada conflicto detectado.
 | 6 | Feriado `2026-06-20` | `tipo_dia = feriado`, estado según bloqueos/reservas | ✅ |
 | 7 | Domingo cualquiera | `hora_checkin_minima = 18:00` | ✅ |
 | 8 | Viernes y sábado | `tipo_dia = finde` | ✅ |
+| 9 | PRE_RESERVA con `estado = pago_en_revision` y `expira_en` vencido | Fechas siguen marcadas como `ocupada` — `pago_en_revision` bloquea siempre | ✅ |
 
 ### TEST
 
 | # | Descripción | Resultado | ✅ |
 |---|---|---|---|
 | 1 | Ejecución inicial con cache vacía, sin datos | 300 filas `disponible`, 0 warnings, 1 LOG | ✅ |
+| 2 | PRE_RESERVA con `estado = pago_en_revision` y `expira_en` vencido | Fechas siguen `ocupada` — misma lógica que DEV | ✅ |
 
 ### Modos de ejecución
 

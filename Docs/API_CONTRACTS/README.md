@@ -17,7 +17,7 @@ y convertible a OpenAPI/Swagger más adelante cuando se expongan como webhooks r
 | `db_recalcular_disponibilidad` | [db_recalcular_disponibilidad.md](./db_recalcular_disponibilidad.md) | validado | Si | Si |
 | `db_crear_consulta` | [db_crear_consulta.md](./db_crear_consulta.md) | validado | Si | Si |
 | `db_crear_prereserva` | [db_crear_prereserva.md](./db_crear_prereserva.md) | validado | Si | Si |
-| `db_registrar_pago` | pendiente | pendiente | — | — |
+| `db_registrar_pago` | [db_registrar_pago.md](./db_registrar_pago.md) | validado | Si | Si |
 | `db_confirmar_reserva` | pendiente | pendiente | — | — |
 | `sistema_expirar_prereservas` | pendiente | pendiente | — | — |
 
@@ -29,7 +29,7 @@ y convertible a OpenAPI/Swagger más adelante cuando se expongan como webhooks r
 - **IDs:** enteros positivos, calculados como `max + 1` en DEV/TEST.
   Para producción con alta concurrencia migrar a UUID o DB transaccional.
 - **fecha_in / fecha_out:** intervalo semiabierto `[fecha_in, fecha_out)`.
-  `fecha_in` es inclusive, `fecha_out` es exclusive.
+  `fecha_in` es inclusive, `fecha_out` es exclusiva.
 - **SHEETS_ID:** no incluido en este repositorio. Ver `.env.example`.
 - **Credenciales n8n:** no portables entre instancias. Sanitizar antes de commitear.
 
@@ -64,4 +64,6 @@ workflow id       → __WORKFLOW_ID__
 instanceId        → __N8N_INSTANCE_ID__
 versionId         → __WORKFLOW_VERSION_ID__
 subworkflow IDs   → __RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__ (u otros placeholders segun el caso)
+credential name   → __CREDENTIAL_NAME__
+subworkflow name  → __RECALCULAR_DISPONIBILIDAD_WORKFLOW_NAME__ (u otros placeholders según el caso)
 ```

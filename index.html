@@ -689,8 +689,8 @@
   <div class="hero-badges">
     <span class="badge badge-green"><span class="badge-dot"></span>Arquitectura cerrada</span>
     <span class="badge badge-green"><span class="badge-dot"></span>DEV y TEST validados</span>
-    <span class="badge badge-amber"><span class="badge-dot"></span>Workflows validados</span>
-    <span class="badge badge-amber"><span class="badge-dot"></span>Etapa 4 en curso</span>
+    <span class="badge badge-green"><span class="badge-dot"></span>4 workflows validados</span>
+    <span class="badge badge-amber"><span class="badge-dot"></span>Confirmación definitiva: próximo paso</span>
   </div>
 </section>
 
@@ -707,7 +707,7 @@
     <div class="summary-card reveal">
       <div class="summary-icon">⚙️</div>
       <h3>Funciona en DEV y TEST</h3>
-      <p>Los primeros tres workflows están validados en entornos separados. Hay datos reales, logs y trazabilidad.</p>
+      <p>Los primeros cuatro workflows están validados en entornos separados. Hay datos reales, logs y trazabilidad hasta el registro de pago.</p>
     </div>
     <div class="summary-card reveal">
       <div class="summary-icon">📐</div>
@@ -860,6 +860,23 @@
       </div>
     </div>
 
+    <div class="wf-card reveal">
+      <div class="wf-header">
+        <span class="wf-status">Validado ✓</span>
+        <div class="wf-name">db_registrar_pago · v1</div>
+        <div class="wf-title">Registro de Pago</div>
+      </div>
+      <div class="wf-body">
+        <p class="wf-desc">Registra el pago reportado por el huésped y lo deja en estado <em>en_revision</em>. La pre-reserva pasa de <em>pendiente_pago</em> a <em>pago_en_revision</em> y sigue bloqueando disponibilidad aunque la fecha de vencimiento original haya expirado. La confirmación definitiva queda a cargo del próximo workflow.</p>
+        <div class="wf-tags">
+          <span class="wf-tag">Pago en revisión</span>
+          <span class="wf-tag">Bloqueo extendido</span>
+          <span class="wf-tag">Revisión manual</span>
+          <span class="wf-tag">Trazabilidad</span>
+        </div>
+      </div>
+    </div>
+
   </div>
 </section>
 
@@ -884,19 +901,25 @@
     <div class="flow-step">
       <div class="flow-num">🔒</div>
       <h4>Pre-reserva</h4>
-      <p>Se bloquean las fechas temporalmente. El huésped tiene tiempo para pagar.</p>
+      <p>Se bloquean las fechas temporalmente. El huésped tiene tiempo para reportar el pago.</p>
     </div>
 
     <div class="flow-step">
       <div class="flow-num">💳</div>
-      <h4>Pago</h4>
-      <p>(Próximamente) El huésped reporta el pago. El sistema re-valida disponibilidad.</p>
+      <h4>Pago reportado</h4>
+      <p>El huésped reporta el pago. El sistema lo registra en estado <em>en_revision</em> y extiende el bloqueo de fechas.</p>
+    </div>
+
+    <div class="flow-step">
+      <div class="flow-num">🔍</div>
+      <h4>Revisión manual</h4>
+      <p>El equipo verifica la transferencia. El pago queda en revisión hasta su aprobación.</p>
     </div>
 
     <div class="flow-step">
       <div class="flow-num">✅</div>
       <h4>Confirmación</h4>
-      <p>(Próximamente) La reserva se confirma. Calendario y equipo notificados automáticamente.</p>
+      <p>(Próximo paso) La reserva se confirma definitivamente con <em>db_confirmar_reserva</em>. Calendario y equipo notificados.</p>
     </div>
 
   </div>
@@ -947,13 +970,13 @@
       </tr>
       <tr>
         <td>Registro de pagos</td>
-        <td>db_registrar_pago — en diseño</td>
-        <td><span class="chip chip-pending">→ Pendiente</span></td>
+        <td>db_registrar_pago v1 — pago en revisión, bloqueo extendido</td>
+        <td><span class="chip chip-done">✓ Completo</span></td>
       </tr>
       <tr>
         <td>Confirmación definitiva</td>
-        <td>db_confirmar_reserva</td>
-        <td><span class="chip chip-pending">→ Pendiente</span></td>
+        <td>db_confirmar_reserva — próximo workflow a implementar</td>
+        <td><span class="chip chip-pending">→ Próximo paso</span></td>
       </tr>
       <tr>
         <td>Expiración automática</td>
@@ -994,13 +1017,13 @@
       <div class="roadmap-item">Validaciones y protecciones</div>
       <div class="roadmap-item">Registro de consultas</div>
       <div class="roadmap-item">Pre-reservas con bloqueo</div>
+      <div class="roadmap-item">Registro de pago reportado</div>
       <div class="roadmap-item">Contratos técnicos documentados</div>
     </div>
 
     <div class="roadmap-col soon">
       <h3>Próximos pasos</h3>
-      <div class="roadmap-item">Registro de pagos</div>
-      <div class="roadmap-item">Confirmación definitiva</div>
+      <div class="roadmap-item">Confirmación definitiva de reserva</div>
       <div class="roadmap-item">Expiración automática de pre-reservas</div>
       <div class="roadmap-item">Motor de reservas completo</div>
       <div class="roadmap-item">Entorno productivo en Google Sheets</div>
@@ -1029,7 +1052,7 @@
   </p>
   <br><br>
   <p style="color: rgba(255,255,255,0.35); font-size: 0.85rem; font-style: italic;">
-    "Ya no es solo una idea ni un prototipo visual: el sistema core empezó a funcionar en DEV y TEST."
+    "La arquitectura operativa ya llega hasta el registro de pago reportado y revisión manual. La confirmación definitiva de reserva es el próximo paso."
   </p>
 </section>
 

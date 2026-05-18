@@ -48,7 +48,7 @@ Los Sheets `VITA_DELTA_DEV` y `VITA_DELTA_TEST` están creados y verificados.
 | `db_recalcular_disponibilidad` | v8 | Validado | Validado | Regenera DISPONIBILIDAD_CACHE completa |
 | `db_crear_consulta` | v3 | Validado | Validado | Registra o recupera una consulta activa |
 | `db_crear_prereserva` | v2 | Validado | Validado | Crea pre-reserva temporal con doble verificación de disponibilidad |
-| `db_registrar_pago` | — | Pendiente | Pendiente | Registra un pago recibido |
+| `db_registrar_pago` | v1 | Validado | Validado | Registra un pago reportado y pasa PRE_RESERVA a revisión manual |
 | `db_confirmar_reserva` | — | Pendiente | Pendiente | Confirma la reserva definitiva tras el pago |
 | `sistema_expirar_prereservas` | — | Pendiente | Pendiente | Expira pre-reservas vencidas automáticamente |
 
@@ -78,7 +78,7 @@ Los humanos auditan.
 Consulta entrante
   → db_crear_consulta          registra la consulta
   → db_crear_prereserva        bloqueo temporal + verificación en 2 capas
-  → db_registrar_pago          (pendiente)
+  → db_registrar_pago          registra el pago reportado → PRE_RESERVA pasa a revisión manual
   → db_confirmar_reserva       (pendiente)
 ```
 
@@ -96,7 +96,7 @@ El prototipo visual original de la futura web de reservas fue movido a `Prototip
 
 ## Qué no está implementado todavía
 
-- `db_registrar_pago`, `db_confirmar_reserva` y `sistema_expirar_prereservas`.
+- `db_confirmar_reserva` y `sistema_expirar_prereservas`.
 - Integración con MercadoPago.
 - Integración con WhatsApp e Instagram.
 - Bot conversacional conectado a canales reales.
@@ -108,7 +108,7 @@ El prototipo visual original de la futura web de reservas fue movido a `Prototip
 
 ## Próximo paso
 
-Implementar `db_registrar_pago`: el workflow que registra un pago recibido, actualiza el estado de la pre-reserva y prepara el camino para `db_confirmar_reserva`.
+Implementar `db_confirmar_reserva`: el workflow que confirma la reserva definitiva después de que Franco o Rodrigo validan el pago registrado en `db_registrar_pago`.
 
 ---
 
@@ -134,7 +134,8 @@ Docs/
 │   ├── README.md
 │   ├── db_recalcular_disponibilidad.md
 │   ├── db_crear_consulta.md
-│   └── db_crear_prereserva.md
+│   ├── db_crear_prereserva.md
+│   └── db_registrar_pago.md
 │
 └── Implementacion/
     ├── README.md
@@ -149,7 +150,8 @@ Workflows/
     ├── README.md
     ├── db_recalcular_disponibilidad.template.json
     ├── db_crear_consulta.template.json
-    └── db_crear_prereserva.template.json
+    ├── db_crear_prereserva.template.json
+    └── db_registrar_pago.template.json
 ```
 
 ---

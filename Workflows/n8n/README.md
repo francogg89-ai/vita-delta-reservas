@@ -57,7 +57,9 @@ https://tu-instancia.n8n.cloud/workflow/__RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID_
 3. Seleccionar el archivo modificado
 4. Verificar que los nodos Google Sheets apuntan al Sheet correcto
 5. Ctrl+S
-6. Settings del workflow → Max Concurrency = 1 (para db_crear_prereserva)
+6. Settings del workflow → Max Concurrency = 1 cuando aplique:
+- db_recalcular_disponibilidad
+- db_crear_prereserva
 7. Execute workflow
 
 ## DEV vs TEST vs PROD
@@ -73,13 +75,19 @@ La unica diferencia es el valor de `__SHEETS_ID__` y las credenciales.
 
 ## Nota sobre db_recalcular_disponibilidad como subworkflow
 
-`db_crear_prereserva` llama a `db_recalcular_disponibilidad` como subworkflow.
-Para que esto funcione, `db_recalcular_disponibilidad` DEBE tener un trigger
-"When Executed by Another Workflow" conectado al nodo inicial del workflow
-(ademas del Manual Trigger que se usa para pruebas manuales).
+`db_recalcular_disponibilidad` es llamado como subworkflow por otros workflows.
+Para que esto funcione, DEBE tener un trigger "When Executed by Another Workflow"
+conectado al nodo inicial (ademas del Manual Trigger que se usa para pruebas manuales).
 
-Sin ese trigger, n8n no puede invocar el workflow como subworkflow y
-`db_crear_prereserva` fallara en el paso de recalculo de cache.
+Sin ese trigger, n8n no puede invocar el workflow como subworkflow.
+
+Workflows que llaman a `db_recalcular_disponibilidad`:
+
+| Workflow que llama | Cuando | Motivo |
+|---|---|---|
+| `db_crear_prereserva` | Al inicio, antes de verificar disponibilidad | Limpiar pre-reservas vencidas de la cache antes de consultar |
+| `db_crear_prereserva` | Al final, despues de crear la PRE_RESERVA | Reflejar el nuevo bloqueo en cache |
+| `db_registrar_pago` | Al final, despues de actualizar PRE_RESERVAS | Reflejar que pago_en_revision bloquea aunque expira_en este vencido |
 
 ## Workflows disponibles
 
@@ -88,12 +96,12 @@ Sin ese trigger, n8n no puede invocar el workflow como subworkflow y
 | `db_recalcular_disponibilidad.template.json` | Regenera DISPONIBILIDAD_CACHE completa | [Docs/API_CONTRACTS/db_recalcular_disponibilidad.md](../../Docs/API_CONTRACTS/db_recalcular_disponibilidad.md) |
 | `db_crear_consulta.template.json` | Registra o recupera una consulta activa | [Docs/API_CONTRACTS/db_crear_consulta.md](../../Docs/API_CONTRACTS/db_crear_consulta.md) |
 | `db_crear_prereserva.template.json` | Crea pre-reserva temporal con doble verificacion | [Docs/API_CONTRACTS/db_crear_prereserva.md](../../Docs/API_CONTRACTS/db_crear_prereserva.md) |
+| `db_registrar_pago.template.json` | Registra pago reportado y pasa PRE_RESERVA a pago_en_revision | [Docs/API_CONTRACTS/db_registrar_pago.md](../../Docs/API_CONTRACTS/db_registrar_pago.md) |
 
 ## Workflows pendientes de implementar
 
 | Workflow | Estado |
 |---|---|
-| `db_registrar_pago` | pendiente |
 | `db_confirmar_reserva` | pendiente |
 | `sistema_expirar_prereservas` | pendiente |
 
@@ -105,14 +113,16 @@ Docs/
     ├── README.md
     ├── db_recalcular_disponibilidad.md
     ├── db_crear_consulta.md
-    └── db_crear_prereserva.md
+    ├── db_crear_prereserva.md
+    └── db_registrar_pago.md
 
 Workflows/
 └── n8n/
     ├── README.md
     ├── db_recalcular_disponibilidad.template.json
     ├── db_crear_consulta.template.json
-    └── db_crear_prereserva.template.json
+    ├── db_crear_prereserva.template.json
+    └── db_registrar_pago.template.json
 ```
 
 ## Notas generales
