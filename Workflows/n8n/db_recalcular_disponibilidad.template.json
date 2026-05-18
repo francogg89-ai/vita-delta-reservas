@@ -14,7 +14,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 1 — Resolver Input\n// ═══════════════════════════════════════════════════════════════\n// ⚠️  SHEETS_ID — reemplazar __SHEETS_ID__ con el ID real del Sheets\n// Actualizar aquí y en todos los nodos Google Sheets si cambia.\n// Valor actual: __SHEETS_ID__\n//\n// ⚠️  CREDENCIALES\n// credential id (__CREDENTIAL_ID__) específico de esta instancia.\n// Sanitizar antes de subir a GitHub:\n//   \"id\" en cada bloque credentials → \"__CREDENTIAL_ID__\"\n//   SHEETS_ID → \"__SHEETS_ID__\"\n// ═══════════════════════════════════════════════════════════════\n\nconst SHEETS_ID  = '__SHEETS_ID__'; // __ENTORNO__\nconst DIAS_CICLO = 60;\n\nconst input = $input.first()?.json ?? {};\n\nfunction generarFechas(dias) {\n  const fechas = [];\n  const hoy = new Date();\n  hoy.setUTCHours(0, 0, 0, 0);\n  for (let i = 0; i < dias; i++) {\n    const d = new Date(hoy);\n    d.setUTCDate(hoy.getUTCDate() + i);\n    fechas.push(d.toISOString().split('T')[0]);\n  }\n  return fechas;\n}\n\nconst id_cabanas_input = (Array.isArray(input.id_cabanas) && input.id_cabanas.length > 0)\n  ? input.id_cabanas : [];\n\nconst fechas = (Array.isArray(input.fechas) && input.fechas.length > 0)\n  ? input.fechas : generarFechas(DIAS_CICLO);\n\nconst source_event = input.source_event ?? 'recalculo_manual';\n\nreturn [{\n  json: {\n    SHEETS_ID,\n    id_cabanas_input,\n    fechas,\n    source_event,\n    scope: id_cabanas_input.length === 0 ? 'todas_las_cabanas' : 'cabanas_especificas',\n    total_fechas: fechas.length,\n    ts_inicio: new Date().toISOString()\n  }\n}];"
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// TEMPLATE SANITIZADO — db_recalcular_disponibilidad v8\n// ═══════════════════════════════════════════════════════════════\n// Este JSON es un template genérico para importar en n8n.\n// No contiene credenciales, IDs de Sheet ni IDs de workflow reales.\n//\n// Antes de importar, reemplazar:\n//   __SHEETS_ID__       → ID del Google Sheet del entorno\n//   __CREDENTIAL_ID__   → ID de la credencial OAuth en n8n\n//   __CREDENTIAL_NAME__ → Nombre de la credencial OAuth en n8n\n//\n// El mismo template sirve para DEV, TEST y PROD.\n// Solo cambia __SHEETS_ID__ y las credenciales.\n//\n// RECÁLCULO COMPLETO:\n// Este workflow limpia DISPONIBILIDAD_CACHE!A2:R y reescribe\n// todas las filas del ciclo (por defecto 5 cabañas × 60 días).\n// No enviar id_cabanas ni fechas para scope parcial hasta que\n// exista una versión específica de recálculo parcial que no borre\n// la cache completa antes de escribir.\n//\n// TRIGGERS:\n// Este workflow tiene dos triggers conectados a Resolver Input:\n//   1. Manual Trigger — para pruebas manuales desde n8n.\n//   2. When Executed by Another Workflow — para ser llamado como\n//      subworkflow desde db_crear_prereserva y otros workflows.\n//      Ambos deben estar conectados al mismo nodo inicial.\n// ═══════════════════════════════════════════════════════════════\n\n// ═══════════════════════════════════════════════════════════════\n// NODO 1 — Resolver Input\n// ═══════════════════════════════════════════════════════════════\n// ⚠️  SHEETS_ID — __ENTORNO__\n// Actualizar aquí y en todos los nodos Google Sheets si cambia.\n// Valor actual: __SHEETS_ID__\n//\n// ⚠️  CREDENCIALES\n// credential id (__CREDENTIAL_ID__) específico de esta instancia.\n// Sanitizar antes de subir a GitHub:\n//   \"id\" en cada bloque credentials → \"__CREDENTIAL_ID__\"\n//   SHEETS_ID → \"__SHEETS_ID__\"\n// ═══════════════════════════════════════════════════════════════\n\nconst SHEETS_ID  = '__SHEETS_ID__'; // __ENTORNO__\nconst DIAS_CICLO = 60;\n\nconst input = $input.first()?.json ?? {};\n\nfunction generarFechas(dias) {\n  const fechas = [];\n  const hoy = new Date();\n  hoy.setUTCHours(0, 0, 0, 0);\n  for (let i = 0; i < dias; i++) {\n    const d = new Date(hoy);\n    d.setUTCDate(hoy.getUTCDate() + i);\n    fechas.push(d.toISOString().split('T')[0]);\n  }\n  return fechas;\n}\n\n// ── SCOPE PARCIAL IGNORADO — v8 es recálculo completo ───────\n// v8 ignora id_cabanas y fechas del input por seguridad.\n// DISPONIBILIDAD_CACHE!A2:R se limpia completa antes de escribir.\n// Si se escribiera scope parcial, se borrarían las 300 filas\n// y se reescribirían solo las del rango solicitado.\n// Para recálculo parcial real, usar una versión futura del workflow\n// que no borre la cache completa antes de escribir.\nconst id_cabanas_input = []; // siempre vacío — recalcula todas las cabañas\nconst fechas            = generarFechas(DIAS_CICLO); // siempre ciclo completo\n\nconst source_event = input.source_event ?? 'recalculo_manual';\n\nreturn [{\n  json: {\n    SHEETS_ID,\n    id_cabanas_input,\n    fechas,\n    source_event,\n    scope: 'todas_las_cabanas', // v8: siempre recálculo completo\n    total_fechas: fechas.length,\n    ts_inicio: new Date().toISOString()\n  }\n}];"
       },
       "id": "5631d8d8-83a1-4c92-ad35-8abbf47fa2b0",
       "name": "Resolver Input",
@@ -445,7 +445,174 @@
             "tiene_checkin": "={{ $json.tiene_checkin }}",
             "id_reserva_checkin": "={{ $json.id_reserva_checkin }}",
             "recalculado_en": "={{ $json.recalculado_en }}"
-          }
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "id_cabana",
+              "displayName": "id_cabana",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "hora_checkin_minima",
+              "displayName": "hora_checkin_minima",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "hora_checkin_maxima",
+              "displayName": "hora_checkin_maxima",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "hora_checkout_maxima",
+              "displayName": "hora_checkout_maxima",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "hora_checkout_minima",
+              "displayName": "hora_checkout_minima",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo_dia",
+              "displayName": "tipo_dia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "temporada",
+              "displayName": "temporada",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "es_ultimo_dia_bloque",
+              "displayName": "es_ultimo_dia_bloque",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "minimo_noches",
+              "displayName": "minimo_noches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "id_reserva_activa",
+              "displayName": "id_reserva_activa",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "id_prereserva_activa",
+              "displayName": "id_prereserva_activa",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tiene_checkout",
+              "displayName": "tiene_checkout",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "id_reserva_checkout",
+              "displayName": "id_reserva_checkout",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tiene_checkin",
+              "displayName": "tiene_checkin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "id_reserva_checkin",
+              "displayName": "id_reserva_checkin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recalculado_en",
+              "displayName": "recalculado_en",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
         },
         "options": {}
       },
@@ -535,6 +702,19 @@
         4272,
         -272
       ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -352,
+        -448
+      ],
+      "id": "abe6db58-e507-40ef-9148-307f34b35350",
+      "name": "When Executed by Another Workflow"
     }
   ],
   "pinData": {},
@@ -786,6 +966,17 @@
         [
           {
             "node": "Resumen Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Resolver Input",
             "type": "main",
             "index": 0
           }

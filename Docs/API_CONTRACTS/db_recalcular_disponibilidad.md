@@ -204,3 +204,27 @@ de cada conflicto detectado.
 | # | Descripción | Resultado | ✅ |
 |---|---|---|---|
 | 1 | Ejecución inicial con cache vacía, sin datos | 300 filas `disponible`, 0 warnings, 1 LOG | ✅ |
+
+### Modos de ejecución
+
+Este workflow puede ejecutarse de dos formas:
+
+1. **Manual Trigger**
+   - Uso: pruebas DEV/TEST, recálculo manual, reparación operativa.
+   - Permite regenerar DISPONIBILIDAD_CACHE completa a demanda.
+
+2. **When Executed by Another Workflow**
+   - Uso: ejecución como subworkflow desde otros workflows.
+   - Actualmente es llamado por `db_crear_prereserva` después de crear una PRE_RESERVA.
+   - Debe estar conectado al mismo nodo inicial que el Manual Trigger.
+
+En ambos casos, la lógica ejecutada es la misma.
+
+### Advertencia sobre recálculo completo
+
+La versión v8 realiza recálculo completo:
+- limpia `DISPONIBILIDAD_CACHE!A2:R`,
+- recalcula todas las cabañas del rango configurado,
+- reescribe la cache completa.
+
+No debe usarse con scope parcial (`id_cabanas`, `fechas`) hasta que exista una versión específica de recálculo parcial.

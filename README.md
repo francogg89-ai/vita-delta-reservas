@@ -88,7 +88,9 @@ Consulta entrante
 
 ## Sobre `index.html`
 
-El archivo `index.html` en la raíz es un **prototipo visual estático**. No está conectado a Google Sheets, no consulta disponibilidad real, no genera pre-reservas y no procesa pagos. La implementación real de la web pública de reservas es una etapa futura.
+El archivo `index.html` en la raíz del repositorio es una **presentación visual del estado actual del sistema Vita Delta Reservas**. Está pensado para explicar el proyecto a socios, colaboradores y personas no técnicas. No es la web pública de reservas ni está conectado a Google Sheets o n8n.
+
+El prototipo visual original de la futura web de reservas fue movido a `Prototipos/prototipo_web_reservas.html`. Tampoco está conectado al sistema: no consulta disponibilidad real, no genera pre-reservas y no procesa pagos.
 
 ---
 
@@ -113,7 +115,10 @@ Implementar `db_registrar_pago`: el workflow que registra un pago recibido, actu
 ## Estructura del repositorio
 
 ```
-index.html                                    ← Prototipo visual estático (no operativo)
+index.html                                    ← Presentación visual del estado del sistema
+
+Prototipos/
+└── prototipo_web_reservas.html               ← Boceto visual estático de futura web de reservas
 
 Docs/
 ├── Arquitectura/
