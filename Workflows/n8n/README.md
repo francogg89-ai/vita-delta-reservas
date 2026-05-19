@@ -88,6 +88,7 @@ Workflows que llaman a `db_recalcular_disponibilidad`:
 | `db_crear_prereserva` | Al inicio, antes de verificar disponibilidad | Limpiar pre-reservas vencidas de la cache antes de consultar |
 | `db_crear_prereserva` | Al final, despues de crear la PRE_RESERVA | Reflejar el nuevo bloqueo en cache |
 | `db_registrar_pago` | Al final, despues de actualizar PRE_RESERVAS | Reflejar que pago_en_revision bloquea aunque expira_en este vencido |
+| `db_confirmar_reserva` | Al final, despues de confirmar la RESERVA | Actualizar cache para reflejar la reserva confirmada |
 
 ## Workflows disponibles
 
@@ -97,12 +98,12 @@ Workflows que llaman a `db_recalcular_disponibilidad`:
 | `db_crear_consulta.template.json` | Registra o recupera una consulta activa | [Docs/API_CONTRACTS/db_crear_consulta.md](../../Docs/API_CONTRACTS/db_crear_consulta.md) |
 | `db_crear_prereserva.template.json` | Crea pre-reserva temporal con doble verificacion | [Docs/API_CONTRACTS/db_crear_prereserva.md](../../Docs/API_CONTRACTS/db_crear_prereserva.md) |
 | `db_registrar_pago.template.json` | Registra pago reportado y pasa PRE_RESERVA a pago_en_revision | [Docs/API_CONTRACTS/db_registrar_pago.md](../../Docs/API_CONTRACTS/db_registrar_pago.md) |
+| `db_confirmar_reserva.template.json` | Confirma reserva definitiva a partir de PRE_RESERVA y PAGO en revision | [Docs/API_CONTRACTS/db_confirmar_reserva.md](../../Docs/API_CONTRACTS/db_confirmar_reserva.md) |
 
 ## Workflows pendientes de implementar
 
 | Workflow | Estado |
 |---|---|
-| `db_confirmar_reserva` | pendiente |
 | `sistema_expirar_prereservas` | pendiente |
 
 ## Estructura del repositorio relacionada
@@ -114,7 +115,8 @@ Docs/
     ├── db_recalcular_disponibilidad.md
     ├── db_crear_consulta.md
     ├── db_crear_prereserva.md
-    └── db_registrar_pago.md
+    ├── db_registrar_pago.md
+    └── db_confirmar_reserva.md
 
 Workflows/
 └── n8n/
@@ -122,7 +124,8 @@ Workflows/
     ├── db_recalcular_disponibilidad.template.json
     ├── db_crear_consulta.template.json
     ├── db_crear_prereserva.template.json
-    └── db_registrar_pago.template.json
+    ├── db_registrar_pago.template.json
+    └── db_confirmar_reserva.template.json
 ```
 
 ## Notas generales

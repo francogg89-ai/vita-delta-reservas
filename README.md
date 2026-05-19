@@ -49,7 +49,7 @@ Los Sheets `VITA_DELTA_DEV` y `VITA_DELTA_TEST` están creados y verificados.
 | `db_crear_consulta` | v3 | Validado | Validado | Registra o recupera una consulta activa |
 | `db_crear_prereserva` | v2 | Validado | Validado | Crea pre-reserva temporal con doble verificación de disponibilidad |
 | `db_registrar_pago` | v1 | Validado | Validado | Registra un pago reportado y pasa PRE_RESERVA a revisión manual |
-| `db_confirmar_reserva` | — | Pendiente | Pendiente | Confirma la reserva definitiva tras el pago |
+| `db_confirmar_reserva` | v1 | Validado | Validado | Confirma la reserva definitiva tras verificar el pago |
 | `sistema_expirar_prereservas` | — | Pendiente | Pendiente | Expira pre-reservas vencidas automáticamente |
 
 Los templates sanitizados de los workflows validados están en `Workflows/n8n/`.
@@ -79,7 +79,7 @@ Consulta entrante
   → db_crear_consulta          registra la consulta
   → db_crear_prereserva        bloqueo temporal + verificación en 2 capas
   → db_registrar_pago          registra el pago reportado → PRE_RESERVA pasa a revisión manual
-  → db_confirmar_reserva       (pendiente)
+  → db_confirmar_reserva       Franco/Rodrigo verifican y confirman → RESERVA definitiva
 ```
 
 `db_crear_prereserva` crea un bloqueo temporal con vencimiento. No es una reserva confirmada. El huésped debe completar el pago antes de que expire la pre-reserva.
@@ -96,7 +96,7 @@ El prototipo visual original de la futura web de reservas fue movido a `Prototip
 
 ## Qué no está implementado todavía
 
-- `db_confirmar_reserva` y `sistema_expirar_prereservas`.
+- `sistema_expirar_prereservas`.
 - Integración con MercadoPago.
 - Integración con WhatsApp e Instagram.
 - Bot conversacional conectado a canales reales.
@@ -108,7 +108,7 @@ El prototipo visual original de la futura web de reservas fue movido a `Prototip
 
 ## Próximo paso
 
-Implementar `db_confirmar_reserva`: el workflow que confirma la reserva definitiva después de que Franco o Rodrigo validan el pago registrado en `db_registrar_pago`.
+Implementar `sistema_expirar_prereservas`: el workflow que libera automáticamente las pre-reservas vencidas en `pendiente_pago` para que las fechas vuelvan a estar disponibles.
 
 ---
 
@@ -135,7 +135,8 @@ Docs/
 │   ├── db_recalcular_disponibilidad.md
 │   ├── db_crear_consulta.md
 │   ├── db_crear_prereserva.md
-│   └── db_registrar_pago.md
+│   ├── db_registrar_pago.md
+│   └── db_confirmar_reserva.md
 │
 └── Implementacion/
     ├── README.md
@@ -151,7 +152,8 @@ Workflows/
     ├── db_recalcular_disponibilidad.template.json
     ├── db_crear_consulta.template.json
     ├── db_crear_prereserva.template.json
-    └── db_registrar_pago.template.json
+    ├── db_registrar_pago.template.json
+    └── db_confirmar_reserva.template.json
 ```
 
 ---
