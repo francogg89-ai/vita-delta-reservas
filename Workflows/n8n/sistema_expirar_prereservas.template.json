@@ -1,0 +1,549 @@
+{
+  "name": "sistema_expirar_prereservas",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// TEMPLATE SANITIZADO — sistema_expirar_prereservas v1\n// ═══════════════════════════════════════════════════════════════\n// Este JSON es un template genérico para importar en n8n.\n// No contiene credenciales, IDs de Sheet ni IDs de workflow reales.\n//\n// Antes de importar, reemplazar:\n//   __SHEETS_ID__                              → ID del Google Sheet del entorno\n//   __CREDENTIAL_ID__                          → ID de la credencial OAuth en n8n\n//   __CREDENTIAL_NAME__                        → Nombre de la credencial OAuth en n8n\n//   __RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__  → ID de db_recalcular_disponibilidad\n//   __RECALCULAR_DISPONIBILIDAD_WORKFLOW_NAME__ → Nombre de db_recalcular_disponibilidad\n//\n// SCHEDULE TRIGGER:\n// Cron default: '0 3 * * *' = una vez por día a las 03:00 UTC.\n// Para dos veces por día: '0 3,15 * * *'.\n// En DEV/TEST: mantener workflow INACTIVO y usar Manual Trigger.\n// En producción: activar el workflow cuando se quiera automatizar.\n// ═══════════════════════════════════════════════════════════════\n\n// ═══════════════════════════════════════════════════════════════\n// NODO 1 — Resolver Input\n// ═══════════════════════════════════════════════════════════════\n// ALCANCE v1:\n// ✅ Detecta PRE_RESERVAS con estado = pendiente_pago\n//    y expira_en <= now, y las marca como vencidas.\n// ✅ Soporte dry_run para detectar sin escribir.\n// ✅ Solo actúa si hay PRE_RESERVAS vencidas (no llama\n//    a db_recalcular_disponibilidad si expiradas = 0).\n// ✅ Escribe LOG_CAMBIOS por cada PRE_RESERVA vencida.\n//\n// ❌ FUERA DE ALCANCE en v1:\n//    - No toca pago_en_revision (aunque expira_en esté vencido)\n//    - No toca convertida, cancelada, vencida ni cualquier\n//      otro estado distinto de pendiente_pago\n//    - No toca PAGOS, RESERVAS, CONSULTAS\n//    - No toca DISPONIBILIDAD_CACHE directamente\n//    - No envía WhatsApp ni notificaciones\n//    - No usa IA ni MercadoPago\n//    - No elimina filas\n//\n// ⚠️  SCHEDULE TRIGGER\n// Cron default: '0 3 * * *' = una vez por día a las 03:00 UTC.\n// Para dos veces por día: cambiar a '0 3,15 * * *'.\n// Para activarlo: Settings del workflow → Active → ON.\n// En DEV/TEST dejarlo inactivo y ejecutar manualmente.\n//\n// ⚠️  SHEETS_ID — __ENTORNO__\n// Valor actual: __SHEETS_ID__\n//\n// ⚠️  WORKFLOW ID — db_recalcular_disponibilidad\n// __RECALCULAR_DISPONIBILIDAD_WORKFLOW_NAME__ → ID: __RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__\n// ═══════════════════════════════════════════════════════════════\n\nconst SHEETS_ID = '__SHEETS_ID__'; // __ENTORNO__\n\nconst raw          = $input.first()?.json ?? {};\nconst source_event = String(raw.source_event ?? 'scheduled_expiration').trim();\nconst dry_run      = raw.dry_run === true || String(raw.dry_run).toLowerCase() === 'true';\n\nreturn [{ json: {\n  SHEETS_ID,\n  source_event,\n  dry_run,\n  ts_inicio: new Date().toISOString()\n}}];"
+      },
+      "id": "resolver-input",
+      "name": "Resolver Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PRE_RESERVAS",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "leer-prereservas",
+      "name": "Leer PRE_RESERVAS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        440,
+        400
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "data",
+        "options": {}
+      },
+      "id": "agg-prereservas",
+      "name": "Agg PRE_RESERVAS",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        660,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 2 — Detectar Vencidas\n// ═══════════════════════════════════════════════════════════════\n// Filtra PRE_RESERVAS que cumplen TODAS estas condiciones:\n//   - estado = 'pendiente_pago' (exacto)\n//   - expira_en es válido y parseable\n//   - expira_en <= ahora\n//\n// Ignora sin error ni log:\n//   - estado ≠ pendiente_pago (incluido pago_en_revision)\n//   - expira_en vacío, inválido o no parseable\n//\n// Si dry_run = true: retorna el análisis sin marcar nada.\n// ═══════════════════════════════════════════════════════════════\n\nconst inputData   = $('Resolver Input').first().json;\nconst ahora       = new Date();\nconst ahoraTsMs   = ahora.getTime();\n\nfunction parseTimestamp(val) {\n  if (!val && val !== 0) return null;\n  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;\n  if (typeof val === 'number') {\n    // Serial de Sheets (días desde 1899-12-30)\n    if (val < 200000) {\n      const d = new Date(Date.UTC(1899, 11, 30) + val * 86400000);\n      return isNaN(d.getTime()) ? null : d;\n    }\n    // Unix ms\n    const d = new Date(val);\n    return isNaN(d.getTime()) ? null : d;\n  }\n  const s = String(val).trim();\n  if (!s) return null;\n  const d = new Date(s);\n  return isNaN(d.getTime()) ? null : d;\n}\n\nconst rows = ($('Agg PRE_RESERVAS').first()?.json?.data ?? [])\n  .filter(r => r && Object.keys(r).some(k => String(r[k]).trim() !== ''));\n\nconst vencidas = [];\n\nfor (const row of rows) {\n  // Solo procesar pendiente_pago\n  if (String(row.estado ?? '').trim() !== 'pendiente_pago') continue;\n\n  // expira_en debe ser válido y parseable\n  const expiraTs = parseTimestamp(row.expira_en);\n  if (!expiraTs) continue; // vacío o inválido → ignorar\n\n  // expira_en debe haber pasado\n  if (expiraTs.getTime() > ahoraTsMs) continue;\n\n  vencidas.push({\n    id_prereserva: parseInt(String(row.id_prereserva), 10),\n    id_cabana:     row.id_cabana     ?? '',\n    fecha_in:      row.fecha_in      ?? '',\n    fecha_out:     row.fecha_out     ?? '',\n    expira_en:     row.expira_en,\n    estado_previo: 'pendiente_pago',\n    estado_nuevo:  'vencida',\n    updated_at:    ahora.toISOString()\n  });\n}\n\nreturn [{ json: {\n  vencidas,\n  expiradas: vencidas.length,\n  dry_run:   inputData.dry_run,\n  source_event: inputData.source_event\n}}];"
+      },
+      "id": "detectar-vencidas",
+      "name": "Detectar Vencidas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-hay-vencidas",
+              "leftValue": "={{ $json.expiradas }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-hay-vencidas",
+      "name": "IF: hay vencidas",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// No hay PRE_RESERVAS vencidas — salida limpia sin tocar nada\nreturn [{ json: {\n  ok:              true,\n  expiradas:       0,\n  dry_run:         $('Detectar Vencidas').first().json.dry_run,\n  recalculo_cache: 'skipped',\n  mensaje:         'No hay pre-reservas vencidas para expirar'\n}}];"
+      },
+      "id": "resumen-sin-cambios",
+      "name": "Resumen: sin cambios",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-dry-run",
+              "leftValue": "={{ $json.dry_run }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-dry-run",
+      "name": "IF: dry_run",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Dry run — devolver análisis sin escribir nada\nconst d = $input.first().json;\nreturn [{ json: {\n  ok:           true,\n  dry_run:      true,\n  expirarian:   d.expiradas,\n  ids_prereserva: d.vencidas.map(v => v.id_prereserva),\n  detalle:      d.vencidas.map(v => ({\n    id_prereserva: v.id_prereserva,\n    id_cabana:     v.id_cabana,\n    fecha_in:      v.fecha_in,\n    fecha_out:     v.fecha_out,\n    expira_en:     v.expira_en\n  })),\n  mensaje: 'Dry run: no se escribieron cambios'\n}}];"
+      },
+      "id": "resumen-dry-run",
+      "name": "Resumen: dry run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar items para Actualizar PRE_RESERVAS\n// Un item por PRE_RESERVA vencida\nconst d = $input.first().json;\nreturn d.vencidas.map(v => ({ json: {\n  id_prereserva: v.id_prereserva,\n  estado:        'vencida',\n  updated_at:    v.updated_at\n}}));"
+      },
+      "id": "preparar-updates",
+      "name": "Preparar Updates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "PRE_RESERVAS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "id_prereserva"
+          ],
+          "value": {
+            "id_prereserva": "={{ $json.id_prereserva }}",
+            "estado": "={{ $json.estado }}",
+            "updated_at": "={{ $json.updated_at }}"
+          }
+        },
+        "options": {
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "actualizar-prereservas",
+      "name": "Actualizar PRE_RESERVAS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        360
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar filas de LOG_CAMBIOS — una por PRE_RESERVA vencida\nconst d = $('Detectar Vencidas').first().json;\nconst ahora = new Date();\n\nreturn d.vencidas.map(v => ({ json: {\n  id_log:           `LOG-EXPIRA-${v.id_prereserva}-${ahora.getTime()}`,\n  fecha_hora:        v.updated_at,\n  tabla_afectada:   'PRE_RESERVAS',\n  id_registro:      String(v.id_prereserva),\n  campo_modificado: 'estado',\n  valor_anterior:   'pendiente_pago',\n  valor_nuevo:      'vencida',\n  modificado_por:   'n8n',\n  source_event:     d.source_event,\n  nivel:            'info',\n  detalle: JSON.stringify({\n    id_prereserva: v.id_prereserva,\n    id_cabana:     v.id_cabana,\n    fecha_in:      v.fecha_in,\n    fecha_out:     v.fecha_out,\n    expira_en:     v.expira_en\n  })\n}}));"
+      },
+      "id": "preparar-logs",
+      "name": "Preparar LOGs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "LOG_CAMBIOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_log": "={{ $json.id_log }}",
+            "fecha_hora": "={{ $json.fecha_hora }}",
+            "tabla_afectada": "={{ $json.tabla_afectada }}",
+            "id_registro": "={{ $json.id_registro }}",
+            "campo_modificado": "={{ $json.campo_modificado }}",
+            "valor_anterior": "={{ $json.valor_anterior }}",
+            "valor_nuevo": "={{ $json.valor_nuevo }}",
+            "modificado_por": "={{ $json.modificado_por }}",
+            "source_event": "={{ $json.source_event }}",
+            "nivel": "={{ $json.nivel }}",
+            "detalle": "={{ $json.detalle }}"
+          }
+        },
+        "options": {
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "escribir-log",
+      "name": "Escribir LOG_CAMBIOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2200,
+        360
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recálculo completo — sin scope parcial.\nreturn [{ json: { source_event: 'prereservas_expiradas' } }];"
+      },
+      "id": "prep-recalcular",
+      "name": "Prep Recalcular",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "__RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__",
+          "mode": "list",
+          "cachedResultName": "__RECALCULAR_DISPONIBILIDAD_WORKFLOW_NAME__"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "ejecutar-recalcular",
+      "name": "Ejecutar Recalculo Final",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2640,
+        360
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO FINAL — Resumen\n// ═══════════════════════════════════════════════════════════════\n// continueOnFail = true garantiza que siempre llega aquí.\n// Si el recálculo falló, las PRE_RESERVAS ya fueron actualizadas\n// y los LOGs ya fueron escritos. Solo la cache puede estar\n// desactualizada. Acción: ejecutar recálculo manual.\n// ═══════════════════════════════════════════════════════════════\n\nconst d = $('Detectar Vencidas').first().json;\n\nconst recalculoOutput = $('Ejecutar Recalculo Final').first()?.json ?? {};\nconst recalculo_fallo = !!recalculoOutput.error || recalculoOutput.ok === false;\n\nreturn [{ json: {\n  ok:              true,\n  expiradas:       d.expiradas,\n  ids_prereserva:  d.vencidas.map(v => v.id_prereserva),\n  dry_run:         false,\n  recalculo_cache: recalculo_fallo ? 'warning' : 'ok',\n  recalculo_error: recalculo_fallo\n    ? 'db_recalcular_disponibilidad falló después de expirar las pre-reservas. Cache puede estar desactualizada. Ejecutar recálculo manual.'\n    : null,\n  mensaje: 'Pre-reservas vencidas expiradas correctamente'\n}}];"
+      },
+      "id": "resumen-final",
+      "name": "Resumen Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        360
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Resolver Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Resolver Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Input": {
+      "main": [
+        [
+          {
+            "node": "Leer PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Agg PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Detectar Vencidas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar Vencidas": {
+      "main": [
+        [
+          {
+            "node": "IF: hay vencidas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: hay vencidas": {
+      "main": [
+        [
+          {
+            "node": "IF: dry_run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resumen: sin cambios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: dry_run": {
+      "main": [
+        [
+          {
+            "node": "Resumen: dry run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Updates": {
+      "main": [
+        [
+          {
+            "node": "Actualizar PRE_RESERVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar PRE_RESERVAS": {
+      "main": [
+        [
+          {
+            "node": "Preparar LOGs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar LOGs": {
+      "main": [
+        [
+          {
+            "node": "Escribir LOG_CAMBIOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escribir LOG_CAMBIOS": {
+      "main": [
+        [
+          {
+            "node": "Prep Recalcular",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Recalcular": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar Recalculo Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Recalculo Final": {
+      "main": [
+        [
+          {
+            "node": "Resumen Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "pinData": {},
+  "id": "__WORKFLOW_ID__",
+  "versionId": "__WORKFLOW_VERSION_ID__"
+}

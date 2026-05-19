@@ -41,7 +41,7 @@ Los Sheets `VITA_DELTA_DEV` y `VITA_DELTA_TEST` están creados y verificados.
 | 5 | Protecciones por entorno | OK |
 | 6 | Auditoría final aprobada | OK |
 
-### Workflows n8n — En implementación
+### Workflows n8n — Core validado
 
 | Workflow | Versión | DEV | TEST | Descripción |
 |---|---|---|---|---|
@@ -50,7 +50,7 @@ Los Sheets `VITA_DELTA_DEV` y `VITA_DELTA_TEST` están creados y verificados.
 | `db_crear_prereserva` | v2 | Validado | Validado | Crea pre-reserva temporal con doble verificación de disponibilidad |
 | `db_registrar_pago` | v1 | Validado | Validado | Registra un pago reportado y pasa PRE_RESERVA a revisión manual |
 | `db_confirmar_reserva` | v1 | Validado | Validado | Confirma la reserva definitiva tras verificar el pago |
-| `sistema_expirar_prereservas` | — | Pendiente | Pendiente | Expira pre-reservas vencidas automáticamente |
+| `sistema_expirar_prereservas` | v1 | Validado | Validado | Marca como vencidas las PRE_RESERVAS en pendiente_pago con expira_en vencido |
 
 Los templates sanitizados de los workflows validados están en `Workflows/n8n/`.
 Los contratos técnicos están en `Docs/API_CONTRACTS/`.
@@ -96,7 +96,6 @@ El prototipo visual original de la futura web de reservas fue movido a `Prototip
 
 ## Qué no está implementado todavía
 
-- `sistema_expirar_prereservas`.
 - Integración con MercadoPago.
 - Integración con WhatsApp e Instagram.
 - Bot conversacional conectado a canales reales.
@@ -108,7 +107,12 @@ El prototipo visual original de la futura web de reservas fue movido a `Prototip
 
 ## Próximo paso
 
-Implementar `sistema_expirar_prereservas`: el workflow que libera automáticamente las pre-reservas vencidas en `pendiente_pago` para que las fechas vuelvan a estar disponibles.
+El core de workflows de reservas está completo y validado en DEV y TEST. Las próximas etapas son:
+
+- Activar `sistema_expirar_prereservas` en producción con Schedule Trigger diario.
+- Implementar la capa conversacional con Claude API conectada a los workflows determinísticos.
+- Integrar canales reales: WhatsApp e Instagram.
+- Implementar la web pública de reservas conectada al sistema.
 
 ---
 
@@ -136,7 +140,8 @@ Docs/
 │   ├── db_crear_consulta.md
 │   ├── db_crear_prereserva.md
 │   ├── db_registrar_pago.md
-│   └── db_confirmar_reserva.md
+│   ├── db_confirmar_reserva.md
+│   └── sistema_expirar_prereservas.md
 │
 └── Implementacion/
     ├── README.md
@@ -153,7 +158,8 @@ Workflows/
     ├── db_crear_consulta.template.json
     ├── db_crear_prereserva.template.json
     ├── db_registrar_pago.template.json
-    └── db_confirmar_reserva.template.json
+    ├── db_confirmar_reserva.template.json
+    └── sistema_expirar_prereservas.template.json
 ```
 
 ---

@@ -19,7 +19,7 @@ y convertible a OpenAPI/Swagger más adelante cuando se expongan como webhooks r
 | `db_crear_prereserva` | [db_crear_prereserva.md](./db_crear_prereserva.md) | validado | Si | Si |
 | `db_registrar_pago` | [db_registrar_pago.md](./db_registrar_pago.md) | validado | Si | Si |
 | `db_confirmar_reserva` | [db_confirmar_reserva.md](./db_confirmar_reserva.md) | validado | Si | Si |
-| `sistema_expirar_prereservas` | pendiente | pendiente | — | — |
+| `sistema_expirar_prereservas` | [sistema_expirar_prereservas.md](./sistema_expirar_prereservas.md) | validado | Si | Si |
 
 ## Convenciones
 

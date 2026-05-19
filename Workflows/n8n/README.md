@@ -89,6 +89,7 @@ Workflows que llaman a `db_recalcular_disponibilidad`:
 | `db_crear_prereserva` | Al final, despues de crear la PRE_RESERVA | Reflejar el nuevo bloqueo en cache |
 | `db_registrar_pago` | Al final, despues de actualizar PRE_RESERVAS | Reflejar que pago_en_revision bloquea aunque expira_en este vencido |
 | `db_confirmar_reserva` | Al final, despues de confirmar la RESERVA | Actualizar cache para reflejar la reserva confirmada |
+| `sistema_expirar_prereservas` | Al final, solo si hubo pre-reservas vencidas | Ordenar estados vencidos y actualizar disponibilidad derivada |
 
 ## Workflows disponibles
 
@@ -99,12 +100,7 @@ Workflows que llaman a `db_recalcular_disponibilidad`:
 | `db_crear_prereserva.template.json` | Crea pre-reserva temporal con doble verificacion | [Docs/API_CONTRACTS/db_crear_prereserva.md](../../Docs/API_CONTRACTS/db_crear_prereserva.md) |
 | `db_registrar_pago.template.json` | Registra pago reportado y pasa PRE_RESERVA a pago_en_revision | [Docs/API_CONTRACTS/db_registrar_pago.md](../../Docs/API_CONTRACTS/db_registrar_pago.md) |
 | `db_confirmar_reserva.template.json` | Confirma reserva definitiva a partir de PRE_RESERVA y PAGO en revision | [Docs/API_CONTRACTS/db_confirmar_reserva.md](../../Docs/API_CONTRACTS/db_confirmar_reserva.md) |
-
-## Workflows pendientes de implementar
-
-| Workflow | Estado |
-|---|---|
-| `sistema_expirar_prereservas` | pendiente |
+| `sistema_expirar_prereservas.template.json` | Marca como vencidas las PRE_RESERVAS pendiente_pago con expira_en vencido | [Docs/API_CONTRACTS/sistema_expirar_prereservas.md](../../Docs/API_CONTRACTS/sistema_expirar_prereservas.md) |
 
 ## Estructura del repositorio relacionada
 
@@ -116,7 +112,8 @@ Docs/
     ├── db_crear_consulta.md
     ├── db_crear_prereserva.md
     ├── db_registrar_pago.md
-    └── db_confirmar_reserva.md
+    ├── db_confirmar_reserva.md
+    └── sistema_expirar_prereservas.md
 
 Workflows/
 └── n8n/
@@ -125,7 +122,8 @@ Workflows/
     ├── db_crear_consulta.template.json
     ├── db_crear_prereserva.template.json
     ├── db_registrar_pago.template.json
-    └── db_confirmar_reserva.template.json
+    ├── db_confirmar_reserva.template.json
+    └── sistema_expirar_prereservas.template.json
 ```
 
 ## Notas generales
