@@ -370,3 +370,34 @@ Ambos usan `EXCLUDE USING gist` (gracias a la extensión `btree_gist` habilitada
 **Decisión:** avanzar a Bloque 10 (`upsert_huesped`).
 
 ---
+
+### Bloque 10 — Función `upsert_huesped`
+
+**Estado:** Cerrado. **Primera función de negocio del sistema.**
+
+**SQL ejecutado:** Función `upsert_huesped(payload JSONB) RETURNS JSONB` con lógica de búsqueda priorizada (teléfono normalizado → email → INSERT nuevo), manejo selectivo de UPDATE (COALESCE preserva valores existentes), validación de contacto mínimo, y manejo diferenciado de `unique_violation` según constraint:
+- Conflicto por DNI: error controlado `huesped_duplicado` (requiere intervención humana).
+- Conflicto por teléfono/email: recuperación silenciosa con `modo='recovered_from_unique_violation'` (cubre race conditions).
+
+**Resultado de ejecución:** `Success. No rows returned`. Sin popup RLS (CREATE FUNCTION). Sin popup destructive (no escribe por sí mismo).
+
+**Verificaciones post-ejecución:**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 10.1 | Función registrada en `pg_proc` | `upsert_huesped` retorna jsonb, VOLATILE | exacto ✓ |
+| 10.2 | T1 — crear nuevo (telefono + email) | `modo='create'`, `encontrado_por=null` | id_huesped=2, exacto ✓ |
+| 10.3 | T2 — buscar por teléfono (formato distinto al T1) | `modo='update'`, `encontrado_por='telefono'`, mismo id_huesped | exacto ✓ — confirma normalización end-to-end |
+| 10.4 | T3 — sin contacto (solo nombre) | `ok=false`, `error='contacto_requerido'` | exacto ✓ — falla antes del INSERT, no escribe |
+| 10.5 | T4 — buscar por email (sin teléfono) | `modo='update'`, `encontrado_por='email'`, mismo id_huesped | exacto ✓ — confirma fallback email |
+| 10.6 | Limpieza post-tests | DELETE 1 + COUNT 0 | exacto ✓ |
+
+**Observación operativa — secuencia BIGSERIAL:** El primer huésped insertado por el T1 recibió `id_huesped=2`, no 1, porque la secuencia `huespedes_id_huesped_seq` ya había avanzado durante el test del Bloque 9 (test del trigger). Comportamiento esperado de PostgreSQL: las secuencias no retroceden tras DELETE. No se resetea en DEV — refleja el comportamiento real de producción. Si en algún momento futuro hace falta una secuencia limpia (improbable), se usaría `ALTER SEQUENCE ... RESTART WITH 1`.
+
+**Observación operativa — popup destructive:** El popup "Potential issue detected — destructive operations" aparece cuando el SQL contiene textualmente `INSERT/UPDATE/DELETE/DROP/ALTER`. Las llamadas a funciones almacenadas (`SELECT upsert_huesped(...)`) no disparan el popup aunque internamente escriban, porque Supabase hace análisis estático del texto sin entrar en el cuerpo de la función. Para los próximos bloques esto será frecuente — la mayoría de tests funcionales sobre funciones no dispararán popup.
+
+**Cobertura de tests:** El plan menciona un T5 opcional sobre conflicto DNI que requiere setup previo (crear un huésped con DNI X, luego intentar crear otro con mismo DNI pero datos distintos). Queda implícitamente cubierto por la lógica de `unique_violation` con `LIKE '%dni%'` que está en la función. Si en Fase 4 (tests con seed completo) se quiere verificación explícita, se cubre ahí.
+
+**Decisión:** avanzar a Bloque 11 (`validar_disponibilidad` — función auxiliar de disponibilidad).
+
+---
