@@ -401,3 +401,31 @@ Ambos usan `EXCLUDE USING gist` (gracias a la extensión `btree_gist` habilitada
 **Decisión:** avanzar a Bloque 11 (`validar_disponibilidad` — función auxiliar de disponibilidad).
 
 ---
+
+### Bloque 11 — Función `validar_disponibilidad`
+
+**Estado:** Cerrado. **Función auxiliar más usada de Fase 2.**
+
+**SQL ejecutado:** Función `validar_disponibilidad(p_id_cabana BIGINT, p_fecha_in DATE, p_fecha_out DATE, p_excluir_prereserva BIGINT DEFAULT NULL) RETURNS JSONB`. Verifica solapamientos contra tres fuentes (`reservas` con estado confirmada/activa, `pre_reservas` con estado pendiente_pago vigente o pago_en_revision, `bloqueos` activos específicos o totales). Internamente usa `SELECT ... FOR UPDATE` sobre cabanas/reservas/pre_reservas/bloqueos, por lo que el documento explicita en comentario inline que solo debe llamarse desde transacciones que hayan tomado previamente `pg_advisory_xact_lock(10, 0)` para evitar deadlocks (advertencia v1.5 Obs G).
+
+**Resultado de ejecución:** `Success. No rows returned`. Sin popup destructive (CREATE FUNCTION).
+
+**Verificaciones post-ejecución:**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 11.1 | Función registrada en `pg_proc` | `validar_disponibilidad`, jsonb, VOLATILE, 4 argumentos | exacto ✓ |
+| 11.2 | 4 casos de error en parámetros (UNION ALL) | `fechas_invalidas` ×2, `id_cabana_requerido`, `cabana_no_existe` | exacto ✓ |
+| 11.3 | Setup: crear cabaña test (`Cabaña Test B11`) | 1 fila con id_cabana asignado y `activa=true` | id=1 ✓ |
+| 11.4 | Disponible con tablas vacías | `{ok: true, disponible: true}` | exacto ✓ |
+| 11.5 | **Detección de conflicto: bloqueo solapado** | `{ok: true, disponible: false, conflictos: [{fuente: "bloqueos"}]}` | exacto ✓ — confirma lógica de `daterange && daterange` |
+| 11.6 | Limpieza + sanity check | cabanas/bloqueos/huespedes en 0 | exacto ✓ |
+
+**Observación operativa — UNION ALL para múltiples test cases:** El SQL Editor de Supabase muestra por defecto solo el resultado del último statement cuando se ejecutan varios SELECTs separados por `;`. Para los tests de parámetros (4 casos), se reescribió usando `UNION ALL` con una columna `caso` identificadora para ver los 4 outputs en una sola tabla. Patrón adoptado para futuros bloques con tests funcionales múltiples del mismo tipo.
+
+**Observación operativa — orden de claves en JSONB:** En Verify 11.5 el JSON devuelto tenía las claves en orden distinto al predicho (`conflictos` antes de `disponible`). PostgreSQL no garantiza orden de claves en JSONB construido vía `jsonb_build_object` + `||`. Lo relevante son las claves y valores, no su orden de impresión.
+
+**Decisión:** avanzar a Bloque 12 (`obtener_disponibilidad_rango` — última función auxiliar antes de los bloques transaccionales).
+
+---
+
