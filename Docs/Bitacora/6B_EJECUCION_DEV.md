@@ -155,3 +155,55 @@ Tres queries de verificación ejecutadas (filtradas por `typtype='e'` y `nspname
 
 ---
 
+### Bloque 3 — Tablas catálogo
+
+**Estado:** Cerrado.
+
+**SQL ejecutado:** 8 tablas creadas en `public` sin dependencias entre sí: `cabanas`, `huespedes`, `feriados`, `tarifas`, `temporadas`, `socios`, `cuentas_cobro`, `plantillas_mensajes`. Incluye `telefono_normalizado` en `huespedes` (v1.1), 3 índices únicos parciales (`dni`, `telefono_normalizado`, `LOWER(email)`), 1 índice único parcial por concepto vigente en `tarifas`, 10 CHECK constraints.
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Advertencia "Potential issue detected" (RLS):** Supabase advirtió que las tablas se crean sin Row Level Security habilitada. Resuelto con "Run without RLS", alineado con la arquitectura aprobada.
+
+Justificación documental (`6B_SCHEMA_SQL.md` Sección 20 y `ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md` Sección "RLS pendiente"):
+- Vita Delta no tiene UI interna ni Supabase Auth en esta etapa.
+- n8n usa credencial de servicio (`service_role_key`), que bypassea RLS por diseño.
+- Las tablas quedan protegidas por el default de PostgreSQL: sin `GRANT` explícito a roles `anon` o `authenticated`, no son accesibles desde la API REST autogenerada.
+- RLS se implementará en una etapa específica posterior, cuando se construya frontend público con Supabase Auth, junto con `SECURITY DEFINER` en funciones críticas.
+
+Esta misma decisión aplicará a los Bloques 4, 5, 6 y 7 (todos crean tablas).
+
+**Verificaciones post-ejecución:**
+
+| # | Query | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 3.1 | 8 tablas catálogo en `pg_tables` | 8 filas | 8 filas ✓ |
+| 3.2 | Columna `telefono_normalizado` en `huespedes` | 1 fila, tipo `text`, nullable | 1 fila ✓ |
+| 3.3 | Índices únicos parciales `uq_%` en `huespedes` | 3 filas (`uq_huespedes_dni`, `uq_huespedes_email`, `uq_huespedes_telefono_normalizado`) | 3 filas ✓ |
+| 3.4 | CHECK constraints del bloque | 10 filas | 10 filas ✓ |
+
+**Decisión:** avanzar a Bloque 4.
+
+---
+
+### Bloque 4 — Tablas de configuración
+
+**Estado:** Cerrado.
+
+**SQL ejecutado:** 4 tablas creadas en `public`: `configuracion_general` (PK natural por `clave`), `eventos_especiales` (con JSONB en `reglas_especiales`), `paquetes_evento` (FK obligatoria a `eventos_especiales` con ON DELETE CASCADE), `descuentos` (5 CHECKs sobre tipo, aplica_a, aplica_sobre, valor positivo, fechas).
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Advertencia RLS:** Misma decisión que Bloque 3, "Run without RLS" — justificación ya documentada en la entrada del Bloque 3.
+
+**Verificaciones post-ejecución:**
+
+| # | Query | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 4.1 | 4 tablas en `pg_tables` | 4 filas | 4 filas ✓ |
+| 4.2 | FK de `paquetes_evento.id_evento` a `eventos_especiales.id_evento` con ON DELETE CASCADE | 1 fila con `on_delete_action='c'` | 1 fila, `c` ✓ |
+| 4.3 | CHECK constraints sobre `eventos_especiales` y `descuentos` | 6 filas (1 + 5) | 6 filas ✓ |
+
+**Decisión:** avanzar a Bloque 5.
+
+---
