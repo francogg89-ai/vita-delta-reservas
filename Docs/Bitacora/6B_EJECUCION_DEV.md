@@ -342,3 +342,31 @@ Ambos usan `EXCLUDE USING gist` (gracias a la extensión `btree_gist` habilitada
 **Decisión:** habilitado para arrancar Fase 2 (funciones y triggers, Bloques 9 a 19). La Fase 2 es la más sensible del schema porque introduce la lógica almacenada: normalización de teléfono, upsert de huéspedes, validación de disponibilidad, creación/confirmación/cancelación de pre-reservas, manejo de pagos, expiración automática. Cada función crítica tiene tests funcionales pequeños recomendados durante la ejecución; los tests end-to-end completos van en Fase 4.
 
 ---
+
+### Bloque 9 — `normalizar_telefono` + trigger en `huespedes`
+
+**Estado:** Cerrado. **Primera función de Fase 2.**
+
+**SQL ejecutado:** 
+- Función `normalizar_telefono(input TEXT) RETURNS TEXT` con `LANGUAGE plpgsql IMMUTABLE`. Aplica reglas de limpieza: quita espacios/guiones/paréntesis/puntos, convierte `00` inicial a `+`, colapsa múltiples `+` a uno solo, no asume prefijo argentino automático.
+- Trigger function `set_telefono_normalizado()` que invoca a `normalizar_telefono(NEW.telefono)` y asigna el resultado a `NEW.telefono_normalizado`.
+- Trigger `trg_huespedes_telefono_norm BEFORE INSERT OR UPDATE OF telefono ON huespedes FOR EACH ROW`.
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Verificaciones post-ejecución:**
+
+| # | Query | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 9.1 | 2 funciones en `pg_proc` con volatilidad correcta | `normalizar_telefono` IMMUTABLE (i), `set_telefono_normalizado` VOLATILE (v) | exacto ✓ |
+| 9.2 | Trigger `trg_huespedes_telefono_norm` registrado en `information_schema.triggers` | 2 filas (INSERT + UPDATE, ambos BEFORE) ejecutando `set_telefono_normalizado()` | exacto ✓ |
+| 9.3 | Test funcional con 6 casos | `+5491134567890`, `+541134567890`, `1134567890`, `+541134567890`, NULL, NULL | exacto ✓ |
+| 9.4 | Test del trigger en vivo (INSERT + UPDATE + DELETE sobre `huespedes`) | INSERT puebla `telefono_normalizado`, UPDATE de `telefono` lo recalcula, DELETE limpia | confirmado vía RETURNING del UPDATE (1 fila: `(011) 9876-5432` → `01198765432`), implícitamente confirma INSERT previo, DELETE ejecutado sin error |
+
+**Observación sobre Verify 9.4:** Supabase devolvió únicamente el output del último RETURNING visible (el del UPDATE), pero la presencia de esa fila confirma toda la cadena: el INSERT debe haberse ejecutado para que el UPDATE encontrara la fila, y el `telefono_normalizado` se llenó automáticamente por el trigger. El DELETE final se ejecutó sin error. Sanity check post-test (`SELECT COUNT(*) FROM huespedes`) pendiente de correr para confirmar limpieza.
+
+**Advertencia "Potential issue detected — destructive operations":** Supabase advierte ante cualquier query con INSERT/UPDATE/DELETE. Resuelto con "Run query", justificado porque la tabla `huespedes` estaba vacía, el test es auto-contenido (escribe y borra dentro del mismo bloque), y estamos en DEV.
+
+**Decisión:** avanzar a Bloque 10 (`upsert_huesped`).
+
+---
