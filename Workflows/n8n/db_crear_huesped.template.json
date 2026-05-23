@@ -1,0 +1,735 @@
+{
+  "name": "db_crear_huesped v1.1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "trigger-subworkflow",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// TEMPLATE SANITIZADO — db_crear_huesped v1.1\n// ═══════════════════════════════════════════════════════════════\n// Este JSON es un template genérico para importar en n8n.\n// No contiene credenciales, IDs de Sheet ni IDs de workflow reales.\n//\n// Antes de importar, reemplazar:\n//   __SHEETS_ID__       → ID del Google Sheet del entorno\n//   __ENTORNO__         → Nombre del entorno (ej: VITA_DELTA_PROD)\n//   __CREDENTIAL_ID__   → ID de la credencial OAuth en n8n\n//   __CREDENTIAL_NAME__ → Nombre de la credencial OAuth en n8n\n//\n// El mismo template sirve para DEV, TEST y PROD.\n// Solo cambia __SHEETS_ID__ y las credenciales.\n//\n// TRIGGERS:\n//   1. Manual Trigger — para pruebas desde n8n (usar pin data).\n//   2. When Executed by Another Workflow — llamado desde db_crear_prereserva.\n// Si el input viene vacío, devuelve input_invalido.\n//\n// DEDUPLICACIÓN:\n//   Paso 1: busca por teléfono normalizado.\n//   Paso 2: si no encuentra, busca por email normalizado.\n//   Si encuentra por email y teléfono existente vacío → lo completa.\n//\n// NO TOCA: PRE_RESERVAS, RESERVAS, PAGOS, DISPONIBILIDAD_CACHE.\n// NO actualiza primera_reserva_fecha ni total_reservas.\n// ═══════════════════════════════════════════════════════════════\n\n// ═══════════════════════════════════════════════════════════════\n// NODO 1 — Resolver Input\n// ═══════════════════════════════════════════════════════════════\n// ALCANCE v1:\n// ✅ Crea o actualiza un huésped en HUÉSPEDES.\n// ✅ Deduplicación por teléfono primero, email como fallback.\n// ✅ Normaliza teléfono y email antes de buscar.\n// ✅ En modo actualizado, solo pisa campos con valor real.\n// ✅ Escribe LOG_CAMBIOS en casos exitosos y en input_invalido.\n//\n// ❌ FUERA DE ALCANCE en v1:\n//    - No toca PRE_RESERVAS, RESERVAS, PAGOS, DISPONIBILIDAD_CACHE\n//    - No actualiza primera_reserva_fecha ni total_reservas\n//      (responsabilidad de db_confirmar_reserva)\n//    - No envía WhatsApp ni notificaciones\n//    - No usa IA\n//\n// ⚠️  SHEETS_ID — __ENTORNO__\n// Valor actual: __SHEETS_ID__\n//\n// ⚠️  TRIGGERS\n// - Manual Trigger: para pruebas desde n8n. Pasar input via pin data.\n// - When Executed by Another Workflow: llamado desde db_crear_prereserva.\n// Si el input viene vacío, devuelve input_invalido — no hay MANUAL_INPUT.\n//\n// ⚠️  id_huesped usa max + 1. Max Concurrency = 1.\n// ═══════════════════════════════════════════════════════════════\n\nconst SHEETS_ID = '__SHEETS_ID__'; // __ENTORNO__\n\nconst CANALES_VALIDOS = ['whatsapp', 'instagram', 'web', 'manual'];\n\nfunction normalizarTelefono(tel) {\n  if (!tel) return '';\n  let t = String(tel).trim();\n  // Quitar espacios, guiones, paréntesis, puntos\n  t = t.replace(/[\\s\\-().]/g, '');\n  // 0054... → +54...\n  if (t.startsWith('00')) t = '+' + t.slice(2);\n  // 54... (sin +) → +54...\n  if (/^54\\d/.test(t)) t = '+' + t;\n  return t;\n}\n\nfunction normalizarEmail(email) {\n  if (!email) return '';\n  return String(email).trim().toLowerCase();\n}\n\nfunction valorReal(v) {\n  if (v === null || v === undefined) return false;\n  if (typeof v === 'string') return v.trim() !== '';\n  return true;\n}\n\nconst raw = $input.first()?.json ?? {};\n\nconst nombre          = String(raw.nombre        ?? '').trim();\nconst apellido        = String(raw.apellido       ?? '').trim();\nconst dni             = String(raw.dni            ?? '').trim();\nconst telefono        = normalizarTelefono(raw.telefono);\nconst email           = normalizarEmail(raw.email);\nconst canal_raw       = String(raw.canal_preferido ?? '').trim();\nconst canal_preferido = CANALES_VALIDOS.includes(canal_raw) ? canal_raw : 'whatsapp';\nconst notas_internas  = String(raw.notas_internas ?? '').trim();\nconst source_event    = String(raw.source_event   ?? 'manual').trim();\n\n// ── Validaciones ─────────────────────────────────────────────\nconst errores = [];\nif (!nombre)   errores.push('nombre es obligatorio');\nif (!telefono) errores.push('telefono es obligatorio');\n\nif (errores.length > 0) {\n  return [{ json: {\n    ok:        false,\n    error:     'input_invalido',\n    detalle:   errores,\n    _validado: false,\n    _log_warning: {\n      tabla_afectada:   'HUÉSPEDES',\n      id_registro:      'N/A',\n      campo_modificado: 'validacion_input',\n      valor_anterior:   '',\n      valor_nuevo:      '',\n      modificado_por:   'n8n',\n      source_event,\n      nivel:            'warning',\n      detalle:          JSON.stringify({ error: 'input_invalido', detalle: errores })\n    }\n  }}];\n}\n\nreturn [{ json: {\n  SHEETS_ID,\n  nombre,\n  apellido,\n  dni,\n  telefono,\n  email,\n  canal_preferido,\n  notas_internas,\n  source_event,\n  ts_inicio: new Date().toISOString(),\n  _validado: true\n}}];"
+      },
+      "id": "resolver-input",
+      "name": "Resolver Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-validado",
+              "leftValue": "={{ $json._validado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-input-valido",
+      "name": "IF: input válido",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nreturn [{ json: {\n  _output: { ok: d.ok, error: d.error, detalle: d.detalle },\n  _log:    d._log_warning\n}}];"
+      },
+      "id": "prep-log-invalido",
+      "name": "Prep LOG Input Inválido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "LOG_CAMBIOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_log": "={{ 'LOG-HUESPED-ERR-' + Date.now() }}",
+            "fecha_hora": "={{ new Date().toISOString() }}",
+            "tabla_afectada": "={{ $json._log.tabla_afectada }}",
+            "id_registro": "={{ $json._log.id_registro }}",
+            "campo_modificado": "={{ $json._log.campo_modificado }}",
+            "valor_anterior": "={{ $json._log.valor_anterior }}",
+            "valor_nuevo": "={{ $json._log.valor_nuevo }}",
+            "modificado_por": "={{ $json._log.modificado_por }}",
+            "source_event": "={{ $json._log.source_event }}",
+            "nivel": "={{ $json._log.nivel }}",
+            "detalle": "={{ $json._log.detalle }}"
+          }
+        },
+        "options": {
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "log-invalido",
+      "name": "LOG Input Inválido",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        880,
+        560
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Prep LOG Input Inválido').first().json;\nreturn [{ json: d._output }];"
+      },
+      "id": "error-input",
+      "name": "Error: input inválido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "HUÉSPEDES",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "leer-huespedes",
+      "name": "Leer HUÉSPEDES",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        660,
+        260
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "data",
+        "options": {}
+      },
+      "id": "agg-huespedes",
+      "name": "Agg HUÉSPEDES",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        880,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════\n// NODO 2 — Buscar Huésped Existente\n// ═══════════════════════════════════════════════════════════════\n// Paso 1: buscar por teléfono normalizado.\n// Paso 2: si no encuentra y hay email, buscar por email normalizado.\n// Si encontró por email y el teléfono existente está vacío → completarlo.\n// Si no encuentra nada → modo CREATE.\n// ═══════════════════════════════════════════════════════════════\n\nconst inputData = $('Resolver Input').first().json;\n\nfunction normTel(tel) {\n  if (!tel) return '';\n  let t = String(tel).trim().replace(/[\\s\\-().]/g, '');\n  if (t.startsWith('00')) t = '+' + t.slice(2);\n  if (/^54\\d/.test(t)) t = '+' + t;\n  return t;\n}\nfunction normEmail(e) {\n  if (!e) return '';\n  return String(e).trim().toLowerCase();\n}\nfunction valorReal(v) {\n  if (v === null || v === undefined) return false;\n  if (typeof v === 'string') return v.trim() !== '';\n  return true;\n}\n\nconst huespedes = ($('Agg HUÉSPEDES').first()?.json?.data ?? [])\n  .filter(h => h && Object.keys(h).some(k => String(h[k]).trim() !== ''));\n\nconst ids = huespedes\n  .map(h => parseInt(String(h.id_huesped ?? ''), 10))\n  .filter(n => !isNaN(n) && n > 0);\nconst nuevo_id_huesped = (ids.length > 0 ? Math.max(...ids) : 0) + 1;\n\n// Paso 1 — por teléfono\nlet huesped_existente = null;\nlet encontrado_por    = null;\n\nif (inputData.telefono) {\n  huesped_existente = huespedes.find(h => normTel(h.telefono) === inputData.telefono);\n  if (huesped_existente) encontrado_por = 'telefono';\n}\n\n// Paso 2 — por email\nif (!huesped_existente && inputData.email) {\n  huesped_existente = huespedes.find(h => normEmail(h.email) === inputData.email);\n  if (huesped_existente) encontrado_por = 'email';\n}\n\nconst ahora = new Date().toISOString();\n\nif (!huesped_existente) {\n  return [{ json: {\n    _modo:             'creado',\n    _nuevo_id_huesped: nuevo_id_huesped,\n    _huesped_existente: null,\n    _encontrado_por:   null,\n    _inputData:        inputData\n  }}];\n}\n\n// Construir campos a actualizar — solo los que tienen valor real\nconst campos_update = {};\nif (valorReal(inputData.nombre))          campos_update.nombre          = inputData.nombre;\nif (valorReal(inputData.apellido))        campos_update.apellido        = inputData.apellido;\nif (valorReal(inputData.dni))             campos_update.dni             = inputData.dni;\nif (valorReal(inputData.email))           campos_update.email           = inputData.email;\nif (valorReal(inputData.canal_preferido)) campos_update.canal_preferido = inputData.canal_preferido;\nif (valorReal(inputData.notas_internas))  campos_update.notas_internas  = inputData.notas_internas;\n\n// Si encontró por email y el teléfono existente está vacío → completarlo\nif (encontrado_por === 'email' && !normTel(huesped_existente.telefono) && valorReal(inputData.telefono)) {\n  campos_update.telefono = inputData.telefono;\n}\ncampos_update.updated_at = ahora;\n\nreturn [{ json: {\n  _modo:              'actualizado',\n  _id_huesped_actual: parseInt(String(huesped_existente.id_huesped), 10),\n  _huesped_existente: huesped_existente,\n  _encontrado_por:    encontrado_por,\n  _campos_update:     campos_update,\n  _inputData:         inputData\n}}];"
+      },
+      "id": "buscar-huesped",
+      "name": "Buscar Huésped Existente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-existe",
+              "leftValue": "={{ $json._modo }}",
+              "rightValue": "actualizado",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-existe",
+      "name": "IF: huésped existe",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d   = $input.first().json;\nconst ahora = new Date().toISOString();\nreturn [{ json: {\n  // Columnas reales de HUÉSPEDES para el update explícito\n  id_huesped:      d._id_huesped_actual,\n  nombre:          d._campos_update.nombre          ?? d._huesped_existente.nombre          ?? '',\n  apellido:        d._campos_update.apellido        ?? d._huesped_existente.apellido        ?? '',\n  dni:             d._campos_update.dni             ?? d._huesped_existente.dni             ?? '',\n  telefono:        d._campos_update.telefono        ?? d._huesped_existente.telefono        ?? '',\n  email:           d._campos_update.email           ?? d._huesped_existente.email           ?? '',\n  canal_preferido: d._campos_update.canal_preferido ?? d._huesped_existente.canal_preferido ?? '',\n  notas_internas:  d._campos_update.notas_internas  ?? d._huesped_existente.notas_internas  ?? '',\n  updated_at:      d._campos_update.updated_at ?? ahora,\n  // metadata interna (no se escribe en Sheets — se usan en LOG)\n  _id_huesped:     d._id_huesped_actual,\n  _modo:           'actualizado',\n  _encontrado_por: d._encontrado_por,\n  _inputData:      d._inputData\n}}];"
+      },
+      "id": "preparar-update",
+      "name": "Preparar UPDATE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "HUÉSPEDES",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "id_huesped"
+          ],
+          "value": {
+            "id_huesped": "={{ $json.id_huesped }}",
+            "nombre": "={{ $json.nombre }}",
+            "apellido": "={{ $json.apellido }}",
+            "dni": "={{ $json.dni }}",
+            "telefono": "={{ $json.telefono }}",
+            "email": "={{ $json.email }}",
+            "canal_preferido": "={{ $json.canal_preferido }}",
+            "notas_internas": "={{ $json.notas_internas }}",
+            "updated_at": "={{ $json.updated_at }}"
+          }
+        },
+        "options": {
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "escribir-update",
+      "name": "Escribir HUÉSPEDES (Update)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        160
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Preparar UPDATE').first().json;\nconst ahora = new Date();\nreturn [{ json: {\n  id_log:           `LOG-HUESPED-${ahora.getTime()}`,\n  fecha_hora:        ahora.toISOString(),\n  tabla_afectada:   'HUÉSPEDES',\n  id_registro:      String(d._id_huesped),\n  campo_modificado: 'updated',\n  valor_anterior:   '',\n  valor_nuevo:      'actualizado',\n  modificado_por:   'n8n',\n  source_event:     d._inputData?.source_event ?? 'manual',\n  nivel:            'info',\n  detalle: JSON.stringify({\n    modo:           'actualizado',\n    id_huesped:     d._id_huesped,\n    nombre:         d._inputData?.nombre,\n    telefono:       d._inputData?.telefono,\n    encontrado_por: d._encontrado_por\n  }),\n  _id_huesped:     d._id_huesped,\n  _modo:           'actualizado',\n  _encontrado_por: d._encontrado_por,\n  _inputData:      d._inputData\n}}];"
+      },
+      "id": "prep-log-update",
+      "name": "Preparar LOG UPDATE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d   = $input.first().json;\nconst ahora = new Date().toISOString();\nreturn [{ json: {\n  id_huesped:            d._nuevo_id_huesped,\n  nombre:                d._inputData.nombre,\n  apellido:              d._inputData.apellido       ?? '',\n  dni:                   d._inputData.dni            ?? '',\n  telefono:              d._inputData.telefono,\n  email:                 d._inputData.email          ?? '',\n  canal_preferido:       d._inputData.canal_preferido,\n  primera_reserva_fecha: '',\n  total_reservas:        0,\n  notas_internas:        d._inputData.notas_internas ?? '',\n  created_at:            ahora,\n  updated_at:            ahora,\n  _id_huesped:           d._nuevo_id_huesped,\n  _modo:                 'creado',\n  _encontrado_por:       null,\n  _inputData:            d._inputData\n}}];"
+      },
+      "id": "preparar-create",
+      "name": "Preparar CREATE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "HUÉSPEDES",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_huesped": "={{ $json.id_huesped }}",
+            "nombre": "={{ $json.nombre }}",
+            "apellido": "={{ $json.apellido }}",
+            "dni": "={{ $json.dni }}",
+            "telefono": "={{ $json.telefono }}",
+            "email": "={{ $json.email }}",
+            "canal_preferido": "={{ $json.canal_preferido }}",
+            "primera_reserva_fecha": "={{ $json.primera_reserva_fecha }}",
+            "total_reservas": "={{ $json.total_reservas }}",
+            "notas_internas": "={{ $json.notas_internas }}",
+            "created_at": "={{ $json.created_at }}",
+            "updated_at": "={{ $json.updated_at }}"
+          }
+        },
+        "options": {
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "escribir-create",
+      "name": "Escribir HUÉSPEDES (Create)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        360
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Preparar CREATE').first().json;\nconst ahora = new Date();\nreturn [{ json: {\n  id_log:           `LOG-HUESPED-${ahora.getTime()}`,\n  fecha_hora:        ahora.toISOString(),\n  tabla_afectada:   'HUÉSPEDES',\n  id_registro:      String(d._id_huesped),\n  campo_modificado: 'created',\n  valor_anterior:   '',\n  valor_nuevo:      'creado',\n  modificado_por:   'n8n',\n  source_event:     d._inputData?.source_event ?? 'manual',\n  nivel:            'info',\n  detalle: JSON.stringify({\n    modo:       'creado',\n    id_huesped: d._id_huesped,\n    nombre:     d._inputData?.nombre,\n    telefono:   d._inputData?.telefono\n  }),\n  _id_huesped:     d._id_huesped,\n  _modo:           'creado',\n  _encontrado_por: null,\n  _inputData:      d._inputData\n}}];"
+      },
+      "id": "prep-log-create",
+      "name": "Preparar LOG CREATE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "LOG_CAMBIOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_log": "={{ $json.id_log }}",
+            "fecha_hora": "={{ $json.fecha_hora }}",
+            "tabla_afectada": "={{ $json.tabla_afectada }}",
+            "id_registro": "={{ $json.id_registro }}",
+            "campo_modificado": "={{ $json.campo_modificado }}",
+            "valor_anterior": "={{ $json.valor_anterior }}",
+            "valor_nuevo": "={{ $json.valor_nuevo }}",
+            "modificado_por": "={{ $json.modificado_por }}",
+            "source_event": "={{ $json.source_event }}",
+            "nivel": "={{ $json.nivel }}",
+            "detalle": "={{ $json.detalle }}"
+          }
+        },
+        "options": {
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "log-update",
+      "name": "LOG UPDATE",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2200,
+        160
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SHEETS_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "LOG_CAMBIOS",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_log": "={{ $json.id_log }}",
+            "fecha_hora": "={{ $json.fecha_hora }}",
+            "tabla_afectada": "={{ $json.tabla_afectada }}",
+            "id_registro": "={{ $json.id_registro }}",
+            "campo_modificado": "={{ $json.campo_modificado }}",
+            "valor_anterior": "={{ $json.valor_anterior }}",
+            "valor_nuevo": "={{ $json.valor_nuevo }}",
+            "modificado_por": "={{ $json.modificado_por }}",
+            "source_event": "={{ $json.source_event }}",
+            "nivel": "={{ $json.nivel }}",
+            "detalle": "={{ $json.detalle }}"
+          }
+        },
+        "options": {
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "log-create",
+      "name": "LOG CREATE",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2200,
+        360
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resumen para rama UPDATE\nconst d = $('Preparar LOG UPDATE').first().json;\nreturn [{ json: {\n  ok:             true,\n  modo:           d._modo,\n  id_huesped:     d._id_huesped,\n  nombre:         d._inputData?.nombre,\n  apellido:       d._inputData?.apellido   ?? '',\n  telefono:       d._inputData?.telefono,\n  email:          d._inputData?.email      ?? '',\n  encontrado_por: d._encontrado_por,\n  source_event:   d._inputData?.source_event\n}}];"
+      },
+      "id": "resumen-update",
+      "name": "Resumen UPDATE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resumen para rama CREATE\nconst d = $('Preparar LOG CREATE').first().json;\nreturn [{ json: {\n  ok:             true,\n  modo:           d._modo,\n  id_huesped:     d._id_huesped,\n  nombre:         d._inputData?.nombre,\n  apellido:       d._inputData?.apellido   ?? '',\n  telefono:       d._inputData?.telefono,\n  email:          d._inputData?.email      ?? '',\n  encontrado_por: null,\n  source_event:   d._inputData?.source_event\n}}];"
+      },
+      "id": "resumen-create",
+      "name": "Resumen CREATE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        360
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Resolver Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Resolver Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Input": {
+      "main": [
+        [
+          {
+            "node": "IF: input válido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: input válido": {
+      "main": [
+        [
+          {
+            "node": "Leer HUÉSPEDES",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prep LOG Input Inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep LOG Input Inválido": {
+      "main": [
+        [
+          {
+            "node": "LOG Input Inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG Input Inválido": {
+      "main": [
+        [
+          {
+            "node": "Error: input inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer HUÉSPEDES": {
+      "main": [
+        [
+          {
+            "node": "Agg HUÉSPEDES",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agg HUÉSPEDES": {
+      "main": [
+        [
+          {
+            "node": "Buscar Huésped Existente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Huésped Existente": {
+      "main": [
+        [
+          {
+            "node": "IF: huésped existe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: huésped existe": {
+      "main": [
+        [
+          {
+            "node": "Preparar UPDATE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar CREATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar UPDATE": {
+      "main": [
+        [
+          {
+            "node": "Escribir HUÉSPEDES (Update)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escribir HUÉSPEDES (Update)": {
+      "main": [
+        [
+          {
+            "node": "Preparar LOG UPDATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar LOG UPDATE": {
+      "main": [
+        [
+          {
+            "node": "LOG UPDATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG UPDATE": {
+      "main": [
+        [
+          {
+            "node": "Resumen UPDATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar CREATE": {
+      "main": [
+        [
+          {
+            "node": "Escribir HUÉSPEDES (Create)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escribir HUÉSPEDES (Create)": {
+      "main": [
+        [
+          {
+            "node": "Preparar LOG CREATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar LOG CREATE": {
+      "main": [
+        [
+          {
+            "node": "LOG CREATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOG CREATE": {
+      "main": [
+        [
+          {
+            "node": "Resumen CREATE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "pinData": {},
+  "id": "__WORKFLOW_ID__",
+  "versionId": "__WORKFLOW_VERSION_ID__"
+}

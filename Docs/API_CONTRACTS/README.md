@@ -16,10 +16,13 @@ y convertible a OpenAPI/Swagger más adelante cuando se expongan como webhooks r
 |---|---|---|---|---|
 | `db_recalcular_disponibilidad` | [db_recalcular_disponibilidad.md](./db_recalcular_disponibilidad.md) | validado | Si | Si |
 | `db_crear_consulta` | [db_crear_consulta.md](./db_crear_consulta.md) | validado | Si | Si |
-| `db_crear_prereserva` | [db_crear_prereserva.md](./db_crear_prereserva.md) | validado | Si | Si |
+| `db_crear_huesped` | [db_crear_huesped.md](./db_crear_huesped.md) | validado | Si | Si |
+| `db_crear_prereserva` | [db_crear_prereserva.md](./db_crear_prereserva.md) | validado | Si | — |
 | `db_registrar_pago` | [db_registrar_pago.md](./db_registrar_pago.md) | validado | Si | Si |
 | `db_confirmar_reserva` | [db_confirmar_reserva.md](./db_confirmar_reserva.md) | validado | Si | Si |
 | `sistema_expirar_prereservas` | [sistema_expirar_prereservas.md](./sistema_expirar_prereservas.md) | validado | Si | Si |
+
+> `db_crear_prereserva v3` fue validado en DEV. TEST pendiente.
 
 ## Convenciones
 
@@ -67,3 +70,13 @@ subworkflow IDs   → __RECALCULAR_DISPONIBILIDAD_WORKFLOW_ID__ (u otros placeho
 credential name   → __CREDENTIAL_NAME__
 subworkflow name  → __RECALCULAR_DISPONIBILIDAD_WORKFLOW_NAME__ (u otros placeholders según el caso)
 ```
+
+## Nota sobre migración a Supabase
+
+El sistema fue diseñado sobre Google Sheets como base de datos operativa
+para las etapas de diseño, prototipado y validación (DEV/TEST).
+
+La migración a Supabase está planificada como próxima etapa.
+Los contratos técnicos de los workflows documentan el comportamiento esperado
+independientemente de la capa de persistencia — los inputs, outputs, reglas de negocio
+y flujos de datos son válidos para Supabase con ajustes en los nodos de lectura/escritura.
