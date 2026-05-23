@@ -3,7 +3,7 @@
 
 **Versión:** 1.0
 **Fecha:** Mayo 2026
-**Estado:** Arquitectura consolidada — base de datos lista para ejecución
+**Estado:** Arquitectura consolidada — ejecución DEV iniciada; Bloque 13 cerrado; Bloques 14-22 pendientes
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** `Docs/Arquitectura/ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1`
@@ -213,7 +213,7 @@ Las credenciales de Supabase (Project ID, password, anon key, service role key, 
 
 ## 5. COMPONENTES DE LA SOLUCIÓN
 
-Descripción a alto nivel de qué construye la Etapa 6B. El detalle SQL completo vive en `6B_SCHEMA_SQL.md v1.5`.
+Descripción a alto nivel de qué construye la Etapa 6B. El detalle SQL completo vive en `6B_SCHEMA_SQL.md v1.6.1`.
 
 ### Tablas (20 tablas)
 
@@ -295,7 +295,7 @@ Detalle en `6B_PLAN_FASES.md v1.1`.
 
 ## 6. FUNCIONES CRÍTICAS
 
-Resumen breve de cada función. El SQL completo vive en `6B_SCHEMA_SQL.md v1.5`.
+Resumen breve de cada función. El SQL completo vive en `6B_SCHEMA_SQL.md v1.6.1`.
 
 ### `upsert_huesped(payload JSONB)`
 
@@ -510,7 +510,7 @@ Si se mezclara 6B con la reescritura de n8n, ante cualquier bug sería difícil 
 
 ### Hijos de esta etapa
 
-- **`Docs/Implementacion/6B_SCHEMA_SQL.md v1.5`** — Schema completo, funciones, triggers, vistas, seed. Aprobado.
+- **`Docs/Implementacion/6B_SCHEMA_SQL.md v1.6.1`** — Schema completo, funciones, triggers, vistas, seed. Aprobado.
 - **`Docs/Implementacion/6B_PLAN_FASES.md v1.1`** — Plan operativo bloque por bloque, 36 tests, criterios de éxito/freno. Aprobado y sanitizado.
 - **`Docs/Implementacion/6B_REESCRITURA_WORKFLOWS.md`** — Futuro. NO existe todavía. Se genera después de cerrar DEV.
 
@@ -538,9 +538,21 @@ Si se mezclara 6B con la reescritura de n8n, ante cualquier bug sería difícil 
 
 ### Schema aprobado técnicamente
 
-`6B_SCHEMA_SQL.md v1.5` cerró 5 iteraciones quirúrgicas (v1.1 → v1.5) y está en estado "Aprobada para planificación de ejecución en Supabase DEV — NO EJECUTAR SIN PLAN DE FASES".
+`6B_SCHEMA_SQL.md v1.6.1` cerró una secuencia de iteraciones quirúrgicas sobre el schema PostgreSQL de la Etapa 6B y queda como documento técnico base vigente para continuar la ejecución en Supabase DEV.
 
-Las 5 iteraciones cubrieron, en orden: consolidación de 17 ajustes técnicos (v1.1), 9 ajustes operativos (v1.2), 5 ajustes finales antes de ejecutar (v1.3), introducción del lock global de disponibilidad (v1.4), y corrección crítica del orden de locks en `confirmar_reserva` para evitar deadlocks (v1.5).
+El documento está en estado: **"Corrección documental sobre v1.6. Bloque 13 ejecutado en DEV. Pendiente Bloques 14-22. Sin cambios operativos."**
+
+Las iteraciones cubrieron, en orden:
+
+- `v1.1`: consolidación de ajustes técnicos estructurales sobre tablas, funciones, pagos, huéspedes, idempotencia y carga manual segura.
+- `v1.2`: endurecimiento operativo de validaciones, bloqueos, semántica de `pago_en_revision`, contexto de logs y motor de precios como pieza futura obligatoria.
+- `v1.3`: ajustes finales sobre idempotencia post-lock, validación explícita de huésped, `recovery_path` y pagos sobre pre-reservas no activas.
+- `v1.4`: introducción del lock global de disponibilidad `(10, 0)` y eliminación de `LOCK TABLE`.
+- `v1.5`: corrección crítica del orden de locks para que el lock global se tome antes de cualquier `SELECT ... FOR UPDATE`, evitando deadlocks entre funciones críticas.
+- `v1.6`: corrección del bug detectado en ejecución real del Bloque 13: `pg_advisory_xact_lock(integer, bigint)` no existe, por lo que el lock por cabaña debe usar cast explícito `::INTEGER`.
+- `v1.6.1`: corrección documental pura para alinear la narrativa de la Sección 10 con el SQL real y la invariante de locks. No modifica SQL ejecutable, schema ni comportamiento.
+
+Estado operativo actual: el Bloque 13 (`crear_prereserva`) ya fue ejecutado, corregido y verificado en Supabase DEV. Los Bloques 14 a 22 deben ejecutarse desde `6B_SCHEMA_SQL.md v1.6.1`.
 
 ### Plan de fases aprobado y sanitizado
 
@@ -563,7 +575,7 @@ Tres opciones, en orden de preferencia:
 
 1. **Ejecutar Fase 0 → Bloque 1 → bitácora → avance bloque por bloque** en Supabase DEV siguiendo `6B_PLAN_FASES.md v1.1`. Es la opción recomendada.
 2. Subir los documentos sanitizados al repo de GitHub si todavía no lo hiciste.
-3. (No recomendado) Empezar a redactar `6B_REESCRITURA_WORKFLOWS.md` antes de cerrar DEV. Esto introduce riesgo: si ejecutar el schema revela algo que requiere v1.6, la reescritura quedaría desactualizada antes de empezar.
+3. (No recomendado) Empezar a redactar `6B_REESCRITURA_WORKFLOWS.md` antes de cerrar DEV. Esto introduce riesgo: si ejecutar el schema revela algo que requiere una nueva versión del schema, la reescritura quedaría desactualizada antes de empezar.
 
 ---
 
@@ -573,7 +585,7 @@ Tres opciones, en orden de preferencia:
 
 **Riesgo:** un bloque falla a mitad de camino y deja el schema en estado parcial.
 
-**Mitigación:** cada bloque tiene su rollback documentado en v1.5. El plan de fases (v1.1) exige verificación post-ejecución antes de avanzar. Si algo falla, se detiene la ejecución y se evalúa: rollback de bloque, reset del proyecto (si DEV está vacío), o investigación con bitácora.
+**Mitigación:** cada bloque tiene su rollback documentado en v1.6.1. El plan de fases (v1.1) exige verificación post-ejecución antes de avanzar. Si algo falla, se detiene la ejecución y se evalúa: rollback de bloque, reset del proyecto (si DEV está vacío), o investigación con bitácora.
 
 ### Mala configuración de secrets
 
@@ -626,7 +638,7 @@ Si por error se sube algo: rotar credenciales inmediatamente en Supabase, hacer 
 
 **Riesgo:** Supabase suspende un proyecto inactivo o un accidente borra DEV.
 
-**Mitigación:** el schema completo está en `6B_SCHEMA_SQL.md v1.5` versionado en GitHub. Recrear DEV es ejecutar el plan de fases desde Fase 0. El seed mínimo se carga vía Bloque 21. Tiempo total de recreación: 4-6 horas. No se pierde nada irrecuperable.
+**Mitigación:** el schema completo está en `6B_SCHEMA_SQL.md v1.6.1` versionado en GitHub. Recrear DEV es ejecutar el plan de fases desde Fase 0. El seed mínimo se carga vía Bloque 21. Tiempo total de recreación: 4-6 horas. No se pierde nada irrecuperable.
 
 ---
 
@@ -635,7 +647,7 @@ Si por error se sube algo: rotar credenciales inmediatamente en Supabase, hacer 
 Plan secuencial recomendado:
 
 1. **Subir documentos sanitizados a GitHub.**
-   - `Docs/Implementacion/6B_SCHEMA_SQL.md v1.5` (revisado para sanitización, limpio).
+   - `Docs/Implementacion/6B_SCHEMA_SQL.md v1.6.1` (revisado para sanitización, limpio).
    - `Docs/Implementacion/6B_PLAN_FASES.md v1.1` (sanitizado).
    - `Docs/Arquitectura/ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md v1.0` (este documento).
 
@@ -661,6 +673,6 @@ Las etapas posteriores (motor de precios en PostgreSQL, web pública, MercadoPag
 **FIN DEL DOCUMENTO — `ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md v1.0`**
 
 **Trazabilidad:**
-- v1.0 — Primera redacción consolidada (2026-05-22). Cierra documentalmente la trilogía de la Etapa 6B: schema (v1.5), plan (v1.1) y arquitectura (v1.0). Sanitizado para GitHub desde el inicio.
+- v1.0 — Primera redacción consolidada (2026-05-22). Cierra documentalmente la trilogía de la Etapa 6B: schema (v1.6.1), plan (v1.1) y arquitectura (v1.0). Sanitizado para GitHub desde el inicio.
 
 **Estado:** Arquitectura consolidada — base de datos lista para ejecución.

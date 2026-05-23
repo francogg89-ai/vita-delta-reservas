@@ -4,7 +4,7 @@
 **Versión:** 1.1
 **Fecha:** Mayo 2026
 **Estado:** Propuesta para revisión — NO EJECUTAR TODAVÍA
-**Documento base:** `Docs/Implementacion/6B_SCHEMA_SQL.md v1.5` (aprobado)
+**Documento base:** `Docs/Implementacion/6B_SCHEMA_SQL.md v1.6.1` (aprobado)
 **Entorno objetivo:** Supabase DEV (proyecto `__SUPABASE_PROJECT_ID_DEV__`, región `sa-east-1`)
 **Autores:** Franco (titular) + Claude (arquitecto)
 
@@ -69,7 +69,7 @@ Versión de sanitización para GitHub. **Cero cambios operativos.** Mismo plan, 
 
 ### Qué se va a ejecutar
 
-Los 22 bloques SQL del documento `6B_SCHEMA_SQL.md v1.5`, ejecutados uno por uno en Supabase DEV (no en producción), con verificación post-ejecución en cada paso. El plan se organiza en 5 fases:
+Los 22 bloques SQL del documento `6B_SCHEMA_SQL.md v1.6.1`, ejecutados uno por uno en Supabase DEV (no en producción), con verificación post-ejecución en cada paso. El plan se organiza en 5 fases:
 
 - **Fase 0** — Preparación (no ejecuta SQL).
 - **Fase 1** — Infraestructura base (Bloques 1-8): extensiones, enums, tablas, constraints.
@@ -143,7 +143,7 @@ Si alguna no aparece como disponible:
 
 ### 2.4 Documentación local
 
-- [ ] Tener copia local de `Docs/Implementacion/6B_SCHEMA_SQL.md v1.5`.
+- [ ] Tener copia local de `Docs/Implementacion/6B_SCHEMA_SQL.md v1.6.1`.
 - [ ] Tener este documento (`6B_PLAN_FASES.md`) abierto durante la ejecución.
 - [ ] Tener claro que el SQL se ejecuta **por bloques**, no copiando todo el archivo de una vez.
 
@@ -168,7 +168,7 @@ Reglas obligatorias para cada bloque:
 
 ### 3.1 Un bloque a la vez
 
-- Copiar el SQL del bloque desde `6B_SCHEMA_SQL.md v1.5`.
+- Copiar el SQL del bloque desde `6B_SCHEMA_SQL.md v1.6.1`.
 - Pegar en SQL Editor de Supabase.
 - Ejecutar.
 - **No** copiar el siguiente bloque hasta haber verificado el actual.
@@ -183,7 +183,7 @@ Cada ejecución muestra mensajes en Supabase. **Leerlos antes de continuar.**
 
 ### 3.3 Correr la verificación post-ejecución
 
-Cada bloque del documento SQL v1.5 incluye un **query de verificación** (sección "Verificación post-ejecución" dentro del bloque). Es obligatorio correrlo.
+Cada bloque del documento SQL v1.6.1 incluye un **query de verificación** (sección "Verificación post-ejecución" dentro del bloque). Es obligatorio correrlo.
 
 Si el resultado del query de verificación NO coincide con el esperado:
 - **Frenar.**
@@ -196,7 +196,7 @@ Cualquier error técnico (no esperado) durante la ejecución de un bloque o su v
 - **NO ejecutar el siguiente bloque.**
 - **NO modificar el SQL a mano "para que ande".**
 - Documentar el error literal (mensaje, código `SQLSTATE`, contexto).
-- Revisar el bloque, el documento v1.5, y este plan antes de cualquier acción.
+- Revisar el bloque, el documento v1.6.1, y este plan antes de cualquier acción.
 
 ### 3.5 No continuar por intuición
 
@@ -219,7 +219,7 @@ Esta bitácora es valiosa cuando volvamos a hacer el ejercicio en TEST o en PROD
 Si durante la ejecución se descubre un error en el SQL que requiere corregir:
 - **Frenar.**
 - Documentar el problema.
-- Generar v1.6 del schema SQL (o decidir parche puntual y documentarlo).
+- Generar una nueva versión del schema SQL (patch o minor según alcance) o decidir parche puntual y documentarlo.
 - **NO** correr una versión "parcheada al vuelo" sin que quede registrada.
 
 ### 3.8 No mezclar ejecución de schema con workflows n8n
@@ -230,14 +230,14 @@ Mientras se ejecuta este plan en Supabase DEV, **no tocar workflows n8n** que ap
 
 ## 4. TABLA DE BLOQUES SQL
 
-Tabla de los 22 bloques del documento v1.5. Cada bloque tiene:
+Tabla de los 22 bloques del documento v1.6.1. Cada bloque tiene:
 - **#** — número de bloque.
 - **Nombre** — corto, identificable.
 - **Crea/modifica** — qué hace.
 - **Depende de** — qué bloques deben haberse ejecutado antes.
 - **Riesgo** — bajo / medio / alto.
 - **Verificación post-ejecución** — query a correr.
-- **Rollback** — disponible en el documento v1.5.
+- **Rollback** — disponible en el documento v1.6.1.
 - **Criterio para avanzar** — qué tiene que estar OK para pasar al siguiente.
 - **Criterio para frenar** — qué dispara una pausa.
 
@@ -344,7 +344,7 @@ Objetivo: verificar que el entorno está listo. **Sin SQL todavía.**
    ```
    Debe devolver 1 fila con la fecha actual, nombre del DB y versión de PostgreSQL.
 5. Confirmar que no estamos en producción (verificar nombre del proyecto).
-6. Tener `6B_SCHEMA_SQL.md v1.5` abierto en otra ventana.
+6. Tener `6B_SCHEMA_SQL.md v1.6.1` abierto en otra ventana.
 7. Tener este documento abierto.
 
 **Criterio para avanzar a Fase 1:** todos los puntos del checklist OK.
@@ -395,7 +395,7 @@ Objetivo: crear toda la lógica almacenada. **Esta fase es la más sensible.**
 
 **Orden estricto (ver dependencias en Sección 4):**
 
-1. **Bloque 9** — `normalizar_telefono` + columna + trigger. **Correr el test funcional** con los 6 casos del documento v1.5. Si alguno falla, frenar.
+1. **Bloque 9** — `normalizar_telefono` + columna + trigger. **Correr el test funcional** con los 6 casos del documento v1.6.1. Si alguno falla, frenar.
 
 2. **Bloque 10** — `upsert_huesped`. Correr los 3 tests funcionales del documento v1.5.
 
@@ -1334,9 +1334,9 @@ COMMIT;
 
 > **No usar `DROP SCHEMA CASCADE` ni equivalentes destructivos sin entender el estado actual.**
 
-El rollback debe ser proporcional al problema. Cada bloque del documento v1.5 incluye su propio rollback documentado. Usar ese primero.
+El rollback debe ser proporcional al problema. Cada bloque del documento v1.6.1 incluye su propio rollback documentado. Usar ese primero.
 
-### 7.2 Rollback por bloque (incluido en v1.5)
+### 7.2 Rollback por bloque (incluido en v1.6.1)
 
 Cada bloque del documento SQL tiene una sección "**Rollback:**" con el SQL exacto para revertir. Ejemplos:
 
@@ -1500,7 +1500,7 @@ DEV está listo como base de datos operativa cuando se cumplen todos estos punto
 
 - [ ] Bitácora de ejecución llena con fechas, observaciones y resoluciones.
 - [ ] Cualquier desviación del plan documentada.
-- [ ] Cualquier parche al SQL documentado (idealmente con v1.6 generada).
+- [ ] Cualquier parche al SQL documentado mediante nueva versión del schema antes de continuar.
 
 ---
 
@@ -1560,7 +1560,7 @@ Para que quede explícito, los siguientes ítems quedan **fuera del alcance** de
 - **Integración real con MercadoPago.** Solo se simula con `medio_pago='mp_link'` y `proveedor='mercadopago'` en pagos manuales.
 - **Integración real con WhatsApp.** Solo se simulan envíos con plantillas.
 - **Integración real con Instagram DMs.**
-- **RLS (Row Level Security) completo.** Documentado como principio en v1.5; se implementa cuando exista Supabase Auth.
+- **RLS (Row Level Security) completo.** Documentado como principio en v1.6.1; se implementa cuando exista Supabase Auth.
 - **Supabase Auth.** No se configura ahora.
 - **Contabilidad completa.** Documentada como contemplada futura (D32) pero no implementada.
 - **Migración productiva de Sheets.** Pertenece a etapa posterior, con plan propio.

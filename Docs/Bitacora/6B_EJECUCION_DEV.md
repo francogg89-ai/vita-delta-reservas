@@ -525,3 +525,11 @@ Cuando hay múltiples SELECTs separados por `;`, Supabase muestra solo el output
 **Decisión:** avanzar a Bloque 14 (`confirmar_reserva`) en próxima sesión.
 
 ---
+
+### Actualización documental posterior al Bloque 13
+
+Durante la ejecución del Bloque 13 se detectó un bug de tipado en `pg_advisory_xact_lock(1, v_id_cabana)` porque `v_id_cabana` es `BIGINT` y PostgreSQL no provee la sobrecarga `(integer, bigint)`. El bug fue corregido en DEV vía `CREATE OR REPLACE FUNCTION` y luego incorporado al documento `6B_SCHEMA_SQL.md v1.6`.
+
+A partir del Bloque 14, la ejecución continúa usando `6B_SCHEMA_SQL.md v1.6`.
+
+---

@@ -1,16 +1,114 @@
 # 6B_SCHEMA_SQL.md
 # Schema PostgreSQL — Vita Delta Reservas
 
-**Versión:** 1.5
+**Versión:** 1.6.1
 **Fecha:** Mayo 2026
-**Estado:** Propuesta para revisión — NO EJECUTAR TODAVÍA
+**Estado:** Corrección documental sobre v1.6. Bloque 13 ejecutado en DEV. Pendiente Bloques 14-22. Sin cambios operativos.
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1
 **Sucesora directa de:** ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md v1.1
 
-> **IMPORTANTE:** Todo el SQL incluido en la Parte B de este documento es **SQL propuesto para revisión antes de ejecutar**. No correr ningún bloque en Supabase hasta revisar el documento completo, validar las decisiones técnicas y aprobar explícitamente. La ejecución se hará bloque por bloque siguiendo el orden establecido en la Parte B.
+> **IMPORTANTE:** El SQL de la Parte B se ejecuta bloque por bloque siguiendo `Docs/Implementacion/6B_PLAN_FASES.md`. Al momento de v1.6.1, el Bloque 13 ya fue ejecutado y verificado en Supabase DEV. Los Bloques 14 a 22 todavía no fueron ejecutados y deben correrse desde este documento.
 > **NOTA DE SANITIZACIÓN:** Este documento fue revisado para subir a GitHub. No contiene Project ID, Project URL, passwords, connection strings, anon keys, service role keys, JWTs ni datos reales de huéspedes. Los teléfonos en tests funcionales son sintéticos. Las credenciales reales del proyecto Supabase deben vivir fuera del repositorio.
+
+---
+
+## RESUMEN DE CAMBIOS v1.6 → v1.6.1
+
+Versión de **corrección documental pura**. Patch-level, no minor bump, porque **no toca SQL ejecutable, schema, funciones ni tests**. Solo alinea la narrativa con el SQL real.
+
+### Por qué importa
+
+La descripción conceptual de algunas funciones en Sección 10 quedó desactualizada respecto al SQL real después de las correcciones de v1.5 (invariante de orden de locks) y v1.6 (cast `::INTEGER`). En particular, las narrativas de `confirmar_reserva` (10.6) y `cancelar_prereserva` (10.7) describían el SELECT FOR UPDATE como primer paso y el lock global después.
+
+**Eso contradice directamente la invariante de locks v1.5**, que exige tomar `pg_advisory_xact_lock(10, 0)` antes de CUALQUIER otro lock — incluido `SELECT ... FOR UPDATE`. Si alguien leyera solo la Sección 10 (sin mirar el SQL ejecutable) para entender el flujo o implementar una variante, internalizaría el orden incorrecto: justo el patrón que generaba deadlocks `40P01` entre `confirmar_reserva` y `cancelar_prereserva` antes de la corrección de v1.5.
+
+v1.6.1 cierra esa inconsistencia documental.
+
+### Cambios aplicados
+
+1. **Sección 10.6 (`confirmar_reserva`) — orden de locks corregido en la narrativa:**
+   - Antes (v1.6): "Lockear pre-reserva con FOR UPDATE → tomar locks de disponibilidad".
+   - Ahora (v1.6.1): "Setear contexto → tomar lock global `(10, 0)` ANTES del FOR UPDATE → lockear pre-reserva con FOR UPDATE → tomar lock por cabaña `(1, v_pre.id_cabana::INTEGER)`".
+
+2. **Sección 10.7 (`cancelar_prereserva`) — orden de locks corregido en la narrativa:**
+   - Antes (v1.6): "Lockear pre-reserva con FOR UPDATE → tomar lock global".
+   - Ahora (v1.6.1): "Setear contexto → tomar lock global `(10, 0)` ANTES del FOR UPDATE → mapear motivo → lockear pre-reserva con FOR UPDATE".
+
+3. **Menciones conceptuales del lock por cabaña unificadas con cast** `::INTEGER` en Sección 10 (10.5, 10.6, 10.7, 10.8). Antes algunas decían `pg_advisory_xact_lock(1, id_cabana)` sin cast en texto descriptivo; ahora todas usan el patrón consistente con el SQL ejecutable y con la nota técnica de Sección 15.
+
+### Lo que NO cambió
+
+- **Cero cambios en SQL ejecutable.** Bloques 13, 14, 15, 16 y resto siguen exactamente como en v1.6.
+- Schema, constraints, EXCLUDE, tablas, enums, vistas, triggers, pg_cron, seed.
+- Diseño de locks (D46 sigue vigente).
+- Invariante de orden de locks v1.5.
+- Cast `::INTEGER` en SQL ejecutable v1.6.
+- Tests, decisiones D1-D46, bitácora del Bloque 13.
+
+### Estado en Supabase DEV (al momento de generar v1.6.1)
+
+Idéntico a v1.6:
+- Bloque 13 ejecutado y verificado en DEV (corregido vía `CREATE OR REPLACE` durante ejecución real).
+- Bloques 14-22 pendientes de ejecución. Nacen correctos desde v1.6 / v1.6.1 (idéntico SQL).
+
+---
+
+## RESUMEN DE CAMBIOS v1.5 → v1.6
+
+Versión quirúrgica que corrige un bug detectado durante la ejecución real del Bloque 13 en Supabase DEV. Cero cambios de schema, cero features nuevas, cero cambios de diseño de locks.
+
+### Bug detectado en DEV
+
+Durante la ejecución del Bloque 13 (`crear_prereserva`) en Supabase DEV con PostgreSQL 17.6, la función falló en runtime con:
+
+```
+ERROR 42883: function pg_advisory_xact_lock(integer, bigint) does not exist
+HINT: No function matches the given name and argument types.
+QUERY: SELECT pg_advisory_xact_lock(1, v_id_cabana)
+CONTEXT: PL/pgSQL function crear_prereserva(jsonb) line 178 at PERFORM
+```
+
+### Causa raíz
+
+PostgreSQL provee solo dos sobrecargas de `pg_advisory_xact_lock`:
+
+- `pg_advisory_xact_lock(bigint)` — 1 argumento.
+- `pg_advisory_xact_lock(integer, integer)` — 2 argumentos del mismo tipo.
+
+**No existe** la variante `(integer, bigint)`. El lock global `pg_advisory_xact_lock(10, 0)` funciona porque ambos literales se infieren como `integer`. El lock por cabaña `pg_advisory_xact_lock(1, v_id_cabana)` falla porque `v_id_cabana` está declarada como `BIGINT` (consistente con `id_cabana` que es `BIGSERIAL` en `cabanas`).
+
+### Corrección aplicada en v1.6
+
+Cast explícito a `INTEGER` en el segundo argumento del lock por cabaña, en las 3 funciones afectadas:
+
+| Bloque | Función | Línea afectada | Cambio |
+|---|---|---|---|
+| 13 | `crear_prereserva` | `PERFORM pg_advisory_xact_lock(1, v_id_cabana)` | → `... v_id_cabana::INTEGER` |
+| 14 | `confirmar_reserva` | `PERFORM pg_advisory_xact_lock(1, v_pre.id_cabana)` | → `... v_pre.id_cabana::INTEGER` |
+| 16 | `crear_bloqueo` | `PERFORM pg_advisory_xact_lock(1, v_id_cabana)` | → `... v_id_cabana::INTEGER` |
+
+El cast es seguro porque `id_cabana` en Vita Delta nunca va a superar el rango `INTEGER` (~2.1 mil millones), y `pg_advisory_xact_lock` usa el segundo argumento como identificador de lock, no como dato de negocio.
+
+### Nota técnica agregada en Sección 15
+
+Se documenta el por qué del cast para que cualquiera que rehaga el schema desde cero no se tope con el mismo error.
+
+### Estado en Supabase DEV (al momento de generar v1.6)
+
+- **Bloque 13** ya fue ejecutado y corregido vía `CREATE OR REPLACE FUNCTION` en DEV. Verificado con los 9 checks del bloque (T-PR-1 a T-PR-9). Bitácora commiteada en `Docs/Bitacora/6B_EJECUCION_DEV.md`.
+- **Bloques 14, 15, 16, 17, 18, 19, 20, 21, 22** todavía NO fueron ejecutados. Cuando se ejecuten desde v1.6, nacen correctos.
+- **No se re-ejecuta el Bloque 13.** El documento v1.6 queda como fuente de verdad para próximos bloques, recreación futura de DEV, ejecución en TEST y ejecución futura en PROD.
+
+### Lo que NO cambió respecto a v1.5
+
+- Schema, constraints, EXCLUDE, tablas, enums, vistas, triggers, pg_cron, seed.
+- Diseño de locks (D46 sigue vigente: lock global `(10, 0)` antes que cualquier otro lock).
+- Invariante de orden de locks (v1.5).
+- `upsert_huesped`, `validar_disponibilidad`, `obtener_disponibilidad_rango`, `cancelar_prereserva`, `registrar_pago`, `expirar_prereservas_vencidas` (no toman lock por cabaña).
+- Tests (los tests del Bloque 13 ya quedaron documentados como pasados en bitácora; los demás se ejecutan tal cual).
+- Decisiones D1-D46 (sin agregar D47; v1.6 es corrección de implementación, no decisión nueva).
 
 ---
 
@@ -851,7 +949,7 @@ Reemplaza conceptualmente a `DISPONIBILIDAD_CACHE`. Devuelve disponibilidad calc
 2. Si `monto_total IS NULL OR monto_sena IS NULL` → devolver `error='precio_requerido'`.
 3. Si viene `idempotency_key` → buscar pre-reserva activa con esa key. Si existe, devolver la existente con flag `idempotent_match=true`.
 4. Resolver huésped vía `upsert_huesped()` (Modo 2).
-5. Tomar locks de disponibilidad (v1.4): primero `pg_advisory_xact_lock(10, 0)` (global), después `pg_advisory_xact_lock(1, id_cabana)` (cabaña).
+5. Tomar locks de disponibilidad (v1.4, v1.6): primero `pg_advisory_xact_lock(10, 0)` (global), después `pg_advisory_xact_lock(1, v_id_cabana::INTEGER)` (cabaña, con cast obligatorio — ver Sección 15).
 6. Llamar a `validar_disponibilidad()`. Si no disponible → devolver `error='no_disponible'`.
 7. Calcular `hora_checkin` y `hora_checkout` finales: si vienen solicitadas, validar contra rango permitido. Si no, usar default.
 8. INSERT en pre_reservas.
@@ -879,19 +977,22 @@ Convierte una pre-reserva en reserva confirmada.
 
 **Flujo:**
 
-1. Lockear la pre-reserva con SELECT FOR UPDATE.
-2. Verificar que exista y estado sea `pendiente_pago` o `pago_en_revision`.
-3. Tomar locks de disponibilidad (v1.4): primero `pg_advisory_xact_lock(10, 0)` (global), después `pg_advisory_xact_lock(1, id_cabana)` (cabaña).
-4. Verificar pagos asociados:
+1. Extraer payload y validar mínimo (`id_pre_reserva`, `source_event`).
+2. Setear contexto de logs (`app.modificado_por='confirmar_reserva'`, `app.source_event=<source_event>`) para que los triggers de log de estado tengan contexto preciso (D38, v1.2).
+3. **Tomar lock global `(10, 0)` ANTES de cualquier `FOR UPDATE`** (invariante v1.5): `pg_advisory_xact_lock(10, 0)`. Este orden es obligatorio porque `SELECT ... FOR UPDATE` toma row locks que PostgreSQL incluye en su grafo de detección de deadlocks. Tomar el FOR UPDATE antes del global puede causar deadlocks contra `cancelar_prereserva`.
+4. Lockear y leer la pre-reserva con `SELECT * FROM pre_reservas WHERE id_pre_reserva = X FOR UPDATE`.
+5. Verificar que exista y que el estado sea `pendiente_pago` o `pago_en_revision`.
+6. Tomar lock por cabaña (ahora que conocemos `v_pre.id_cabana`): `pg_advisory_xact_lock(1, v_pre.id_cabana::INTEGER)`. El cast a INTEGER es obligatorio porque PostgreSQL no provee `pg_advisory_xact_lock(integer, bigint)` (ver nota técnica en Sección 15).
+7. Verificar pagos asociados:
    - Camino estricto (default): buscar al menos un pago en estado `confirmado` asociado a la pre-reserva. Si no hay → `error='sin_pago_confirmado'`.
    - Camino combinado (si `permitir_pago_en_revision=true` y `validado_por` viene): aceptar pagos en `en_revision`. Dentro de la transacción, actualizar el pago a `confirmado` con `validado_por` y `validado_en=NOW()`.
-5. Revalidar disponibilidad excluyendo la propia pre-reserva (en pre_reservas WHERE id_pre_reserva != THIS).
-6. INSERT en reservas copiando todos los campos de la pre-reserva (fechas, horas, montos, personas, huésped, cabaña) **incluyendo los 4 campos operativos** (`mascotas`, `detalle_mascotas`, `ninos`, `notas_reserva`). Capturar `exclusion_violation` defensivamente.
-7. UPDATE pre_reserva: estado = `convertida`.
-8. UPDATE pago: setear `id_reserva` apuntando a la nueva reserva.
-9. UPDATE huesped: `total_reservas = total_reservas + 1`. Si `primera_reserva_fecha IS NULL`, setear con la fecha de check-in.
-10. INSERT en log_cambios con evento `reserva_confirmada`.
-11. Devolver `{ ok, id_reserva, id_pre_reserva }`.
+8. Revalidar disponibilidad excluyendo la propia pre-reserva (en pre_reservas WHERE id_pre_reserva != THIS).
+9. INSERT en reservas copiando todos los campos de la pre-reserva (fechas, horas, montos, personas, huésped, cabaña) **incluyendo los 4 campos operativos** (`mascotas`, `detalle_mascotas`, `ninos`, `notas_reserva`). Capturar `exclusion_violation` defensivamente.
+10. UPDATE pre_reserva: estado = `convertida`.
+11. UPDATE pago: setear `id_reserva` apuntando a la nueva reserva.
+12. UPDATE huesped: `total_reservas = total_reservas + 1`. Si `primera_reserva_fecha IS NULL`, setear con la fecha de check-in.
+13. INSERT en log_cambios con evento `reserva_confirmada`.
+14. Devolver `{ ok, id_reserva, id_pre_reserva }`.
 
 ### 10.7 `cancelar_prereserva(payload JSONB) RETURNS JSONB` *(nuevo en v1.1)*
 
@@ -907,16 +1008,18 @@ Convierte una pre-reserva en reserva confirmada.
 
 **Flujo:**
 
-1. Lockear la pre-reserva con SELECT FOR UPDATE.
-2. **Tomar lock global (v1.4):** `pg_advisory_xact_lock(10, 0)`. No se toma lock por cabaña porque el UPDATE solo libera disponibilidad.
-3. Verificar que exista y estado sea cancelable (`pendiente_pago` o `pago_en_revision`).
-4. Mapear motivo a estado:
+1. Extraer payload y validar mínimo (`id_pre_reserva`, `motivo`, `source_event`).
+2. Setear contexto de logs (`app.modificado_por='cancelar_prereserva'`, `app.source_event=<source_event>`) para que los triggers de log de estado tengan contexto preciso (D38, v1.2).
+3. **Tomar lock global `(10, 0)` ANTES de cualquier `FOR UPDATE`** (invariante v1.5): `pg_advisory_xact_lock(10, 0)`. Esta función NO toma lock por cabaña porque el UPDATE solo libera disponibilidad, pero sí toma el lock global para serializarse contra `crear_bloqueo` paralelo y evitar falsos conflictos operativos.
+4. Mapear motivo a estado nuevo:
    - `cliente` → `cancelada_por_cliente`.
    - `bloqueo` → `cancelada_por_bloqueo`.
-5. UPDATE estado.
-6. **NO tocar pagos.** Contar pagos asociados y devolverlos como info.
-7. INSERT en log_cambios.
-8. Devolver `{ ok, id_pre_reserva, estado_anterior, estado_nuevo, pagos_asociados_count, pagos_asociados_ids[] }`.
+5. Lockear y leer la pre-reserva con `SELECT * FROM pre_reservas WHERE id_pre_reserva = X FOR UPDATE`.
+6. Verificar que exista y que el estado sea cancelable (`pendiente_pago` o `pago_en_revision`).
+7. UPDATE estado.
+8. **NO tocar pagos.** Contar pagos asociados y devolverlos como info (los humanos deciden si reembolsan, reasignan o gestionan manualmente).
+9. INSERT en log_cambios.
+10. Devolver `{ ok, id_pre_reserva, estado_anterior, estado_nuevo, pagos_asociados_count, pagos_asociados_ids[] }`.
 
 ### 10.8 `crear_bloqueo(payload JSONB) RETURNS JSONB` *(nuevo en v1.1)*
 
@@ -938,7 +1041,7 @@ Convierte una pre-reserva en reserva confirmada.
 1. Validar payload (fechas, motivo en lista).
 2. **Tomar lock global (v1.4):** `pg_advisory_xact_lock(10, 0)`.
 3. Si `id_cabana` específica:
-   - Tomar también lock por cabaña: `pg_advisory_xact_lock(1, id_cabana)`.
+   - Tomar también lock por cabaña: `pg_advisory_xact_lock(1, v_id_cabana::INTEGER)` (cast obligatorio — ver Sección 15).
    - Verificar que no haya reservas `confirmada`/`activa` solapando con ese rango. Si hay → `error='conflicto_con_reserva'` con lista de IDs.
    - Verificar que no haya pre-reservas vigentes solapando. Si hay → `error='conflicto_con_prereserva'`.
    - Verificar que no haya bloqueos activos solapados (específico vs específico o específico vs total). Si hay → `error='bloqueo_solapado'`.
@@ -1113,16 +1216,50 @@ Para coordinar acceso concurrente a la disponibilidad, todas las funciones que a
 | Namespace | Key | Uso | Llamada |
 |---|---|---|---|
 | `10` | `0` | **Lock global de disponibilidad** (siempre primero) | `pg_advisory_xact_lock(10, 0)` |
-| `1` | `id_cabana` | Lock específico por cabaña (siempre después del global) | `pg_advisory_xact_lock(1, id_cabana)` |
+| `1` | `id_cabana` | Lock específico por cabaña (siempre después del global) | `pg_advisory_xact_lock(1, id_cabana::INTEGER)` |
+
+### Nota técnica sobre sobrecargas de `pg_advisory_xact_lock` (v1.6)
+
+**Por qué el segundo argumento se castea a `INTEGER`.**
+
+PostgreSQL provee solo dos sobrecargas de `pg_advisory_xact_lock`:
+
+- `pg_advisory_xact_lock(bigint)` — versión de 1 argumento.
+- `pg_advisory_xact_lock(integer, integer)` — versión de 2 argumentos del mismo tipo.
+
+**No existe** `pg_advisory_xact_lock(integer, bigint)`. Si el segundo argumento es de tipo `BIGINT` (porque `id_cabana` viene de una columna `BIGSERIAL` o de una variable declarada `BIGINT`), PostgreSQL no encuentra una sobrecarga compatible y aborta con error en runtime:
+
+```
+ERROR 42883: function pg_advisory_xact_lock(integer, bigint) does not exist
+```
+
+**Solución:** cast explícito a `INTEGER` en cada llamada de lock por cabaña:
+
+```sql
+PERFORM pg_advisory_xact_lock(1, v_id_cabana::INTEGER);
+PERFORM pg_advisory_xact_lock(1, v_pre.id_cabana::INTEGER);
+```
+
+**Por qué el cast es seguro en Vita Delta:**
+- `id_cabana` nunca va a superar el rango `INTEGER` (~2.1 mil millones). A 5 cabañas hoy y 12-15 en el horizonte previsto, estamos varios órdenes de magnitud por debajo del límite.
+- `pg_advisory_xact_lock` usa el segundo argumento como **identificador de lock**, no como dato de negocio. El cast no introduce riesgo semántico.
+
+**Por qué el lock global no necesita cast:**
+- `pg_advisory_xact_lock(10, 0)` usa dos literales numéricos pequeños que PostgreSQL infiere como `integer` automáticamente. La sobrecarga `(integer, integer)` matchea sin necesidad de casts.
+
+**Por qué no cambiar el tipo de `v_id_cabana` a `INTEGER` en las funciones:**
+- `id_cabana` en las tablas es `BIGSERIAL` (`BIGINT`). Si declarara `v_id_cabana INTEGER`, habría cast implícito en cada SELECT/INSERT que use la variable. El cast localizado a `::INTEGER` solo en las 2-3 llamadas de advisory lock es más limpio y conservador.
+
+**Historia del bug:** detectado durante la ejecución del Bloque 13 (`crear_prereserva`) en Supabase DEV con PostgreSQL 17.6. Corrección aplicada en v1.6.
 
 ### Invariante de orden (obligatorio, fortalecida en v1.5)
 
 **Toda función crítica debe respetar este orden estricto. La invariante cubre TODO tipo de lock, no solo advisory.**
 
 ```
-1. pg_advisory_xact_lock(10, 0)         -- SIEMPRE primero, antes de cualquier otro lock
-2. SELECT ... FOR UPDATE (si aplica)    -- row locks SOLO después del global
-3. pg_advisory_xact_lock(1, id_cabana)  -- por cabaña, si aplica
+1. pg_advisory_xact_lock(10, 0)                  -- SIEMPRE primero, antes de cualquier otro lock
+2. SELECT ... FOR UPDATE (si aplica)             -- row locks SOLO después del global
+3. pg_advisory_xact_lock(1, id_cabana::INTEGER)  -- por cabaña, si aplica (cast obligatorio, ver nota v1.6)
 4. Validaciones
 5. INSERT/UPDATE
 ```
@@ -3135,8 +3272,12 @@ BEGIN
   --   - antes de pg_advisory_xact_lock(1, id_cabana) (lock por cabaña)
   --   - antes de cualquier table-level lock si volviera a existir
   -- Romper este orden puede causar deadlocks (error 40P01) o inconsistencias.
-  PERFORM pg_advisory_xact_lock(10, 0);                  -- (1) lock global
-  PERFORM pg_advisory_xact_lock(1, v_id_cabana);         -- (2) lock por cabaña
+  --
+  -- NOTA TÉCNICA (v1.6): el segundo argumento del lock por cabaña debe castearse
+  -- explícitamente a INTEGER. PostgreSQL no provee pg_advisory_xact_lock(integer, bigint).
+  -- Ver Sección 15 para detalle. Bug detectado en ejecución DEV del Bloque 13.
+  PERFORM pg_advisory_xact_lock(10, 0);                            -- (1) lock global
+  PERFORM pg_advisory_xact_lock(1, v_id_cabana::INTEGER);          -- (2) lock por cabaña
 
   -- ─── 5.bis (v1.3, Ajuste crítico 1) Double-check de idempotencia POST-LOCK ──
   -- Cierra el agujero donde dos requests con la misma idempotency_key llegan
@@ -3459,7 +3600,10 @@ BEGIN
   -- ─── 3. Lock por cabaña (ahora que conocemos v_pre.id_cabana) ──
   -- Este lock va después del SELECT porque depende de v_pre.id_cabana.
   -- Es seguro porque el lock global ya está tomado en el paso 1.ter.
-  PERFORM pg_advisory_xact_lock(1, v_pre.id_cabana);
+  --
+  -- NOTA TÉCNICA (v1.6): cast explícito a INTEGER. PostgreSQL no provee
+  -- pg_advisory_xact_lock(integer, bigint). Ver Sección 15.
+  PERFORM pg_advisory_xact_lock(1, v_pre.id_cabana::INTEGER);
 
   -- ─── 4. Verificar pago asociado ────────────────────────
   -- Camino estricto: requiere al menos un pago 'confirmado'
@@ -3800,7 +3944,9 @@ BEGIN
 
   IF v_id_cabana IS NOT NULL THEN
     -- Bloqueo específico: tomar también lock por cabaña
-    PERFORM pg_advisory_xact_lock(1, v_id_cabana);       -- (2) lock por cabaña, solo si aplica
+    -- NOTA TÉCNICA (v1.6): cast explícito a INTEGER. PostgreSQL no provee
+    -- pg_advisory_xact_lock(integer, bigint). Ver Sección 15.
+    PERFORM pg_advisory_xact_lock(1, v_id_cabana::INTEGER);       -- (2) lock por cabaña, solo si aplica
 
     -- Verificar cabaña existe
     IF NOT EXISTS (SELECT 1 FROM cabanas WHERE id_cabana = v_id_cabana) THEN
@@ -4767,3 +4913,5 @@ SELECT cron.unschedule('cleanup_cron_history');
 - v1.3 — Versión quirúrgica con 5 ajustes finales antes de ejecutar: double-check de idempotencia post-lock, validación explícita de nombre/contacto del huésped, `recovery_path` unificado, warning en pago sobre pre-reserva terminal, documentación de config inválida.
 - v1.4 — Versión quirúrgica enfocada exclusivamente en concurrencia: advisory lock global `(10, 0)` introducido como Capa 0 de la estrategia anti-double-booking. `LOCK TABLE` eliminado. Aplica en `crear_prereserva`, `confirmar_reserva`, `cancelar_prereserva`, `crear_bloqueo`. Cero cambios de schema.
 - v1.5 — Corrección crítica del orden de locks en `confirmar_reserva`. Invariante fortalecida: el lock global debe tomarse antes de CUALQUIER lock (advisory, row-level con `FOR UPDATE`, o table-level). Comentario inline unificado en las 4 funciones críticas. Advertencia agregada en `validar_disponibilidad`. Limpieza documental de referencias históricas a `LOCK TABLE`. Cero cambios de schema, cero features.
+- v1.6 — Corrección de advisory locks por cabaña: cast explícito `::INTEGER` en Bloques 13, 14 y 16. Bug detectado durante ejecución DEV del Bloque 13 (`pg_advisory_xact_lock(integer, bigint) does not exist`). Nota técnica agregada en Sección 15 explicando las sobrecargas disponibles de `pg_advisory_xact_lock` y por qué el cast es necesario. Estado: Bloque 13 ya ejecutado y corregido en DEV vía `CREATE OR REPLACE`. Bloques 14-22 nacen correctos con v1.6.
+- v1.6.1 — Corrección documental sobre v1.6. Alinea narrativa de Sección 10 con el SQL real: flujos de `confirmar_reserva` (10.6) y `cancelar_prereserva` (10.7) corregidos para reflejar el orden de locks v1.5 (lock global antes del FOR UPDATE). Menciones conceptuales del lock por cabaña en Sección 10 unificadas con cast `::INTEGER`. **Cero cambios en SQL ejecutable**, schema, funciones o tests. Patch-level. Estado idéntico a v1.6 en DEV.
