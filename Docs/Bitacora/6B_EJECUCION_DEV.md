@@ -429,3 +429,35 @@ Ambos usan `EXCLUDE USING gist` (gracias a la extensión `btree_gist` habilitada
 
 ---
 
+### Bloque 12 — Función `obtener_disponibilidad_rango`
+
+**Estado:** Cerrado. **Reemplazo conceptual de `DISPONIBILIDAD_CACHE` del modelo Sheets.**
+
+**SQL ejecutado:** Función `obtener_disponibilidad_rango(p_fecha_desde DATE, p_fecha_hasta DATE, p_id_cabana BIGINT DEFAULT NULL) RETURNS TABLE(...)`. Calcula disponibilidad al vuelo cruzando `generate_series` de fechas × cabañas activas, y para cada slot resuelve `estado` (bloqueada/ocupada/checkout_disponible/disponible), `tipo_dia` (feriado/finde/semana), `temporada`, horarios base (con regla especial domingo→18:00), e IDs de reserva/pre-reserva si aplican. **Función de solo lectura — no escribe, no toma locks**. Va a alimentar la `vista_disponibilidad` del Bloque 20.
+
+**Resultado de ejecución:** `Success. No rows returned`. Sin popups.
+
+**Verificaciones post-ejecución:**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 12.1 | Función registrada en `pg_proc` | `obtener_disponibilidad_rango`, record, VOLATILE, 3 argumentos | exacto ✓ |
+| 12.2 | Con tablas vacías (sin cabañas activas) | 0 filas | exacto ✓ |
+| 12.3 | Setup: 2 cabañas test + 1 feriado fuera de rango + 1 temporada que cubre 5-12/jul | 2 filas (cabañas id=2 e id=3) | exacto ✓ |
+| 12.4 | **Test funcional con datos** (rango 1-8/jul, 2 cabañas) | 14 filas; finde en vie 3 y sáb 4; semana en domingo 5; checkin 18:00 solo domingo; temporada poblada en días 5-7 | exacto ✓ — todas las reglas estructurales verificadas |
+| 12.5 | Filtro por id_cabana específico | COUNT = 7 (1 cabaña × 7 días) | exacto ✓ |
+| 12.6 | Limpieza + sanity check | cabanas/feriados/temporadas en 0 | exacto ✓ |
+
+**Reglas verificadas en Verify 12.4:**
+- Rango `[fecha_desde, fecha_hasta)` con fecha_hasta exclusiva (día 8 no aparece).
+- `EXTRACT(DOW) IN (5,6)` → viernes/sábado como `finde`.
+- `EXTRACT(DOW) = 0` → domingo con `hora_checkin_base = 18:00` (el resto 13:00).
+- `BETWEEN fecha_desde AND fecha_hasta` de temporadas funcionando inclusive.
+- `hora_checkout_base = 10:00` fijo.
+- Estado `disponible` en todos los slots cuando no hay reservas/pre-reservas/bloqueos.
+
+**Cobertura no verificada (intencional):** Los estados `ocupada`, `bloqueada`, `checkout_disponible` no se ejercitaron porque requieren datos en reservas/pre_reservas/bloqueos. El feriado se creó fuera del rango pedido para no contaminar el test base. Estos casos se cubren en Fase 4 con seed completo.
+
+**Decisión:** avanzar a Bloque 13 (`crear_prereserva` — la puerta única, riesgo ALTO).
+
+---
