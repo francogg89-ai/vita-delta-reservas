@@ -288,3 +288,57 @@ Esta misma decisión aplicará a los Bloques 4, 5, 6 y 7 (todos crean tablas).
 **Decisión:** avanzar a Bloque 8 (constraints EXCLUDE — el último de Fase 1).
 
 ---
+
+### Bloque 8 — Constraints EXCLUDE (anti-doble-booking estructural)
+
+**Estado:** Cerrado. **Riesgo: medio (último de Fase 1, primera ejercitación de `btree_gist`).**
+
+**SQL ejecutado:** 2 constraints EXCLUDE agregados vía `ALTER TABLE`:
+
+- `exc_reservas_no_overlap` sobre `reservas`: impide solapamiento de `(id_cabana, daterange(fecha_checkin, fecha_checkout, '[)'))` cuando `estado IN ('confirmada','activa')`.
+- `exc_bloqueos_no_overlap` sobre `bloqueos`: impide solapamiento de `(id_cabana, daterange(fecha_desde, fecha_hasta, '[)'))` cuando `activo = TRUE AND id_cabana IS NOT NULL`.
+
+Ambos usan `EXCLUDE USING gist` (gracias a la extensión `btree_gist` habilitada en Bloque 1) y notación de rango `[)` (`fecha_in` inclusive, `fecha_out` exclusive — alineado con el principio #13 de la arquitectura).
+
+**Resultado de ejecución:** `Success. No rows returned`. No apareció popup RLS (es ALTER TABLE, no CREATE TABLE).
+
+**Verificaciones post-ejecución:**
+
+| # | Query | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 8.1 | 2 constraints EXCLUDE en `pg_constraint` con `contype='x'` | 2 filas | 2 filas ✓ |
+| 8.2 | Definiciones completas vía `pg_get_constraintdef` | Predicados parciales correctos, `daterange '[)'`, `USING gist` | exacto ✓ |
+| 8.3 | Índices GiST asociados (uno por constraint) | 2 filas con `am.amname = 'gist'` | 2 filas ✓ |
+
+**Observación operativa:** la columna `definicion` del Verify 8.2 se cortaba en la grilla. Resuelto haciendo click en la celda para abrir el panel "Viewing cell details" — muestra el contenido completo sin truncar. Convención adoptada para futuras verificaciones con definiciones largas.
+
+**Significado funcional:** a partir de este bloque, PostgreSQL garantiza estructuralmente que es imposible insertar dos reservas confirmadas o activas que se solapen sobre la misma cabaña, o dos bloqueos activos sobre la misma cabaña específica. Esta es la última línea de defensa contra doble booking — independiente de la lógica de aplicación.
+
+**Decisión:** avanzar a Fase 2.
+
+---
+
+## Cierre de Fase 1
+
+**Estado:** Cerrada. 8 de 8 bloques verificados.
+
+**Resumen estructural del schema:**
+
+| Categoría | Conteo |
+|---|---|
+| Extensiones | 2 (btree_gist, pg_cron) |
+| Enums | 4 (21 valores totales) |
+| Tablas catálogo | 8 |
+| Tablas configuración | 4 |
+| Tablas dependientes nivel 1 | 2 |
+| Tablas transaccionales | 5 |
+| Tabla auditoría | 1 (log_cambios con índice GIN sobre JSONB) |
+| **Total tablas** | **20** |
+| CHECK constraints | ~28 (10 Bloque 3 + 6 Bloque 4 + 4 Bloque 5 + 18 Bloque 6) |
+| Foreign keys | 15 |
+| Índices regulares y parciales | ~25 |
+| EXCLUDE constraints | 2 |
+
+**Decisión:** habilitado para arrancar Fase 2 (funciones y triggers, Bloques 9 a 19). La Fase 2 es la más sensible del schema porque introduce la lógica almacenada: normalización de teléfono, upsert de huéspedes, validación de disponibilidad, creación/confirmación/cancelación de pre-reservas, manejo de pagos, expiración automática. Cada función crítica tiene tests funcionales pequeños recomendados durante la ejecución; los tests end-to-end completos van en Fase 4.
+
+---
