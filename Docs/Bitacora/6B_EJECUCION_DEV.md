@@ -232,3 +232,35 @@ Esta misma decisión aplicará a los Bloques 4, 5, 6 y 7 (todos crean tablas).
 **Decisión:** avanzar a Bloque 6 (riesgo medio — tablas transaccionales).
 
 ---
+
+### Bloque 6 — Tablas transaccionales
+
+**Estado:** Cerrado. **Riesgo: medio (el más sensible de Fase 1).**
+
+**SQL ejecutado:** 5 tablas transaccionales creadas en `public`:
+- `pre_reservas` con campos nuevos v1.1 (mascotas, detalle_mascotas, ninos, notas_reserva, idempotency_key), índice único parcial `uq_prereservas_idempotency_activa` sobre `idempotency_key` cuando `estado IN ('pendiente_pago','pago_en_revision')`, 6 CHECKs, 4 índices regulares.
+- `reservas` con campos operativos v1.1 (mascotas, detalle_mascotas, ninos, notas_reserva), 5 CHECKs, 4 índices.
+- `pagos` con cambio v1.1 crítico: `id_prereserva` y `id_reserva` ambos nullable + CHECK `chk_pagos_referencia_minima` que asegura que al menos una de las dos referencias exista. 5 CHECKs, 3 índices.
+- `bloqueos` con `id_cabana` nullable (soporta lock total via función `crear_bloqueo()` futura). 2 CHECKs, 1 índice parcial.
+- `gastos` sin CHECKs propios, 2 índices.
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Advertencia RLS:** Misma decisión que Bloque 3 — "Run without RLS".
+
+**Verificaciones post-ejecución:**
+
+| # | Query | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 6.1 | 5 tablas en `pg_tables` | 5 filas | 5 filas ✓ |
+| 6.2 | Campos operativos v1.1 (mascotas/detalle_mascotas/ninos/notas_reserva en pre_reservas y reservas) | 8 filas, `mascotas` boolean NOT NULL DEFAULT false, otros 3 TEXT nullables | 8 filas ✓ |
+| 6.3 | Columna `idempotency_key` (text, nullable) + índice único parcial `uq_prereservas_idempotency_activa` | columna verificada indirectamente vía existencia del índice; índice presente con cláusula WHERE parcial | índice presente ✓ |
+| 6.4 | CHECK `chk_pagos_referencia_minima` v1.1 | definición `CHECK (((id_prereserva IS NOT NULL) OR (id_reserva IS NOT NULL)))` | exacto ✓ |
+| 6.5 | 11 Foreign Keys del bloque con ON DELETE correcto | 11 filas con tabla/columna/referencia/acción esperada | 11 filas con acciones RESTRICT/SET NULL como diseño ✓ |
+| 6.6 | Conteo de CHECKs por tabla | pre_reservas 6, reservas 5, pagos 5, bloqueos 2 (gastos 0) | exacto ✓ |
+
+**Observación operativa:** Verify 6.3 originalmente proponía dos queries en una sola pestaña (a: columna; b: índice). Se ejecutó solo la query (b) — la existencia del índice único parcial sobre `idempotency_key` confirma indirectamente que la columna existe en `pre_reservas`, ya que PostgreSQL no permite crear índices sobre columnas inexistentes. La verificación se considera válida.
+
+**Decisión:** avanzar a Bloque 7 (tabla de auditoría `log_cambios`).
+
+---
