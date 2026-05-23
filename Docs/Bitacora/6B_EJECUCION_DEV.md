@@ -207,3 +207,28 @@ Esta misma decisión aplicará a los Bloques 4, 5, 6 y 7 (todos crean tablas).
 **Decisión:** avanzar a Bloque 5.
 
 ---
+
+### Bloque 5 — Tablas dependientes nivel 1
+
+**Estado:** Cerrado.
+
+**SQL ejecutado:** 2 tablas creadas en `public`: `consultas` (con 3 FKs implícitas: `huespedes` y `cabanas` con SET NULL, 2 CHECKs sobre canal y estado_conversacion, 3 índices, 2 columnas JSONB) y `overrides_operativos` (FK a `cabanas` con RESTRICT, 2 CHECKs incluyendo lista cerrada de 8 valores en `tipo_override`, 1 índice).
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Advertencia RLS:** Misma decisión que Bloque 3 — "Run without RLS".
+
+**Nota de trazabilidad:** El CHECK `chk_overrides_tipo` incluye `'escalonamiento_umbral_checkins_dia'`, rename oficial cerrado en Etapa 2 v1.3 + 5A v1.1. Reemplaza las claves antiguas `'escalonamiento_umbral_checkout'` y `'escalonamiento_umbral_checkin'`. No modificar sin actualizar primero la documentación de esas etapas.
+
+**Verificaciones post-ejecución:**
+
+| # | Query | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 5.1 | 2 tablas en `pg_tables` | 2 filas | 2 filas ✓ |
+| 5.2 | 3 FKs (2 de `consultas` con SET NULL, 1 de `overrides_operativos` con RESTRICT) | 3 filas con `confdeltype` n, n, r | 3 filas, n/n/r ✓ |
+| 5.3 | CHECK constraints del bloque | 4 filas (2 `consultas` + 2 `overrides_operativos`) | 4 filas ✓ |
+| 5.4 | Índices `idx_*` del bloque | 4 filas (3 `consultas` + 1 `overrides_operativos`) | 4 filas ✓ |
+
+**Decisión:** avanzar a Bloque 6 (riesgo medio — tablas transaccionales).
+
+---
