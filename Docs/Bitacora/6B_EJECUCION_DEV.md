@@ -461,3 +461,67 @@ Ambos usan `EXCLUDE USING gist` (gracias a la extensión `btree_gist` habilitada
 **Decisión:** avanzar a Bloque 13 (`crear_prereserva` — la puerta única, riesgo ALTO).
 
 ---
+
+### Bloque 13 — Función `crear_prereserva` (PUERTA ÚNICA)
+
+**Estado:** Cerrado. **Función más crítica del schema — punto de entrada único para todas las pre-reservas del sistema.**
+
+**SQL ejecutado:** Función `crear_prereserva(payload JSONB) RETURNS JSONB` (~250 líneas). Implementa el flujo completo de creación de pre-reserva con 12 secciones: extracción y validación de payload, lectura de configuración agrupada (`jsonb_object_agg` sobre 6 claves), idempotencia pre-lock, validación y resolución de huésped vía `upsert_huesped`, toma de locks (global + por cabaña), idempotencia post-lock, validación de cabaña/capacidad, validación de disponibilidad vía `validar_disponibilidad`, cálculo de horarios desde config (con regla especial domingo), INSERT con manejo defensivo de `unique_violation`, log de creación, log warning si faltan claves de config, y retorno de JSONB unificado.
+
+**Bug detectado y corregido durante la ejecución:**
+
+El SQL original del documento `6B_SCHEMA_SQL.md v1.5` contiene la línea:
+```sql
+PERFORM pg_advisory_xact_lock(1, v_id_cabana);
+```
+
+Esto falla con `ERROR 42883: function pg_advisory_xact_lock(integer, bigint) does not exist` porque `v_id_cabana` está declarada como `BIGINT` y PostgreSQL no tiene la sobrecarga `(integer, bigint)`. Existen solo `(bigint)` y `(integer, integer)`.
+
+**Corrección aplicada vía `CREATE OR REPLACE FUNCTION`:**
+```sql
+PERFORM pg_advisory_xact_lock(1, v_id_cabana::INTEGER);
+```
+
+El cast a INTEGER es seguro porque `id_cabana` en Vita Delta nunca va a superar el rango integer (~2.1 mil millones). La función `pg_advisory_xact_lock` no necesita el valor exacto, solo un identificador único.
+
+**Acción tomada:**
+- Pestaña original "Bloque 13 — crear_prereserva" conservada con el SQL del documento (bug incluido).
+- Pestaña nueva "Bloque 13 v2 — fix advisory lock" con el SQL corregido aplicado vía `CREATE OR REPLACE`.
+
+**Acción pendiente para próximos bloques:** Verificar si los Bloques 14 (`confirmar_reserva`) y 16 (`crear_bloqueo`) tienen el mismo patrón. Si sí, aplicar el cast `::INTEGER` proactivamente.
+
+**Acción pendiente para documentación:** Reportar el bug del documento `6B_SCHEMA_SQL.md v1.5` para corrección.
+
+**Verificaciones post-ejecución (9 pasos):**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 13.1 | Función registrada (1 argumento JSONB) | `crear_prereserva, jsonb, VOLATILE, 1` | exacto ✓ |
+| 13.2 | Setup: 1 cabaña + 6 claves config (post-corrección `tipo_valor`) | cabana=1, claves_horario=5, clave_expiracion=1, id_cabana_test=6 | exacto ✓ |
+| 13.3 | **T-PR-1: Creación exitosa (camino feliz)** | JSON con `ok:true`, `id_pre_reserva:1`, `estado:pendiente_pago`, `hora_checkin:13:00:00` (sábado, no domingo), `expira_en:~60min`, `recovery_path:null` | exacto ✓ — la función completa funciona end-to-end |
+| 13.4 | **T-PR-2: Idempotencia con misma key** | Ambas llamadas devuelven mismo `id_pre_reserva=2` e `id_huesped=5`; llamada 2 con `recovery_path:"pre_lock"` | exacto ✓ — la segunda no creó huésped "Cliente Distinto", cortocircuito perfecto |
+| 13.5 | 6 errores controlados (sin_contacto, cabana_no_existe, excede_capacidad, precio_requerido, fechas_invalidas, nombre_vacio) | 6 JSONs con códigos estables y motivos | exacto ✓ — todos los flancos validados |
+| 13.6 | T-PR-9: no_disponible (rango solapado con T-PR-1) | `{ok:false, error:"no_disponible", conflictos:[{fuente:"pre_reservas"}]}` | exacto ✓ — confirma integración con `validar_disponibilidad` |
+| 13.7 | Logs generados en `log_cambios` | 2 filas (T-PR-1 y T-PR-2 llamada 1), `evento:prereserva_creada`, `nivel:info`, source_event conservado | exacto ✓ — los tests de error NO generan log (diseño correcto) |
+| 13.8 | Limpieza inicial (pre-reservas, 3 huéspedes, cabaña, config, logs) | 5 tablas en 0, salvo `huespedes:2` | parcialmente — 2 huéspedes residuales |
+| 13.8b | Limpieza extendida (huéspedes residuales de tests de error) | 11 tablas verificadas en 0 | exacto ✓ — DEV en estado limpio |
+
+**Lección operativa importante — huéspedes residuales en tests de error:**
+
+`crear_prereserva` ejecuta `upsert_huesped` en la sección 4, ANTES de la validación de cabaña (sección 6). Por lo tanto, los tests que fallan en secciones ≥ 6 (`cabana_no_existe`, `excede_capacidad`) dejan el huésped creado aunque la pre-reserva no se haya creado.
+
+Esto **no es un bug** — es por diseño. Razón: en el flujo conversacional real, si el huésped es válido pero la cabaña tiene problemas, queremos preservar su contacto para sugerirle alternativas. `upsert_huesped` es idempotente, así que no hay duplicación.
+
+**Implicación para futuros bloques (14-18):** los planes de tests de error deben contemplar limpieza de TODAS las tablas que la función toca antes de devolver el error, no solo de la tabla principal.
+
+**Lección operativa — Supabase rollback transaccional:**
+
+Durante Verify 13.2 inicial (con error de columna `tipo_dato`), Supabase hizo rollback del INSERT a `cabanas` aunque era statement separado del INSERT que falló. Esto sugiere que el SQL Editor envuelve los bloques en una transacción implícita ante errores. Convención adoptada: **asumir rollback ante error y verificar antes de re-correr**.
+
+**Lección operativa — bug del SQL Editor que muestra solo el último resultado:**
+
+Cuando hay múltiples SELECTs separados por `;`, Supabase muestra solo el output del último. Patrón adoptado: usar `UNION ALL` con columna identificadora (`caso`, `test`, `momento`) cuando se quieren ver todos los resultados de una vez.
+
+**Decisión:** avanzar a Bloque 14 (`confirmar_reserva`) en próxima sesión.
+
+---
