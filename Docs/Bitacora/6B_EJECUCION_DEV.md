@@ -264,3 +264,27 @@ Esta misma decisión aplicará a los Bloques 4, 5, 6 y 7 (todos crean tablas).
 **Decisión:** avanzar a Bloque 7 (tabla de auditoría `log_cambios`).
 
 ---
+
+### Bloque 7 — Tabla de auditoría
+
+**Estado:** Cerrado.
+
+**SQL ejecutado:** Tabla `log_cambios` creada con 11 columnas, incluyendo `nivel` tipado con el enum `nivel_log_enum` (default `'info'`) y `detalle` como JSONB. 4 índices creados: btree sobre `fecha_hora DESC`, btree sobre `tabla_afectada`, btree parcial sobre `nivel` (solo cuando `nivel <> 'info'`), y **GIN sobre `detalle`** para búsquedas eficientes dentro del JSONB.
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Advertencia RLS:** Misma decisión que Bloque 3 — "Run without RLS".
+
+**Verificaciones post-ejecución:**
+
+| # | Query | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 7.1 | Tabla en `pg_tables` | 1 fila | 1 fila ✓ |
+| 7.2 | Columna `nivel` con `udt_name = nivel_log_enum` y default `'info'` | 1 fila con USER-DEFINED + nivel_log_enum | exacto ✓ |
+| 7.3 | 4 índices con los tipos correctos (gin/btree) y predicados parciales | 4 filas | `idx_log_cambios_detalle_gin USING gin (detalle)`, `idx_log_cambios_fecha USING btree (fecha_hora DESC)`, `idx_log_cambios_nivel USING btree (nivel) WHERE (nivel <> 'info'::nivel_log_enum)`, `idx_log_cambios_tabla USING btree (tabla_afectada)` ✓ |
+
+**Observación operativa:** la columna `indexdef` se cortaba visualmente en la captura inicial. Resuelto ampliando el ancho de columna manualmente en el SQL Editor — las 4 definiciones completas confirmaron en una sola captura que el GIN está bien creado, el índice parcial sobre `nivel` tiene el WHERE correcto, y el índice sobre `fecha_hora` está en orden DESC. Convención adoptada para futuras verificaciones con `indexdef`: ampliar columna antes de pedir queries adicionales.
+
+**Decisión:** avanzar a Bloque 8 (constraints EXCLUDE — el último de Fase 1).
+
+---
