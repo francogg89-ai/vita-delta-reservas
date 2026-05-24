@@ -946,3 +946,50 @@ Mi conteo inicial de "9 claves originales + 1 nueva = 10" fue incorrecto. El see
 **Decisión:** avanzar a Bloque 22 (Schedule pg_cron — último de Fase 3).
 
 ---
+
+### Bloque 22 — Schedule pg_cron (último de Fase 3)
+
+**Estado:** Cerrado. **Activación de mantenimiento automático del sistema.** A partir de este bloque, Vita Delta tiene jobs programados corriendo cada 5 minutos sin intervención humana.
+
+**SQL ejecutado:** 2 jobs registrados en `cron.job` vía `cron.schedule()`:
+
+| Job | Schedule | Comando | Propósito |
+|---|---|---|---|
+| `expirar_prereservas` | `*/5 * * * *` | `SELECT expirar_prereservas_vencidas();` | Limpia pre-reservas vencidas cada 5 min |
+| `cleanup_cron_history` | `0 3 1 * *` | DELETE de `cron.job_run_details` > 30 días | Limpieza mensual del historial de pg_cron |
+
+**Documento usado:** `6B_SCHEMA_SQL.md v1.6` Bloque 22. Sin cambios.
+
+**Resultado de ejecución:** 2 schedules ejecutados. `cron.schedule()` retorna el `jobid` asignado (1 y 2 en este caso).
+
+**Verificaciones post-ejecución (7 pasos):**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| Verify pg_cron previo | `pg_extension` con `pg_cron 1.6.4` instalado | OK | exacto ✓ |
+| Verify pre-existencia de jobs | `cron.job` vacío | 0 filas | exacto ✓ |
+| 22.1 | 2 jobs registrados en `cron.job` con `active=true` | 2 filas con schedules y comandos correctos | exacto ✓ |
+| 22.2 | Historial de ejecuciones (esperar ~5 min) | Al menos 1 fila con `status: succeeded, return_message: "1 row"` | exacto ✓ — 3 ejecuciones observadas (19:30, 19:35, 19:40) |
+| **Test end-to-end** | Crear pre-reserva 21, forzar `expira_en` al pasado, esperar al próximo cron, verificar que pasa a `vencida` automáticamente | A las 19:40 exactas, pre-reserva pasó a `vencida` sin intervención | exacto ✓ ⭐ |
+| Doble log validado | 2 logs convergentes: trigger automático (B19, transición pura) + log explícito (B18, evento de negocio) | id_log 43 (trigger) + id_log 44 (B18 con `pg_cron`) | exacto ✓ |
+| Cleanup | DEV en estado ideal: 5 tablas operativas en 0, 6 tablas de seed con valores esperados | exacto ✓ |
+
+**Comportamientos clave validados:**
+
+1. **pg_cron activo y ejecutando puntualmente:** observadas 3 ejecuciones consecutivas a 19:30, 19:35, 19:40 (exactas). Duración promedio: 6-8 milisegundos cuando no hay procesamiento, ligeramente más cuando hay trabajo real (la ejecución de 19:40 procesó 1 pre-reserva).
+
+2. **Auto-mantenimiento end-to-end funcionando:** test demostró que una pre-reserva con `expira_en` en el pasado se procesó automáticamente en el siguiente tick del cron. No requirió intervención.
+
+3. **Doble log convergente confirmado en producción:** la operación automática de expiración genera 2 logs distintos:
+   - **id_log 43** del trigger `trg_log_pre_reservas_estado` (B19): `modificado_por='expirar_prereservas_vencidas'` (heredado de `set_config`), `campo_modificado='estado'`, `valor_anterior='pendiente_pago'`, `valor_nuevo='vencida'`. Auditoría pura de transición.
+   - **id_log 44** del log explícito de B18: `modificado_por='pg_cron'` (hardcoded en la función), `evento='prereserva_vencida'`. Evento de negocio.
+
+   Ambos coexisten sin conflicto. Permiten queries de análisis distintos: tracking de transiciones de estado vs eventos automáticos del sistema.
+
+4. **`return_message: "1 row"` es engañoso:** todas las ejecuciones del cron muestran ese mensaje porque corresponde al SELECT que envuelve la función. Para saber cuántas pre-reservas se procesaron realmente, hay que mirar los `updated_at` de `pre_reservas` o los logs.
+
+5. **Resiliencia del sistema:** si pg_cron fallara en producción, las funciones manuales (`crear_prereserva`, `confirmar_reserva`) seguirían detectando pre-reservas vencidas vía sus filtros internos (`WHERE expira_en > NOW()`). El cron acelera la limpieza visible pero el sistema no depende de él para integridad.
+
+**Decisión:** **FASE 3 COMPLETA**. Avanzar a Fase 4 (tests funcionales formales + tests de concurrencia) o Fase 5 (cierre formal DEV + integraciones).
+
+---
