@@ -582,3 +582,54 @@ A partir del Bloque 14, la ejecución continúa usando `6B_SCHEMA_SQL.md v1.6`.
 **Decisión:** avanzar a Bloque 15 (`cancelar_prereserva`) en próxima sesión.
 
 ---
+
+### Bloque 15 — Función `cancelar_prereserva`
+
+**Estado:** Cerrado. **Cierra el ciclo de vida de pre-reservas.** Junto con B13 (`crear_prereserva`) y B14 (`confirmar_reserva`), provee las 3 transiciones de estado: pendiente_pago → convertida (confirmar), → cancelada_* (cancelar), → expirada (B18 futuro).
+
+**SQL ejecutado:** Función `cancelar_prereserva(payload JSONB) RETURNS JSONB` (~95 líneas). Implementa 6 secciones: extracción payload, setear contexto para triggers (D38), lock global (10,0), mapeo motivo→estado, SELECT FOR UPDATE pre-reserva + validación de estado cancelable, UPDATE pre-reserva, conteo de pagos asociados (sin tocarlos), log + return JSON con IDs de pagos.
+
+**Decisiones de diseño confirmadas:**
+- **No toma lock por cabaña** (solo libera disponibilidad, no la consume).
+- **No toca pagos asociados** — los cuenta y devuelve sus IDs en el output para revisión humana.
+- Motivos cerrados: solo `cliente` o `bloqueo`. Otros valores devuelven `motivo_invalido` con lista de válidos.
+- Estados cancelables: solo `pendiente_pago` y `pago_en_revision`.
+
+**Documento usado:** `6B_SCHEMA_SQL.md v1.6`. Sin cambios respecto a v1.5 para este bloque (no usa lock por cabaña → no aplica el fix `::INTEGER`).
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Verificaciones post-ejecución (9 pasos):**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 15.1 | Función registrada | `cancelar_prereserva, jsonb, VOLATILE, 1` | exacto ✓ |
+| 15.2 | Setup (cabaña + config + 2 pre-reservas + 1 pago en_revision) | id_cabana=9, pre_reservas 6 y 7, pago 3 | exacto ✓ |
+| 15.3 | T-CP-1: cancelar pre-reserva 6 con motivo `cliente`, sin pagos | `estado_nuevo: cancelada_por_cliente, pagos_asociados_count: 0, pagos_asociados_ids: []` | exacto ✓ |
+| 15.4 | T-CP-2: cancelar pre-reserva 7 con motivo `bloqueo`, con pago | `estado_nuevo: cancelada_por_bloqueo, pagos_asociados_count: 1, pagos_asociados_ids: [3]` | exacto ✓ — comportamiento clave validado |
+| 15.5 | 4 errores controlados (UNION ALL) | payload_invalido, motivo_invalido (con motivos_validos), prereserva_no_existe, estado_no_cancelable | exacto ✓ |
+| 15.6 | Verificación cruzada de estados | pre-reservas en estados terminales, pago 3 intacto | parcialmente — campo `updated_recently` resultó falso positivo |
+| 15.6-bis | Confirmación definitiva: `pago.updated_at = pago.created_at` | `nunca_modificado: true`, timestamps idénticos al microsegundo | exacto ✓ |
+| 15.7 | Logs (2 cancelaciones, 0 errores) | 2 filas con `evento: prereserva_cancelada`, motivos y pagos diferenciados | exacto ✓ |
+| 15.8 | Limpieza extendida + sanity check global | 11 tablas en 0 | exacto ✓ |
+
+**Lección operativa — diseño de tests con timestamps:**
+
+En Verify 15.6 incluí el campo `updated_recently := updated_at > NOW() - INTERVAL '5 minutes'` para verificar que el pago no fue modificado. Resultó **falso positivo** porque el pago se había creado dentro de esa ventana (durante el setup). El test no demostraba que la función no lo modificó — solo que el pago se creó hace poco.
+
+**Patrón correcto:** para verificar que un registro NO fue tocado por una operación, comparar `updated_at = created_at`. Esa igualdad es **independiente del tiempo de creación** y demuestra inequívocamente que ningún UPDATE corrió desde el INSERT inicial.
+
+Aplicado en Verify 15.6-bis: confirmó `nunca_modificado: true` con timestamps idénticos al microsegundo (`2026-05-24 01:51:55.768927+00` en ambos campos). **Principio de diseño verificado al 100%: `cancelar_prereserva` no toca los pagos asociados.**
+
+**Comportamiento clave del log:**
+Las 2 entradas de `prereserva_cancelada` (id_log 10 y 11) contienen suficiente detalle para reportes operativos:
+- Transición de estado (`estado_anterior` → `estado_nuevo`).
+- Motivo de negocio.
+- Conteo de pagos sin resolver (`pagos_asociados`).
+- Descripción humana opcional.
+
+Esto habilita queries futuras tipo "cancelaciones por motivo en último mes" o "cancelaciones con pagos pendientes de revisar". Los errores controlados NO generan log (diseño correcto).
+
+**Decisión:** avanzar a Bloque 16 (`crear_bloqueo` — alto riesgo) en próxima sesión con cabeza fresca.
+
+---
