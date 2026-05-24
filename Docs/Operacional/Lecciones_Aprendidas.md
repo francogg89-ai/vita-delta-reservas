@@ -17,6 +17,8 @@ NO se dispara con `SELECT funcion(...)` aunque la función internamente escriba.
 ### configuracion_general NO tiene created_at
 Solo tiene updated_at. No usar created_at en queries sobre esa tabla.
 
+*Origen: Bloque 19 / 2026-05-24*
+
 ## Sobre Setup y Limpieza
 
 ### Re-ejecutar setups después de errores
@@ -34,9 +36,13 @@ en huespedes ANTES de validar cabaña) pueden dejar registros aunque el
 test falle con error controlado. Limpiar contemplando TODAS las tablas
 que la función toca, no solo el output esperado.
 
+*Origen: Bloque 19 / 2026-05-24*
+
 ## Sobre Display de Resultados en Supabase
 
 ### SQL Editor muestra solo el último SELECT
 Cuando hay múltiples statements separados por `;`, solo se ve el resultado
 del último SELECT. Para ver varios resultados: usar `UNION ALL` con columna
 identificadora (`test`, `momento`, `caso`).
+
+*Origen: Bloque 19 / 2026-05-24*
