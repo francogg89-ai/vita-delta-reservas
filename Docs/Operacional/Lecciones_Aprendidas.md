@@ -46,3 +46,32 @@ del último SELECT. Para ver varios resultados: usar `UNION ALL` con columna
 identificadora (`test`, `momento`, `caso`).
 
 *Origen: Bloque 19 / 2026-05-24*
+
+## Modelo de daterange `[)` y check-in/check-out
+
+El schema usa rangos exclusivos en checkout: `daterange(fecha_checkin, fecha_checkout, '[)')`.
+Esto significa que `fecha_checkout` NO está dentro del rango ocupado.
+
+*Origen: Bloque 20 / 2026-05-24*
+
+### Implicación operativa positiva: ocupación máxima sin gaps
+
+Una cabaña puede tener reservas consecutivas como:
+- Reserva A: 5-6 jun (cubre día 5)
+- Reserva B: 6-7 jun (cubre día 6)
+- Reserva C: 7-8 jun (cubre día 7)
+
+Los 3 rangos NO se solapan porque cada uno cierra antes de empezar el siguiente.
+Operativamente: cliente A hace checkout a las 10am del día 6, cliente B hace
+checkin a las 13:00 del mismo día 6 (3 horas para limpieza por Jennifer).
+
+*Origen: Bloque 20 / 2026-05-24*
+
+### Protección estructural: EXCLUDE constraint
+
+El constraint `exc_reservas_no_overlap` usa el operador `&&` de daterange.
+Detecta automáticamente solapamientos reales y aborta el INSERT con
+`exclusion_violation` (código 23P01). Imposible de eludir incluso con bugs
+en lógica de aplicación.
+
+Validado empíricamente en Bloque 20 (Fase 3).

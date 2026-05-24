@@ -832,3 +832,68 @@ El test 19.3-bis confirmó el funcionamiento del trigger en transacciones separa
 **Decisión:** FASE 2 COMPLETA. Avanzar a Fase 3 (vistas SQL + seed mínimo + pg_cron schedule) en próxima sesión.
 
 ---
+
+### Bloque 20 — Vistas SQL operativas
+
+**Estado:** Cerrado. **Capa de lectura del sistema.** Provee 6 vistas operativas que distintos consumidores (bot, panel, Vicky, Franco, Rodrigo, Jennifer) pueden consultar sin conocer la estructura interna del schema.
+
+**SQL ejecutado:** 6 vistas (`CREATE OR REPLACE VIEW`) según `6B_SCHEMA_SQL.md v1.6`:
+
+| Vista | Propósito | Horizonte |
+|---|---|---|
+| `vista_disponibilidad` | Wrapping de `obtener_disponibilidad_rango` para uso del bot/web | 60 días forward |
+| `vista_calendario` | Calendario operativo de reservas próximas con datos del huésped | 60 días forward |
+| `vista_prereservas_activas` | Pre-reservas vigentes con `minutos_para_vencer` (cronómetro en vivo) | Sin horizonte fijo |
+| `vista_ocupacion` | Matriz de ocupación por cabaña y mes | 12 meses pasados + 12 futuros |
+| `vista_calendario_semanal` | Estado día por día de cada cabaña (libre/ocupada/bloqueada) | 7 días forward |
+| `vista_limpieza_semana` | Check-ins y check-outs para Jennifer con mascotas/notas | 7 días forward |
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Verificaciones post-ejecución (5 verifies + 4 tests adicionales del modelo daterange):**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 20.1 | Las 6 vistas registradas en `pg_views` | 6 filas con schemaname `public` | exacto ✓ |
+| 20.2 | SELECT a cada vista (DEV vacío) | 6 vistas devuelven 0 filas sin error | exacto ✓ |
+| 20.3 | Setup en 5 pasos (2 cabañas + 6 config + 1 pre-reserva vigente + 1 reserva confirmada + 1 bloqueo) | Estado coherente para testear todas las vistas | exacto ✓ |
+| 20.4 | Conteo de cada vista con datos | vista_disponibilidad: 120, vista_calendario: 1, vista_prereservas_activas: 1, vista_ocupacion: 50, vista_calendario_semanal: 14, vista_limpieza_semana: 1 | exacto ✓ (la limpieza_semana muestra solo checkin porque el checkout cae fuera del horizonte de 7 días) |
+| 20.4-bis | **Validación empírica de daterange `[)`**: 3 pre-reservas consecutivas (5-6, 6-7, 7-8 jun) + 2 reservas confirmadas pegadas + EXCLUDE constraint rechazando solapamiento real | 5 inserciones OK + 1 INSERT directo rechazado con `exclusion_violation` (código 23P01) | exacto ✓ — modelo validado al 100% |
+| 20.5 | Limpieza + sanity check global | 11 tablas en 0 | exacto ✓ |
+
+**Comportamientos clave validados:**
+
+1. **`vista_prereservas_activas` con cronómetro en vivo:** la vista calcula `EXTRACT(EPOCH FROM (expira_en - NOW()))/60` para mostrar minutos restantes en tiempo real. Test confirmó `minutos_para_vencer: 56.6` para una pre-reserva creada con expiración de 60 min (3-4 min después de creación).
+
+2. **`vista_calendario_semanal` solo muestra certezas (decisión de diseño):** la vista NO incluye pre-reservas en el cálculo del estado del día. Solo considera bloqueos y reservas confirmadas. Pre-reservas son "posibilidades", no certezas operativas.
+
+3. **`vista_limpieza_semana` con horizonte fijo de 7 días:** si una reserva tiene checkout más allá del horizonte (ej. una reserva del 30 may al 1 jun, mirada el 24 may), el checkin aparece pero el checkout no. Es comportamiento correcto del horizonte fijo.
+
+**Validación empírica del modelo daterange `[)` (20.4-bis) — ⭐ resultado más importante del bloque:**
+
+Demostrado que el schema soporta 3 reservas consecutivas pegadas en la misma cabaña sin requerir días de gap:
+
+Cabaña 15:
+Reserva A: 5-6 jun (checkout 10am día 6)
+Reserva B: 6-7 jun (checkin 13pm día 6 → 3hs gap para Jennifer)
+Reserva C: 7-8 jun (domingo, checkin 18pm)
+
+Los 3 rangos `[5,6)`, `[6,7)`, `[7,8)` NO se solapan porque cada uno cierra antes de empezar el siguiente. **El EXCLUDE constraint `exc_reservas_no_overlap` permite las 3.**
+
+Adicionalmente, intento de INSERT directo en `reservas` con rango solapado (Cabaña 15, 5-7 jun) fue **rechazado con `exclusion_violation`**. La protección estructural funciona — imposible eludir incluso con bugs de aplicación.
+
+**Implicación operativa:** Vita Delta puede maximizar ocupación de cabañas sin gaps obligatorios. En alta temporada, esto puede significar 20-30% más ingresos vs un modelo que exija gap entre reservas.
+
+**Hallazgos de diseño confirmados (no son bugs):**
+
+1. **`vista_limpieza_semana` con checkout fuera de horizonte:** Jennifer recibe el checkin del día X pero no el checkout si cae más allá de día 7. Mitigable vía notificación n8n. Anotado en `Pendientes_Pre_Produccion.md`.
+
+2. **`vista_calendario_semanal` ignora pre-reservas:** Decisión de diseño confirmada por Franco. Las pre-reservas son posibilidades, no certezas operativas. Mitigable vía n8n cuando una pre-reserva se convierte en reserva dentro del horizonte de 7 días.
+
+**Pendiente para producción (registrado en `Pendientes_Pre_Produccion.md`):**
+
+Migrar horizonte de 60 días (hardcoded) en `vista_disponibilidad` y `vista_calendario` a clave configurable `horizonte_disponibilidad_dias` en `configuracion_general` (valor inicial sugerido: 120). Snippet de migración ya preparado en el documento.
+
+**Decisión:** avanzar a Bloque 21 (Datos seed mínimos).
+
+---
