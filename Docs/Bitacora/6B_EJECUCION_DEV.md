@@ -993,3 +993,100 @@ Mi conteo inicial de "9 claves originales + 1 nueva = 10" fue incorrecto. El see
 **Decisión:** **FASE 3 COMPLETA**. Avanzar a Fase 4 (tests funcionales formales + tests de concurrencia) o Fase 5 (cierre formal DEV + integraciones).
 
 ---
+
+### Hotfix v1.7 — Regla operativa: hora_checkout_domingo = 16:00
+
+**Estado:** Cerrado. **Cambio operativo post-cierre de Fase 3.** Implementa una regla operativa de Vita Delta que estaba plasmada en la arquitectura del proyecto pero no se había implementado en el schema canónico v1.6.
+
+**Origen de la decisión:**
+
+Franco identificó (post-cierre Fase 3) que la arquitectura del proyecto contempla que los clientes que se van un domingo deben tener check-out a las 16:00 (no a las 10:00 default). La razón operativa: la última lancha colectiva sale a la tarde, por lo que los clientes naturalmente quieren quedarse hasta entonces. Si el sistema declara check-out 10:00, los clientes contactan a los dueños para extenderlo, generando trabajo manual evitable. **Implementar la regla a nivel del sistema elimina ese contacto.**
+
+Análisis técnico previo confirmó que la regla no genera conflicto operativo: check-out 16:00 + check-in domingo 18:00 (ya implementado en v1.6) deja 2 horas de margen, suficiente para limpieza de Jennifer.
+
+**Decisión: Opción A (sistema, no solo frontend).** Implementar en sistema garantiza una sola fuente de verdad. Las vistas (`vista_limpieza_semana`, `vista_calendario`) reflejan el horario correcto a todos los consumidores (Vicky, Rodrigo, Jennifer, bot, web) sin duplicar la lógica.
+
+**SQL ejecutado:**
+
+1. **INSERT** a `configuracion_general`:
+```sql
+   INSERT INTO configuracion_general (clave, valor, descripcion, categoria) VALUES
+     ('hora_checkout_domingo', '16:00', 'Check-out cuando domingo es último día (vs default 10:00)', 'horarios');
+```
+
+2. **DROP + CREATE FUNCTION** `crear_prereserva` (workaround obligatorio — ver bug de Supabase abajo).
+
+**Cambio quirúrgico en `crear_prereserva` sección 8:**
+
+```sql
+-- v1.6:
+v_hora_checkout_max := COALESCE((v_config->>'hora_checkout_default')::TIME, TIME '10:00');
+
+-- v1.7:
+v_hora_checkout_max := CASE
+  WHEN EXTRACT(DOW FROM v_fecha_out) = 0
+    THEN COALESCE((v_config->>'hora_checkout_domingo')::TIME, TIME '16:00')
+  ELSE
+    COALESCE((v_config->>'hora_checkout_default')::TIME, TIME '10:00')
+END;
+```
+
+Patrón simétrico al de `v_hora_checkin_min` (que ya detectaba domingo para check-in con `EXTRACT(DOW FROM v_fecha_in) = 0`). La detección de domingo para check-out usa `v_fecha_out` (la fecha en la que el cliente se va).
+
+Cambios adicionales en `crear_prereserva`:
+- Sección 2: agregada `hora_checkout_domingo` a la query de lectura de config (7 claves vs 6 anteriores).
+- Sección 2: agregada `hora_checkout_domingo` al chequeo de claves faltantes (warning si no existe).
+
+**⚠️ Bug crítico detectado en Supabase Dashboard durante la ejecución:**
+
+Primer intento con `CREATE OR REPLACE FUNCTION crear_prereserva` falló con error `42601: unterminated dollar-quoted string`. Análisis del error reveló que **Supabase Dashboard agregó automáticamente al final del SQL**:
+
+```sql
+-- Added by Supabase: enable Row Level Security on newly created tables
+ALTER TABLE v_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE v_existente ENABLE ROW LEVEL SECURITY;
+ALTER TABLE v_cabana ENABLE ROW LEVEL SECURITY;
+-- source: dashboard
+```
+
+Supabase detectó incorrectamente las **variables locales PL/pgSQL** `v_config`, `v_existente`, `v_cabana` (declaradas en el bloque DECLARE de la función) como nombres de tabla nueva, e intentó aplicar `ALTER TABLE ENABLE RLS` sobre ellas. Esto truncó el SQL original a mitad de la sección 9, causando el error de `dollar-quoted string` sin cerrar.
+
+**Workaround aplicado y exitoso:**
+
+1. `DROP FUNCTION IF EXISTS crear_prereserva(jsonb);` — borra la función.
+2. `CREATE FUNCTION crear_prereserva(...)` — recrea con la nueva lógica.
+
+**Supabase NO activa el feature de auto-RLS cuando hay un DROP previo**, porque entiende que estás reemplazando una función existente, no creando "tablas" nuevas. Esta es una lección operativa importante para futuras modificaciones de funciones PL/pgSQL en Supabase (agregada a `Lecciones_Aprendidas.md`).
+
+**Tests funcionales (4 escenarios validados):**
+
+| # | Caso | Esperado | Resultado |
+|---|---|---|---|
+| 1 | fecha_out sábado (no domingo) | `hora_checkout: 10:00` | exacto ✓ |
+| 2 ⭐ | fecha_out **DOMINGO** sin solicitar hora | `hora_checkout: 16:00` | exacto ✓ |
+| 3 | fecha_out domingo + cliente solicita 14:00 | `hora_checkout: 14:00` (acepta, en rango ampliado) | exacto ✓ |
+| 4 | fecha_out domingo + cliente solicita 17:00 | error `hora_fuera_de_rango`, `maximo: 16:00` | exacto ✓ |
+
+**Comportamiento validado end-to-end:**
+
+- Días no domingo: comportamiento idéntico a v1.6 (default 10:00, rango cliente 07:00-10:00).
+- Domingos: default 16:00, rango cliente 07:00-16:00.
+- Mensaje de error en caso de hora fuera de rango menciona correctamente el máximo del día (10:00 los no-domingos, 16:00 los domingos).
+
+**Limpieza post-hotfix:** 5 tablas operativas en 0, 6 tablas de seed con valores esperados (`configuracion_general = 10`).
+
+**Estado del sistema:**
+
+- Función `crear_prereserva` ahora es v1.7 en DEV (DROP + CREATE).
+- Si producción se despliega con esta función, recordar agregar `hora_checkout_domingo` al seed productivo.
+- Las funciones `confirmar_reserva`, `cancelar_prereserva`, `crear_bloqueo`, etc. **NO requieren cambios** — toman los horarios calculados de `pre_reservas` (que ahora vienen correctos desde `crear_prereserva`).
+
+**Pendientes generados:**
+
+- Item nuevo en `Pendientes_Pre_Produccion.md`: incluir `hora_checkout_domingo = 16:00` en el seed productivo cuando se despliegue producción.
+- Bug de Supabase a reportar al encargado del documento `6B_SCHEMA_SQL.md`: la regla `hora_checkout_domingo` no estaba en el schema canónico v1.6 y debería agregarse a la próxima versión.
+- Lección operativa nueva a documentar: Supabase Dashboard reescribe queries con `CREATE OR REPLACE FUNCTION` agregando `ALTER TABLE ENABLE RLS` sobre variables locales con prefijo `v_`. **Workaround: usar DROP + CREATE en lugar de CREATE OR REPLACE.**
+
+**Decisión:** **Hotfix cerrado. Fase 3 sigue completa.** El sistema queda operativo con la regla de check-out de domingo.
+
+---
