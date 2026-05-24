@@ -731,3 +731,46 @@ La función captura el estado de la pre-reserva (sección 3) **antes** de hacer 
 **Decisión:** avanzar a Bloque 18 (`expirar_prereservas_vencidas` + pg_cron).
 
 ---
+
+### Bloque 18 — Función `expirar_prereservas_vencidas` (mantenimiento automático)
+
+**Estado:** Cerrado. **Función de mantenimiento automático del sistema.** Marca como `vencida` las pre-reservas con `expira_en <= NOW()` y estado `pendiente_pago`. Diseñada para ejecutarse vía pg_cron cada N minutos.
+
+**SQL ejecutado:** Función `expirar_prereservas_vencidas() RETURNS INTEGER` (~40 líneas). Sin argumentos. Implementa LOOP sobre pre-reservas vencidas con `FOR UPDATE SKIP LOCKED`, UPDATE a estado `vencida`, log por cada expiración, retorno del conteo total. Setea `app.modificado_por` y `app.source_event` una sola vez al inicio (D38).
+
+**Documento usado:** `6B_SCHEMA_SQL.md v1.6`. Sin cambios respecto a v1.5.
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Verificaciones post-ejecución (7 pasos):**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 18.1 | Función registrada con firma especial | `expirar_prereservas_vencidas, integer, VOLATILE, 0` | exacto ✓ |
+| 18.2 | Setup en 4 pasos: cabaña, config, 3 pre-reservas creadas, manipulación de estados (1 vencida, 1 sin vencer, 1 con estado distinto) | 3 pre-reservas (12, 13, 14) con estados específicos | exacto ✓ |
+| 18.3 | Ejecutar función primera vez | retorno `prereservas_expiradas: 1` | exacto ✓ — solo la pre-reserva 12 procesada |
+| 18.4 | Verificación cruzada de estados finales | id=12 vencida con `fue_actualizada=true`, id=13 sigue pendiente_pago con `fue_actualizada=false`, id=14 sigue pago_en_revision con `fue_actualizada=false` | exacto ✓ — la función solo afecta lo que cumple ambas condiciones |
+| 18.5 | Log de expiración | 1 fila con `modificado_por: pg_cron, evento: prereserva_vencida, id_pre_reserva: 12` | exacto ✓ |
+| 18.6 | Re-ejecución idempotente | retorno `segunda_ejecucion: 0` | exacto ✓ — sin pre-reservas pendientes para expirar |
+| 18.7 | Limpieza + sanity check global | 11 tablas en 0 | exacto ✓ |
+
+**Comportamientos clave validados:**
+
+1. **Filtro estricto del WHERE:** la función solo procesa pre-reservas que cumplen **ambas** condiciones: `estado = 'pendiente_pago'` Y `expira_en <= NOW()`. Una sin la otra no califica.
+
+2. **`FOR UPDATE SKIP LOCKED`:** habilita ejecución concurrente segura. Si otra transacción tiene una fila lockeada, el cron la salta sin esperar. Garantiza zero contention en producción.
+
+3. **Idempotencia operativa:** la segunda ejecución consecutiva retorna 0 porque las pre-reservas ya procesadas tienen `estado='vencida'` y dejan de cumplir el WHERE. Cron puede correr cientos de veces al día sin generar duplicados.
+
+4. **`modificado_por: 'pg_cron'` en el log:** el log hardcodea `'pg_cron'` como modificador en el INSERT a `log_cambios`. Esto distingue claramente las expiraciones automáticas de las acciones manuales en reportes futuros.
+
+5. **Setear contexto UNA VEZ al inicio (D38):** la función setea `app.modificado_por` y `app.source_event` antes del LOOP. Si lo hiciera dentro del loop, sería costo redundante. Esta optimización aplica porque ambos valores son constantes durante toda la ejecución.
+
+**Consulta operativa frecuente del cliente — cambio de tiempo de expiración:**
+Si en producción se quiere cambiar el tiempo durante el cual una pre-reserva queda viva sin pago (default actual: 60 min), basta con `UPDATE configuracion_general SET valor = '90' WHERE clave = 'prereserva_expiracion_minutos'`. La próxima pre-reserva creada usará el nuevo valor. Las existentes mantienen su `expira_en` ya calculado. No requiere modificar funciones ni redeploy.
+
+**Para el deploy final — pg_cron:** la programación del job (`SELECT cron.schedule('expirar-prereservas', '*/5 * * * *', 'SELECT expirar_prereservas_vencidas()')`) NO se ejecutó en DEV. pg_cron en Supabase requiere ser superuser. Queda como tarea de Setup Final cuando se prepare el ambiente de producción.
+
+**Decisión:** avanzar a Bloque 19 (último de Fase 2 — triggers automáticos).
+
+---
