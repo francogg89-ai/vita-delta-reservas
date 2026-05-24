@@ -100,3 +100,43 @@ la rutina de limpieza diaria de Jennifer. No es regla rígida.
 UPDATE cabanas SET orden_limpieza = 3 WHERE nombre = 'Bamboo';
 UPDATE cabanas SET orden_limpieza = 1 WHERE nombre = 'Tokio';
 \`\`\`
+
+## Bug crítico de Supabase Dashboard con CREATE OR REPLACE FUNCTION
+
+Cuando se ejecuta un `CREATE OR REPLACE FUNCTION` en el SQL Editor de Supabase
+con una función PL/pgSQL que contiene variables locales con prefijo `v_`,
+Supabase puede detectar incorrectamente esas variables como **nombres de tabla**
+e intentar agregar automáticamente al final del SQL:
+
+\`\`\`sql
+ALTER TABLE v_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE v_existente ENABLE ROW LEVEL SECURITY;
+-- source: dashboard
+\`\`\`
+
+Esto trunca el SQL original a mitad y causa errores tipo:
+`ERROR 42601: unterminated dollar-quoted string`
+
+### Workaround validado
+
+Usar `DROP FUNCTION` seguido de `CREATE FUNCTION` (sin `OR REPLACE`) en runs
+separados:
+
+\`\`\`sql
+-- Paso 1: DROP en su propio Run
+DROP FUNCTION IF EXISTS mi_funcion(jsonb);
+\`\`\`
+
+\`\`\`sql
+-- Paso 2: CREATE en su propio Run
+CREATE FUNCTION mi_funcion(payload JSONB) RETURNS JSONB ... AS $$
+DECLARE
+  v_config JSONB;  -- ← Supabase ya no lo confunde con tabla
+  ...
+\`\`\`
+
+Supabase no activa el feature de auto-RLS cuando hay un DROP previo, porque
+entiende que estás reemplazando una función existente.
+
+Origen: Hotfix v1.7 (Fase 3, post-cierre), reemplazo de `crear_prereserva`
+con la regla de `hora_checkout_domingo`.
