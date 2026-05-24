@@ -683,3 +683,51 @@ Esto habilita queries futuras tipo "cancelaciones por motivo en último mes" o "
 
 ---
 
+### Bloque 17 — Función `registrar_pago`
+
+**Estado:** Cerrado. **Función de registro de pagos con decisiones automáticas inteligentes.** Conecta eventos externos (webhooks de pasarelas, validaciones humanas, comprobantes) con el sistema. Implementa lógica v1.3 que previene reactivación accidental de pre-reservas terminales.
+
+**SQL ejecutado:** Función `registrar_pago(payload JSONB) RETURNS JSONB` (~180 líneas). Implementa 7 secciones: extracción payload, setear contexto para triggers (D38), validaciones, captura de estado de pre-reserva (v1.3), determinación automática de `estado_final` del pago, INSERT en `pagos`, promoción condicional de pre-reserva a `pago_en_revision`, log con `nivel` diferenciado info/warning, retorno con o sin warning.
+
+**Documento usado:** `6B_SCHEMA_SQL.md v1.6`. Sin cambios respecto a v1.5 para este bloque (no usa `pg_advisory_xact_lock` con BIGINT, no aplica el fix de cast).
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Verificaciones post-ejecución (9 pasos):**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 17.1 | Función registrada | `registrar_pago, jsonb, VOLATILE, 1` | exacto ✓ |
+| 17.2 | Setup (cabaña + config + 2 pre-reservas, una se cancela vía B15 para test v1.3) | id_cabana=12, pre_reservas 10 activa y 11 cancelada_por_cliente | exacto ✓ |
+| 17.3 | T-RP-1: pago confirmado automático (estado_inicial=confirmado + montos iguales) | `ok:true, id_pago:5, estado:confirmado` | exacto ✓ |
+| 17.4 | T-RP-2: pago con monto distinto → en_revision forzado | `ok:true, id_pago:6, estado:en_revision` | exacto ✓ — la función ignoró estado_inicial=confirmado porque montos diferían |
+| 17.5 | **T-RP-3: pago sobre pre-reserva CANCELADA (caso v1.3)** | `ok:true, id_pago:7, estado:en_revision, warning:prereserva_no_activa, prereserva_estado:cancelada_por_cliente` | exacto ✓ — comportamiento clave del bloque verificado |
+| 17.6 | 4 errores controlados (referencia_requerida, payload_invalido, prereserva_no_existe, reserva_no_existe) | 4 JSONs con códigos estables | exacto ✓ |
+| 17.7 | Verificación cruzada de estados post-pagos | pre_reserva 10 promovida a pago_en_revision; pre_reserva 11 INTACTA en cancelada_por_cliente (no reactivada); pagos con estados, validados, y montos correctos | exacto ✓ |
+| 17.8 | Logs (3 de registrar_pago + 3 de setup) | id_log 22 con `nivel:warning, warning:prereserva_no_activa, prereserva_estado:cancelada_por_cliente`. Los otros 2 logs de pago con `nivel:info` | exacto ✓ |
+| 17.9 | Limpieza + sanity check global | 11 tablas en 0 | exacto ✓ |
+
+**Comportamientos clave validados:**
+
+1. **3 decisiones automáticas del estado del pago:**
+   - Pre-reserva activa + estado_inicial='confirmado' + montos iguales → `estado='confirmado'` con `validado_por='sistema_auto'` y `validado_en=NOW()`.
+   - Pre-reserva activa + montos distintos (aunque estado_inicial='confirmado') → `estado='en_revision'` con `validado_por=null` y `validado_en=null`.
+   - Pre-reserva terminal (v1.3) → `estado='en_revision'` forzado, ignorando el `estado_inicial` del payload.
+
+2. **Promoción condicional de pre-reserva:** La función promueve la pre-reserva de `pendiente_pago` a `pago_en_revision` **solo si la pre-reserva está activa**. Si está terminal (cancelada/vencida/conflicto), el UPDATE no la afecta porque tiene cláusula `WHERE estado = 'pendiente_pago'`. Confirmado en Verify 17.7: pre-reserva 11 sigue en `cancelada_por_cliente` tras el T-RP-3.
+
+3. **Log con nivel diferenciado:** los pagos normales generan `nivel:info`. Los pagos sobre pre-reservas terminales generan `nivel:warning` con el campo `warning:'prereserva_no_activa'` y `prereserva_estado` indicando el estado terminal específico (cancelada, vencida, etc.). Esto permite a operadores filtrar `WHERE nivel='warning'` para revisar manualmente los casos especiales.
+
+4. **El default `validado_por='sistema_auto'`:** Cuando el pago se auto-confirma (T-RP-1) pero el payload no trae `validado_por`, la función lo setea como `sistema_auto`. Esto da trazabilidad clara: en producción será fácil distinguir pagos auto-confirmados por el sistema (webhooks MP) vs pagos validados por humanos (Vicky/Franco).
+
+**Detalle técnico — el patrón "decidir antes de actuar":**
+La función captura el estado de la pre-reserva (sección 3) **antes** de hacer el INSERT del pago (sección 5) y antes del UPDATE de la pre-reserva (sección 6). Esto permite que las 3 acciones (insertar pago, promover pre-reserva, generar log) usen información consistente del estado capturado, evitando race conditions de lectura.
+
+**Comportamiento operativo en producción:**
+- Pagos auto-confirmados (webhook Mercado Pago con monto correcto) → `info`, pre-reserva promovida automáticamente.
+- Pagos con discrepancias → `info` pero en_revision, queda en cola para que Vicky/Franco validen.
+- Pagos tardíos sobre pre-reservas canceladas/vencidas → `warning`, la pre-reserva NO se reactiva, queda para decisión humana sobre reembolso/crédito.
+
+**Decisión:** avanzar a Bloque 18 (`expirar_prereservas_vencidas` + pg_cron).
+
+---
