@@ -897,3 +897,52 @@ Migrar horizonte de 60 días (hardcoded) en `vista_disponibilidad` y `vista_cale
 **Decisión:** avanzar a Bloque 21 (Datos seed mínimos).
 
 ---
+
+### Bloque 21 — Datos seed mínimos
+
+**Estado:** Cerrado. **Primer bloque que carga datos productivos reales en DEV.** A partir de acá, DEV no está vacío: convive con datos reales de Vita Delta + datos test descartables.
+
+**SQL ejecutado:** 6 INSERTs sobre tablas distintas. Versión modificada del seed del documento `6B_SCHEMA_SQL.md v1.6` con 3 ajustes operativos.
+
+**Modificaciones al seed del documento (decisiones en sesión):**
+
+1. **Socio 3 = Remo** (no placeholder). Tercer socio real de Vita Delta cargado.
+2. **Cuenta de cobro `playario` activa con CVU real** (0000003100010587293072). El documento la dejaba inactiva como placeholder; en DEV cargamos los datos reales para que el sistema esté listo.
+3. **Agregada clave `horizonte_disponibilidad_dias = 120`** que NO está en el seed del documento. Decisión del Bloque 20: parametrizar el horizonte de las vistas en vez de hardcodearlo. Como en futuro habrá que modificar `vista_disponibilidad` y `vista_calendario` para leer esta clave (registrado en `Pendientes_Pre_Produccion.md` 1.1), tenerla cargada desde ya prepara el terreno.
+4. **NO se carga `hora_checkout_ultimo_dia_bloque = 16:00`** (presente en el documento). Decisión operativa: esa clave sola no tiene sentido porque su par lógico (`hora_checkin_dia_post_bloque` que debería ser 18:00 o 19:00) no existe en el schema ni en las funciones. Cargarla sin su par crearía inconsistencia operativa (cliente saliente a las 16:00 + cliente entrante a las 13:00 = sin tiempo de limpieza). La funcionalidad de "bloques" no está implementada en las funciones actuales (B13-B18 no leen esta clave). Cuando se quiera implementar escalonamiento de "último día de bloque", se cargarán ambas claves juntas con la lógica consistente.
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Verificaciones post-ejecución (5 verifies):**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 21.1 | Conteo por tabla | cabanas=5, socios=3, configuracion_general=9, cuentas_cobro=1, temporadas=1, plantillas_mensajes=1 | exacto ✓ (9 claves, no 10 — corregida una expectativa errónea en sesión) |
+| 21.2 | Cabañas con orden_limpieza | Bamboo→Tokio en orden 1-5, IDs 17-21 (secuencia avanzó por tests previos) | exacto ✓ |
+| 21.3 | 9 claves de configuración con `horizonte_disponibilidad_dias=120` | 9 filas, incluida la clave nueva | exacto ✓ |
+| 21.3b | Cuenta de cobro real con CVU correcto | playario / 0000003100010587293072 / activa=true | exacto ✓ |
+| 21.4a/b/c | Socios (Franco, Remo, Rodrigo), temporada baseline, plantilla prereserva_creada | 3 socios, 1 temporada, 1 plantilla | exacto ✓ |
+
+**Comportamiento operativo a tener en cuenta — `orden_limpieza`:**
+
+Las 5 cabañas tienen `orden_limpieza` asignado (Bamboo=1, Tokio=5). Este campo es **un default sugerido** para Jennifer, no una regla rígida. En la práctica operativa, Jennifer va a priorizar según:
+
+- **Hora de checkout efectiva** (visible en `vista_limpieza_semana`).
+- **Cantidad de personas** (cabañas grandes con 5 personas tardan más).
+- **Mascotas** (requieren limpieza adicional, visible en vista).
+- **Hora de check-in del entrante del mismo día** (visible).
+- **Notas de reserva** (visibles).
+
+El `orden_limpieza` funciona como **tiebreaker** cuando todos los demás factores son iguales. La info contextual la tiene Jennifer en la vista.
+
+**Aprendizaje operativo de la sesión:**
+
+Mi conteo inicial de "9 claves originales + 1 nueva = 10" fue incorrecto. El seed del documento tenía 9 claves originales, después sacamos 1 (`hora_checkout_ultimo_dia_bloque`) y agregamos 1 (`horizonte_disponibilidad_dias`). Total: 9 claves. Lección: **cuando se modifica un seed, recontar las claves resultantes y no quedarse con el conteo original**.
+
+**Pendientes actualizados en `Pendientes_Pre_Produccion.md`:**
+
+- Item 1.1 (horizonte_disponibilidad_dias): **clave cargada en DEV**. Pendiente solo migrar las vistas para que lean desde config (snippet ya armado).
+
+**Decisión:** avanzar a Bloque 22 (Schedule pg_cron — último de Fase 3).
+
+---
