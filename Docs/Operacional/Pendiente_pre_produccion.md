@@ -142,6 +142,27 @@ ENTONCES enviar notificación a Jennifer (WhatsApp/Email) con:
 **Origen:** discusión del Bloque 20, Fase 3 (decisión de diseño confirmada
 por Franco — Jennifer necesita updates cuando la semana cambia).
 
+### 3.2 Endpoint obligatorio antes de web pública — `consultar_disponibilidad_precio`
+
+**Estado actual:** no implementado en DEV.
+
+**Motivo:** antes de exponer una web pública, el cliente debe poder elegir cabaña, fechas y cantidad de personas, y recibir disponibilidad + precio sin crear una pre-reserva todavía.
+
+**Cambio antes de producción web:**
+
+Crear un endpoint backend —inicialmente en n8n o Supabase Edge Function— que:
+
+- recibe `id_cabana`, `fecha_in`, `fecha_out`, `personas`;
+- valida disponibilidad;
+- calcula `monto_total` y `monto_sena`;
+- devuelve desglose de precio;
+- NO crea pre-reserva;
+- NO permite que el frontend sea fuente de verdad del precio.
+
+**Regla:** la web puede mostrar el precio, pero nunca calcularlo como autoridad final.
+
+**Origen:** decisión D40 del schema 6B.
+
 ---
 
 ## 4. Configuración futura del seed productivo
@@ -202,6 +223,21 @@ no falla.
 
 **Origen:** Hotfix v1.7 (Fase 3, post-cierre).
 
+### 4.5 Completar seed productivo no técnico
+
+Antes de producción, completar y verificar datos reales de:
+
+- `socios`: nombres reales y porcentajes definitivos.
+- `cuentas_cobro`: alias, medio, titular, detalle y estado activo/inactivo.
+- `temporadas`: alta, media, baja, fechas y multiplicadores.
+- `feriados`: feriados nacionales/provinciales/locales relevantes.
+- `eventos_especiales`: Año Nuevo, Semana Santa u otros eventos con reglas propias.
+- `plantillas_mensajes`: textos reales para huéspedes/equipo.
+
+**Regla:** no subir datos sensibles reales a GitHub. El documento puede decir qué cargar, pero no debe contener CBU, alias reales sensibles, wallets, teléfonos privados ni credenciales.
+
+**Origen:** preparación de seed productivo posterior a Fase 3.
+
 ---
 
 ## 5. Seguridad
@@ -236,6 +272,57 @@ Validar comportamiento del sistema bajo carga real:
 - Cron de expiración corriendo mientras hay pago en proceso.
 
 **Origen:** plan de Fase 4 según `6B_PLAN_FASES.md`.
+
+---
+
+## 7. Backup y rollback
+
+### 7.1 Backup antes de aplicar schema en producción
+
+Antes de ejecutar cualquier bloque o migración en PROD:
+
+- exportar backup desde Supabase;
+- guardar dump SQL o snapshot disponible;
+- verificar que se puede restaurar o recrear el entorno;
+- registrar commit exacto del repo usado para deploy.
+
+### 7.2 Plan de rollback
+
+Para cada ejecución productiva:
+
+- definir hasta qué punto se puede revertir;
+- no usar `DROP ... CASCADE` sin revisión explícita;
+- documentar qué datos podrían perderse;
+- si ya hay reservas reales cargadas, priorizar migraciones reversibles o scripts correctivos.
+
+**Origen:** control mínimo de riesgo antes de producción.
+
+---
+
+## 8. Secrets y credenciales
+
+### 8.1 Variables de entorno productivas
+
+Antes de producción, verificar que las credenciales reales estén fuera de GitHub:
+
+- Supabase Project URL.
+- Supabase anon key, si aplica.
+- Supabase service role key para n8n.
+- Credenciales n8n.
+- MercadoPago access token / webhook secret.
+- WhatsApp / Meta tokens.
+- Credenciales de email, si aplica.
+
+**Regla:** ningún secret real debe commitearse. Usar `.env`, gestor de secretos o variables del entorno de n8n.
+
+### 8.2 Archivo `.env.example`
+
+Mantener solo placeholders:
+
+```text
+SUPABASE_URL=__SUPABASE_URL__
+SUPABASE_SERVICE_ROLE_KEY=__SUPABASE_SERVICE_ROLE_KEY__
+MERCADOPAGO_ACCESS_TOKEN=__MERCADOPAGO_ACCESS_TOKEN__
 
 ---
 

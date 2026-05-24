@@ -1,16 +1,140 @@
 # 6B_SCHEMA_SQL.md
 # Schema PostgreSQL — Vita Delta Reservas
 
-**Versión:** 1.6.1
+**Versión:** 1.7.1
 **Fecha:** Mayo 2026
-**Estado:** Corrección documental sobre v1.6. Bloque 13 ejecutado en DEV. Pendiente Bloques 14-22. Sin cambios operativos.
+**Estado:** Fase 3 cerrada en DEV. Bloques 1-22 ejecutados. v1.7 aplicado en DEV. Pendiente alinear DEV con v1.7.1 actualizando `obtener_disponibilidad_rango()`.
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1
 **Sucesora directa de:** ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md v1.1
 
-> **IMPORTANTE:** El SQL de la Parte B se ejecuta bloque por bloque siguiendo `Docs/Implementacion/6B_PLAN_FASES.md`. Al momento de v1.6.1, el Bloque 13 ya fue ejecutado y verificado en Supabase DEV. Los Bloques 14 a 22 todavía no fueron ejecutados y deben correrse desde este documento.
+> **IMPORTANTE:** El SQL de la Parte B se ejecuta bloque por bloque siguiendo `Docs/Implementacion/6B_PLAN_FASES.md`. Al momento de v1.7.1, los Bloques 1-22 ya fueron ejecutados y verificados en Supabase DEV (Fase 3 cerrada). El hotfix `hora_checkout_domingo` (v1.7) fue aplicado en DEV y queda incorporado al schema canónico. v1.7.1 corrige la consistencia de `obtener_disponibilidad_rango()` con la regla dominical (D47); DEV debe alinearse con esta versión actualizando una función (ver Sección "Alineación de DEV con v1.7.1" en el resumen de cambios).
 > **NOTA DE SANITIZACIÓN:** Este documento fue revisado para subir a GitHub. No contiene Project ID, Project URL, passwords, connection strings, anon keys, service role keys, JWTs ni datos reales de huéspedes. Los teléfonos en tests funcionales son sintéticos. Las credenciales reales del proyecto Supabase deben vivir fuera del repositorio.
+
+---
+
+## RESUMEN DE CAMBIOS v1.7 → v1.7.1
+
+Versión patch-level con un cambio SQL real menor + dos ajustes documentales. Sin tocar locks, EXCLUDE, motor de precios, RLS, workflows ni funciones no afectadas.
+
+### Cambio SQL — `obtener_disponibilidad_rango()` (Bloque 12)
+
+El SELECT interno de la función devolvía `TIME '10:00' AS hora_checkout_base` hardcodeado, lo cual quedó inconsistente con la regla D47 introducida en v1.7 (checkout máximo 16:00 si `fecha_out` es domingo).
+
+**Cambio aplicado:**
+
+```sql
+-- Antes (v1.7):
+TIME '10:00' AS hora_checkout_base,
+
+-- Después (v1.7.1):
+CASE WHEN EXTRACT(DOW FROM m.fecha) = 0 THEN TIME '16:00' ELSE TIME '10:00' END AS hora_checkout_base,
+```
+
+**Por qué importa:**
+
+- `vista_disponibilidad` se construye sobre `obtener_disponibilidad_rango`. Sin este ajuste, la vista mostraría `hora_checkout_base = 10:00` también para domingos, contradiciendo la regla operativa real.
+- Cuando se implemente `consultar_disponibilidad_precio()` (pendiente, ver D40), probablemente consumirá `obtener_disponibilidad_rango`. La inconsistencia en domingos llegaría hasta el cliente final.
+- La función `crear_prereserva` ya aplica D47 correctamente desde v1.7. Este cambio alinea la vista de disponibilidad con la regla operativa, manteniendo coherencia entre las dos fuentes.
+
+### Ajustes documentales
+
+1. **Sección 15 (Nota operativa Supabase Dashboard):** advertencia agregada sobre `DROP FUNCTION` y dependencias. Si una función está siendo usada por triggers, vistas u otros objetos, `DROP FUNCTION` puede fallar por dependencias. **No usar `DROP ... CASCADE`** sin revisar impacto. El workaround `DROP + CREATE` se validó únicamente para `crear_prereserva` (función transaccional autónoma, sin triggers ni vistas dependientes). Para funciones con dependencias, evaluar caso por caso.
+
+2. **Sección 16 (Utilidad operativa):** frase "antes del máximo 10:00" actualizada a "antes del máximo permitido —10:00 en días normales o 16:00 si `fecha_out` es domingo—". Mantiene compatibilidad con D47.
+
+### Alineación de DEV con v1.7.1
+
+Para alinear DEV con v1.7.1, se debe actualizar `obtener_disponibilidad_rango()` manteniendo la misma firma `(p_fecha_desde DATE, p_fecha_hasta DATE, p_id_cabana BIGINT DEFAULT NULL)`.
+
+La opción natural es `CREATE OR REPLACE FUNCTION`. **Si el Supabase Dashboard vuelve a interferir con la ejecución** (ver hallazgo documentado en Sección 15 durante v1.7), **no usar `DROP ... CASCADE`** porque la función probablemente esté siendo usada por `vista_disponibilidad`. En ese caso, evaluar un workaround específico que preserve las dependencias.
+
+Verificación post-actualización en DEV:
+
+```sql
+-- Verificar que la función fue actualizada
+SELECT pg_get_functiondef(p.oid) LIKE '%CASE WHEN EXTRACT(DOW FROM m.fecha) = 0 THEN%' AS regla_d47_aplicada
+FROM pg_proc p
+WHERE p.proname = 'obtener_disponibilidad_rango';
+
+-- Verificar comportamiento contra un domingo conocido
+SELECT fecha, hora_checkout_base
+FROM obtener_disponibilidad_rango(
+  '2026-06-07'::DATE,  -- domingo
+  '2026-06-08'::DATE,
+  1                    -- cualquier id_cabana válido
+)
+WHERE EXTRACT(DOW FROM fecha) = 0;
+-- Esperado: hora_checkout_base = 16:00:00
+```
+
+### Lo que NO cambió
+
+- Schema, tablas, enums, vistas, triggers, EXCLUDE, pg_cron, seed.
+- Diseño de locks (D46, invariante v1.5, cast v1.6).
+- Funciones no afectadas: `crear_prereserva` (ya aplicaba D47 desde v1.7), `confirmar_reserva`, `cancelar_prereserva`, `crear_bloqueo`, `registrar_pago`, `expirar_prereservas_vencidas`, `upsert_huesped`, `validar_disponibilidad`, `normalizar_telefono`.
+- Tests, decisiones D1-D47, motor de precios, RLS, workflows.
+
+### Estado en Supabase DEV
+
+- Bloques 1-22 ejecutados.
+- v1.7 aplicado completamente (incluye `crear_prereserva` con D47 y `hora_checkout_domingo` en seed).
+- **Pendiente:** actualizar `obtener_disponibilidad_rango()` para alinearse con v1.7.1.
+
+---
+
+## RESUMEN DE CAMBIOS v1.6.1 → v1.7
+
+Versión que incorpora un cambio funcional real (regla de checkout dominical) y una nota operativa documental detectada durante ejecución. Cero cambios en locks, EXCLUDE, motor de precios, RLS, workflows.
+
+### Cambio funcional — `hora_checkout_domingo` (D47)
+
+Vita Delta tiene checkout dominical a las 16:00 por logística de lancha colectiva. Hasta v1.6.1, el sistema usaba `hora_checkout_default` (10:00) para todos los días, con un TODO en `crear_prereserva` que dejaba la lógica de "último día de bloque" para etapa futura. La regla operativa concreta del complejo es más simple que ese TODO genérico: **si `fecha_out` es domingo, el checkout máximo es 16:00**.
+
+**Regla final:**
+- Check-in domingo: 18:00 (ya existía).
+- Check-out domingo: 16:00 (nuevo en v1.7).
+- Check-out otros días: 10:00 (sin cambios).
+
+**Las dos reglas son independientes.** El check-in dominical aplica cuando `fecha_in` es domingo; el check-out dominical aplica cuando `fecha_out` es domingo. Una pre-reserva puede tener una, la otra, ambas, o ninguna.
+
+### Cambios aplicados
+
+1. **Bloque 13 (`crear_prereserva`):**
+   - La lectura agrupada de `configuracion_general` ahora incluye `hora_checkout_domingo`.
+   - El chequeo de claves faltantes incluye `hora_checkout_domingo`.
+   - `v_hora_checkout_max` se calcula con `CASE WHEN EXTRACT(DOW FROM v_fecha_out) = 0` (domingo en PostgreSQL es DOW = 0).
+   - TODO anterior eliminado (queda resuelto por v1.7).
+
+2. **Bloque 21 (seed):**
+   - Agregada clave `hora_checkout_domingo` con valor `'16:00'`.
+   - Eliminada clave `hora_checkout_ultimo_dia_bloque` (no se usa en ninguna función; queda como deuda futura si se implementa lógica específica para feriados o último día de bloque).
+   - Conteo de `configuracion_general` se mantiene en **9 claves** (una entra, una sale).
+
+3. **Sección 16 (Horarios):**
+   - Reglas dominicales documentadas explícitamente para checkin y checkout, indicando que son independientes.
+   - Aclaración: feriados y "último día de bloque" quedan fuera de alcance automático por ahora (resolución manual con el cliente si surge el caso).
+
+4. **Sección 15 (Notas técnicas de PostgreSQL/Supabase):**
+   - Agregada nota operativa sobre comportamiento observado del Supabase Dashboard al modificar funciones con `CREATE OR REPLACE FUNCTION`, y workaround `DROP + CREATE` en runs separados.
+
+5. **Tabla de decisiones:** D47 agregada — "Checkout dominical a las 16:00 como regla operativa de Vita Delta".
+
+### Lo que NO cambió
+
+- Schema, constraints, EXCLUDE, tablas, enums, vistas, triggers, pg_cron.
+- Diseño de locks (D46) e invariante de orden (v1.5).
+- Cast `::INTEGER` en advisory locks (v1.6).
+- Narrativa de Sección 10 alineada con SQL real (v1.6.1).
+- Funciones no afectadas: `upsert_huesped`, `validar_disponibilidad`, `obtener_disponibilidad_rango`, `confirmar_reserva` (hereda `hora_checkout` correctamente desde la pre-reserva sin requerir cambios), `cancelar_prereserva`, `crear_bloqueo`, `registrar_pago`, `expirar_prereservas_vencidas`.
+- Tests, motor de precios, RLS, workflows.
+
+### Estado en Supabase DEV
+
+- Bloques 1-22 ejecutados y bitacoreados.
+- Hotfix `hora_checkout_domingo` aplicado en DEV y verificado durante Fase 3.
+- DEV está alineado con v1.7. Para próximas recreaciones de DEV, ejecución de TEST y ejecución de PROD, este documento es la fuente de verdad.
 
 ---
 
@@ -1320,6 +1444,85 @@ Es arbitrario pero documentado. Reserva un rango (`10, 0`) que no colisiona con 
 
 Si en el futuro se permite INSERT directo a `bloqueos` desde fuera de la función (lo cual no recomendamos), el caller debe tomar el lock global y replicar las validaciones manuales.
 
+### Nota operativa sobre Supabase Dashboard y modificación de funciones (v1.7)
+
+**Hallazgo durante ejecución DEV.** Al aplicar un hotfix sobre una función ya existente vía `CREATE OR REPLACE FUNCTION` desde el SQL Editor del Supabase Dashboard, **se observó que el Dashboard puede interferir con el código pegado**, insertando automáticamente líneas de RLS sobre nombres que interpreta erróneamente como tablas (por ejemplo, variables locales PL/pgSQL con prefijo `v_`). El resultado observado fue truncamiento del SQL y error en runtime:
+
+```
+ERROR 42601: unterminated dollar-quoted string
+```
+
+**Alcance del hallazgo.** Documentado como **comportamiento observado en Supabase Dashboard durante v1.7**. No se afirma como verdad universal de PostgreSQL ni como bug garantizado en todos los entornos. Otras formas de ejecutar SQL contra Supabase (clientes externos como `psql`, `pgAdmin`, scripts de migración) probablemente no presenten este comportamiento.
+
+**Workaround validado.** Para modificar una función ya existente, ejecutar en **dos runs separados** dentro del SQL Editor:
+
+**Run 1 — DROP de la función:**
+
+```sql
+DROP FUNCTION IF EXISTS nombre_funcion(tipos_parametros);
+```
+
+**Run 2 — CREATE de la función (transacción nueva):**
+
+```sql
+CREATE FUNCTION nombre_funcion(...)
+RETURNS ...
+LANGUAGE plpgsql
+AS $$
+...
+$$;
+```
+
+**Cuándo aplica el workaround:**
+
+- ✅ Aplica para **modificaciones posteriores / hotfixes** de funciones ya existentes en Supabase Dashboard.
+- ❌ NO aplica para ejecución desde cero (Bloques iniciales): durante la ejecución de Fases 1-3, todos los `CREATE OR REPLACE FUNCTION` del documento funcionaron correctamente porque la función no existía previamente en el catálogo.
+
+**Decisión documental.** No se modifican los `CREATE OR REPLACE FUNCTION` existentes del documento. Para recreación de DEV, ejecución de TEST y ejecución de PROD desde cero, el SQL canónico sigue siendo válido. El workaround `DROP + CREATE` queda como guía operativa **solo para futuros hotfixes** sobre entornos con funciones ya creadas.
+
+**Advertencia adicional sobre `DROP FUNCTION` y dependencias (v1.7.1).**
+
+El workaround `DROP + CREATE` fue validado durante el hotfix de v1.7 sobre `crear_prereserva`, que es una función transaccional autónoma **sin dependencias directas de triggers, vistas u otras funciones**. Antes de aplicar el workaround a otra función, verificar caso por caso:
+
+- **Funciones de trigger** (por ejemplo, `set_updated_at`, `log_cambio_estado`, `set_telefono_normalizado` del Bloque 9): tienen triggers en tablas que dependen de ellas. `DROP FUNCTION` simple va a fallar con `cannot drop function ... because other objects depend on it`.
+
+- **Funciones usadas en vistas** (por ejemplo, `obtener_disponibilidad_rango` es invocada por `vista_disponibilidad`): el DROP va a fallar por la misma razón.
+
+- **Funciones invocadas por otras funciones** (por ejemplo, `validar_disponibilidad` es llamada dentro de `crear_prereserva` y `confirmar_reserva`): también van a generar dependencias.
+
+**NO usar `DROP ... CASCADE` sin revisar impacto.** `CASCADE` borra silenciosamente todos los objetos dependientes (triggers, vistas, funciones que invocan la función droppeada). El daño puede ser invisible hasta que algo se rompe en producción.
+
+**Procedimiento recomendado para funciones con dependencias** (si `CREATE OR REPLACE FUNCTION` directo falla por interferencia del Dashboard):
+
+1. Identificar todas las dependencias con:
+
+```sql
+SELECT
+  classid::regclass AS tipo_objeto_dependiente,
+  objid::regprocedure AS objeto_dependiente
+FROM pg_depend
+WHERE refobjid = 'nombre_funcion(tipos_parametros)'::regprocedure;
+```
+
+2. Evaluar si recrear las dependencias manualmente después del DROP es viable.
+3. Si las dependencias son muchas, **preferir un enfoque alternativo**: ejecutar `CREATE OR REPLACE FUNCTION` desde un cliente externo (`psql`, `pgAdmin`, script de migración) en lugar del SQL Editor del Dashboard.
+
+**Funciones del schema actual con dependencias conocidas:**
+
+| Función | Tipo de dependencia | Caller |
+|---|---|---|
+| `set_updated_at()` | Trigger | 9 triggers `trg_*_updated_at` |
+| `log_cambio_estado()` | Trigger | 3 triggers `trg_log_*_estado` |
+| `set_telefono_normalizado()` | Trigger | `trg_huespedes_telefono_norm` |
+| `obtener_disponibilidad_rango()` | Vista | `vista_disponibilidad` |
+| `validar_disponibilidad()` | Función | `crear_prereserva`, `confirmar_reserva` |
+| `normalizar_telefono()` | Función | `set_telefono_normalizado` |
+| `expirar_prereservas_vencidas()` | pg_cron job | (cuando esté programado, ver Pendientes Pre-Producción) |
+
+**Funciones autónomas (workaround `DROP + CREATE` es seguro):**
+
+`crear_prereserva`, `confirmar_reserva`, `cancelar_prereserva`, `crear_bloqueo`, `registrar_pago`, `upsert_huesped`. Ninguna está siendo usada por triggers, vistas u otras funciones del schema actual.
+
 ---
 
 ## 16. HORARIOS: LO QUE PIDE EL CLIENTE Y LO QUE VE EL EQUIPO
@@ -1328,17 +1531,33 @@ Si en el futuro se permite INSERT directo a `bloqueos` desde fuera de la funció
 
 En `pre_reservas` y `reservas`, los campos `hora_checkin` y `hora_checkout` representan **la hora declarada/elegida por el cliente, dentro del margen permitido**. No se separan en "hora base" vs "hora real" en v1.1.
 
-### Reglas de margen (Etapa 2 v1.3, sección 6)
+### Reglas de margen (Etapa 2 v1.3, sección 6; actualizado en v1.7)
 
 **Para check-in:**
 - `hora_checkin_minima` = MAX(hora base, hora escalonada).
 - `hora_checkin_maxima` = 22:00 (configurable vía `hora_checkin_max_cliente`).
-- El cliente puede elegir cualquier hora entre esas dos.
+- **Hora base depende del día de la semana:**
+  - Si `fecha_in` es domingo (DOW = 0): hora base = `hora_checkin_domingo` (default 18:00).
+  - Resto de los días: hora base = `hora_checkin_default` (default 13:00).
+- El cliente puede elegir cualquier hora entre la mínima y la máxima.
 
-**Para check-out:**
-- `hora_checkout_maxima` = 10:00 estándar, 16:00 último día de bloque, o override manual.
+**Para check-out (v1.7, D47):**
+- `hora_checkout_maxima` depende del día de la semana del último día de la estadía:
+  - Si `fecha_out` es domingo (DOW = 0): máxima = `hora_checkout_domingo` (default 16:00). Esto refleja la logística de lancha colectiva — los clientes que se van un domingo pueden quedarse hasta las 16:00.
+  - Resto de los días: máxima = `hora_checkout_default` (default 10:00).
 - `hora_checkout_minima` = 07:00 (configurable vía `hora_checkout_min_cliente`).
 - El cliente puede elegir salir antes del máximo, dentro del mínimo.
+
+**Reglas independientes.** La regla dominical de check-in aplica sobre `fecha_in`. La regla dominical de check-out aplica sobre `fecha_out`. Una pre-reserva puede tener una, la otra, ambas o ninguna:
+
+| `fecha_in` | `fecha_out` | check-in base | check-out máx |
+|---|---|---|---|
+| domingo | domingo | 18:00 | 16:00 |
+| domingo | otro día | 18:00 | 10:00 |
+| otro día | domingo | 13:00 | 16:00 |
+| otro día | otro día | 13:00 | 10:00 |
+
+**Casos fuera de alcance automático (v1.7):** feriados nacionales o "último día de bloque" de logística especial (por ejemplo, salida en pleno feriado con lancha colectiva extendida) **NO** están contemplados automáticamente. Si surgen, se resuelven manualmente con el cliente (override operativo) o se agrega una clave de configuración específica en una versión futura.
 
 ### Validación en `crear_prereserva()`
 
@@ -1350,7 +1569,7 @@ El payload acepta opcionalmente `hora_checkin_solicitada` y `hora_checkout_solic
 
 ### Utilidad operativa
 
-`vista_limpieza_semana` muestra `hora_checkin` y `hora_checkout` de cada movimiento. Si el cliente declara salir a las 8:00 (antes del máximo 10:00), Jennifer y el equipo ven esa hora y pueden organizar limpieza más temprano. Esto puede incluso evitar activar el escalonamiento de check-in del próximo huésped.
+`vista_limpieza_semana` muestra `hora_checkin` y `hora_checkout` de cada movimiento. Si el cliente declara salir a las 8:00 (antes del máximo permitido —10:00 en días normales o 16:00 si `fecha_out` es domingo—), Jennifer y el equipo ven esa hora y pueden organizar limpieza más temprano. Esto puede incluso evitar activar el escalonamiento de check-in del próximo huésped.
 
 ### Trabajo futuro (no v1.1)
 
@@ -1646,6 +1865,7 @@ Resumen consolidado de todas las decisiones aprobadas hasta v1.1:
 | **D44** | **`registrar_pago` sobre pre-reserva terminal: fuerza `en_revision`, no reactiva, devuelve warning** | **Aprobado v1.3** |
 | **D45** | **Config inválida documentada como deuda técnica aceptable (no se implementa safe-cast)** | **Aprobado v1.3** |
 | **D46** | **Advisory lock global `(10, 0)` de disponibilidad para serializar operaciones críticas. `LOCK TABLE` eliminado.** | **Aprobado v1.4** |
+| **D47** | **Checkout dominical a las 16:00 como regla operativa de Vita Delta. Implementado en `crear_prereserva` (cálculo de `v_hora_checkout_max` con `CASE WHEN EXTRACT(DOW FROM v_fecha_out) = 0`) y propagado a `reservas` vía `confirmar_reserva` (que copia `hora_checkout` desde la pre-reserva sin transformaciones).** | **Aprobado v1.7** |
 
 ---
 
@@ -3020,7 +3240,7 @@ BEGIN
     ) AS temporada,
     -- Hora base (sin escalonamiento — el escalonamiento lo aplica n8n)
     CASE WHEN EXTRACT(DOW FROM m.fecha) = 0 THEN TIME '18:00' ELSE TIME '13:00' END AS hora_checkin_base,
-    TIME '10:00' AS hora_checkout_base,
+    CASE WHEN EXTRACT(DOW FROM m.fecha) = 0 THEN TIME '16:00' ELSE TIME '10:00' END AS hora_checkout_base,  -- v1.7.1 (D47)
     (
       SELECT r.id_reserva FROM reservas r
       WHERE r.id_cabana = m.id_cabana
@@ -3177,6 +3397,7 @@ BEGIN
     'hora_checkin_max_cliente',
     'hora_checkout_min_cliente',
     'hora_checkout_default',
+    'hora_checkout_domingo',                      -- v1.7 (D47)
     'prereserva_expiracion_minutos'
   );
 
@@ -3199,6 +3420,9 @@ BEGIN
   END IF;
   IF NOT (v_config ? 'hora_checkout_default') THEN
     v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkout_default');
+  END IF;
+  IF NOT (v_config ? 'hora_checkout_domingo') THEN  -- v1.7 (D47)
+    v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkout_domingo');
   END IF;
   IF NOT (v_config ? 'prereserva_expiracion_minutos') THEN
     v_claves_faltantes := array_append(v_claves_faltantes, 'prereserva_expiracion_minutos');
@@ -3345,8 +3569,17 @@ BEGIN
   v_hora_checkin_max := COALESCE((v_config->>'hora_checkin_max_cliente')::TIME, TIME '22:00');
 
   v_hora_checkout_min := COALESCE((v_config->>'hora_checkout_min_cliente')::TIME, TIME '07:00');
-  v_hora_checkout_max := COALESCE((v_config->>'hora_checkout_default')::TIME, TIME '10:00');
-  -- (TODO etapa futura: detectar último día de bloque para v_hora_checkout_max = 16:00)
+
+  -- Hora base check-out (D47, v1.7): domingo usa 'hora_checkout_domingo' (16:00),
+  -- resto de los días usa 'hora_checkout_default' (10:00).
+  -- DOW = 0 → domingo en PostgreSQL. La regla aplica sobre fecha_out (último día
+  -- de la estadía), no sobre fecha_in.
+  v_hora_checkout_max := CASE
+    WHEN EXTRACT(DOW FROM v_fecha_out) = 0
+      THEN COALESCE((v_config->>'hora_checkout_domingo')::TIME, TIME '16:00')
+    ELSE
+      COALESCE((v_config->>'hora_checkout_default')::TIME, TIME '10:00')
+  END;
 
   -- Validar/asignar hora_checkin
   IF v_hora_checkin_sol IS NULL THEN
@@ -4789,7 +5022,7 @@ INSERT INTO configuracion_general (clave, valor, descripcion, categoria) VALUES
   ('hora_checkin_default',         '13:00', 'Check-in estándar',                'horarios'),
   ('hora_checkout_default',        '10:00', 'Check-out estándar',               'horarios'),
   ('hora_checkin_domingo',         '18:00', 'Check-in cuando domingo es primer día', 'horarios'),
-  ('hora_checkout_ultimo_dia_bloque', '16:00', 'Check-out último día de bloque', 'horarios'),
+  ('hora_checkout_domingo',        '16:00', 'Check-out cuando domingo es último día (vs default 10:00)', 'horarios'),  -- v1.7 (D47)
   ('hora_checkin_max_cliente',     '22:00', 'Hora máxima que puede elegir el cliente', 'horarios'),
   ('hora_checkout_min_cliente',    '07:00', 'Hora mínima que puede elegir el cliente', 'horarios'),
   ('escalonamiento_activo',        'true',  'Master switch del escalonamiento', 'escalonamiento'),
@@ -4915,3 +5148,5 @@ SELECT cron.unschedule('cleanup_cron_history');
 - v1.5 — Corrección crítica del orden de locks en `confirmar_reserva`. Invariante fortalecida: el lock global debe tomarse antes de CUALQUIER lock (advisory, row-level con `FOR UPDATE`, o table-level). Comentario inline unificado en las 4 funciones críticas. Advertencia agregada en `validar_disponibilidad`. Limpieza documental de referencias históricas a `LOCK TABLE`. Cero cambios de schema, cero features.
 - v1.6 — Corrección de advisory locks por cabaña: cast explícito `::INTEGER` en Bloques 13, 14 y 16. Bug detectado durante ejecución DEV del Bloque 13 (`pg_advisory_xact_lock(integer, bigint) does not exist`). Nota técnica agregada en Sección 15 explicando las sobrecargas disponibles de `pg_advisory_xact_lock` y por qué el cast es necesario. Estado: Bloque 13 ya ejecutado y corregido en DEV vía `CREATE OR REPLACE`. Bloques 14-22 nacen correctos con v1.6.
 - v1.6.1 — Corrección documental sobre v1.6. Alinea narrativa de Sección 10 con el SQL real: flujos de `confirmar_reserva` (10.6) y `cancelar_prereserva` (10.7) corregidos para reflejar el orden de locks v1.5 (lock global antes del FOR UPDATE). Menciones conceptuales del lock por cabaña en Sección 10 unificadas con cast `::INTEGER`. **Cero cambios en SQL ejecutable**, schema, funciones o tests. Patch-level. Estado idéntico a v1.6 en DEV.
+- v1.7 — Incorporación de `hora_checkout_domingo` como regla operativa real (D47): si `fecha_out` es domingo, el checkout máximo es 16:00 (logística de lancha colectiva). Cambios en Bloque 13 (`crear_prereserva` lee la clave y aplica `CASE` sobre DOW), Bloque 21 (seed agrega `hora_checkout_domingo`, elimina `hora_checkout_ultimo_dia_bloque` que no se usaba) y Sección 16 (regla dominical documentada explícitamente para checkin y checkout como reglas independientes). Adicionalmente, nota operativa en Sección 15 sobre comportamiento observado en Supabase Dashboard al modificar funciones existentes, con workaround `DROP + CREATE` en runs separados. Sin cambios en locks, EXCLUDE, motor de precios, RLS, workflows ni funciones no afectadas.
+- v1.7.1 — Patch-level con cambio SQL menor + dos ajustes documentales. **Bloque 12 (`obtener_disponibilidad_rango`):** `hora_checkout_base` ahora usa `CASE WHEN EXTRACT(DOW FROM m.fecha) = 0` para alinear `vista_disponibilidad` con D47. **Sección 15:** advertencia agregada sobre `DROP FUNCTION` y dependencias, con tabla de funciones del schema según si son autónomas o tienen dependencias. **Sección 16:** frase "antes del máximo 10:00" actualizada para reflejar regla dominical. DEV debe alinearse actualizando `obtener_disponibilidad_rango()` manteniendo la firma. Sin cambios en locks, EXCLUDE, motor de precios, RLS, workflows ni resto de funciones.

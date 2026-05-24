@@ -8,7 +8,7 @@ Sistema de automatización integral para el complejo de cabañas Vita Delta.
 
 Vita Delta Reservas es un sistema de gestión operativa para un complejo de 5 cabañas. El objetivo es centralizar disponibilidad, reservas, pricing, pagos, operación interna y comunicación con huéspedes en una arquitectura automatizable, trazable y escalable.
 
-El stack actual es **Google Sheets** como base de datos operativa, **n8n** como motor de automatización y **Claude API** como capa conversacional futura. La arquitectura está diseñada para migrar progresivamente a una base de datos relacional (PostgreSQL sobre Supabase) sin rehacerse desde cero. Esa migración está formalizada en la Etapa 6B y actualmente está en fase de ejecución sobre el entorno DEV.
+El stack actual es **Google Sheets** como base de datos operativa, **n8n** como motor de automatización y **Claude API** como capa conversacional futura. La arquitectura está diseñada para migrar progresivamente a una base de datos relacional (PostgreSQL sobre Supabase) sin rehacerse desde cero. Esa migración está formalizada en la Etapa 6B, cuya ejecución sobre el entorno DEV está en cierre (Bloques 1-22 ejecutados, alineación final v1.7.1 pendiente).
 
 ---
 
@@ -28,7 +28,7 @@ Todas las etapas de diseño están cerradas. No se reabren.
 | 5A | Modelo de datos real (Sheets) | Cerrada |
 | 5B | Implementación vertical mínima | Cerrada |
 | 6A | Decisión de migración a base relacional | Cerrada |
-| 6B | Migración a Supabase / PostgreSQL | Arquitectura cerrada — ejecución DEV pendiente |
+| 6B | Migración a Supabase / PostgreSQL | Fases 0-3 ejecutadas en DEV — alineación final v1.7.1 pendiente |
 
 ### Google Sheets — Completado
 
@@ -45,13 +45,13 @@ Los Sheets `VITA_DELTA_DEV` y `VITA_DELTA_TEST` están creados y verificados.
 
 ### Workflows n8n — Core validado
 
-Stack actual sobre Sheets + n8n. Estos workflows serán reescritos contra Supabase en la Etapa 6B posterior a la ejecución de DEV.
+Stack actual sobre Sheets + n8n. **Todos estos workflows están validados en Sheets/n8n y serán reescritos contra Supabase en la Etapa 6B posterior a la ejecución de DEV.**
 
 | Workflow | Versión | DEV | TEST | Descripción |
 |---|---|---|---|---|
 | `db_recalcular_disponibilidad` | v8 | Validado | Validado | Regenera DISPONIBILIDAD_CACHE completa |
 | `db_crear_consulta` | v3 | Validado | Validado | Registra o recupera una consulta activa |
-| `db_crear_huesped` | v1 | Validado | Validado | Crea o actualiza un huésped. Validado en Sheets/n8n — será reescrito contra Supabase en etapa posterior. |
+| `db_crear_huesped` | v1 | Validado | Validado | Crea o actualiza un huésped |
 | `db_crear_prereserva` | v2 | Validado | Validado | Crea pre-reserva temporal con doble verificación de disponibilidad |
 | `db_registrar_pago` | v1 | Validado | Validado | Registra un pago reportado y pasa PRE_RESERVA a revisión manual |
 | `db_confirmar_reserva` | v1 | Validado | Validado | Confirma la reserva definitiva tras verificar el pago |
@@ -66,23 +66,27 @@ Los contratos técnicos están en `Docs/API_CONTRACTS/`.
 
 La Etapa 6B traslada la fuente de verdad operacional desde Google Sheets hacia una base de datos PostgreSQL alojada en Supabase. El objetivo es lograr integridad transaccional real, prevención estructural de double booking, latencia mucho más baja en consultas de disponibilidad, y una base sólida para la futura web pública.
 
-**Estado:** arquitectura, schema y plan de ejecución consolidados y aprobados. La ejecución sobre Supabase DEV aún no comenzó.
+**Estado:** arquitectura, schema y plan de ejecución consolidados y aprobados. Ejecución sobre Supabase DEV en cierre: Bloques 1-22 ejecutados, hotfix v1.7 aplicado (`hora_checkout_domingo = 16:00`), alineación final con schema canónico v1.7.1 pendiente (actualización de `obtener_disponibilidad_rango()`).
 
 **Importante:** mientras la migración esté en curso, **Google Sheets sigue siendo la fuente de verdad operativa**. PostgreSQL/Supabase reemplazará a Sheets solo después de:
 
-1. Ejecutar el schema completo en Supabase DEV bloque por bloque según `6B_PLAN_FASES.md`.
-2. Pasar los 36 tests funcionales y de concurrencia documentados.
-3. Cerrar formalmente DEV.
-4. Reescribir los workflows n8n para apuntar a Supabase.
-5. Validar en TEST.
-6. Recién entonces, migrar PROD.
+1. ~~Ejecutar el schema completo en Supabase DEV bloque por bloque según `6B_PLAN_FASES.md`.~~ Ejecutado (Bloques 1-22, Fases 0-3 cerradas).
+2. Pasar los 36 tests funcionales y de concurrencia documentados — los tests por bloque están aplicados; Fase 4 (tests de concurrencia con `pg_sleep`) según bitácora.
+3. Completar alineación final de DEV con `6B_SCHEMA_SQL.md v1.7.1`.
+4. Cerrar formalmente DEV.
+5. Reescribir los workflows n8n para apuntar a Supabase.
+6. Validar en TEST.
+7. Recién entonces, migrar PROD.
 
 Documentos de la etapa:
 
 - `Docs/Arquitectura/ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md` — Decisión de migrar.
-- `Docs/Arquitectura/ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md` — Arquitectura consolidada.
-- `Docs/Implementacion/6B_SCHEMA_SQL.md` — Schema PostgreSQL completo.
-- `Docs/Implementacion/6B_PLAN_FASES.md` — Plan de ejecución bloque por bloque.
+- `Docs/Arquitectura/ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md` — Arquitectura consolidada (v1.0, actualizada post-DEV).
+- `Docs/Implementacion/6B_SCHEMA_SQL.md` — Schema PostgreSQL completo (v1.7.1).
+- `Docs/Implementacion/6B_PLAN_FASES.md` — Plan de ejecución bloque por bloque (v1.1, actualizado post-ejecución).
+- `Docs/Implementacion/6B_SCHEMA_SQL_AJUSTES_PENDIENTES.md` — Ajustes documentales pendientes detectados en ejecución, a integrar al cierre de etapa.
+- `Docs/Implementacion/Pendiente_pre_produccion.md` — Cambios y configuraciones a aplicar antes del despliegue productivo.
+- `Docs/Bitacora/6B_EJECUCION_DEV.md` — Bitácora de ejecución real con entradas de Bloques 1-22 + hotfix v1.7.
 
 ---
 
@@ -126,7 +130,7 @@ El prototipo visual original de la futura web de reservas fue movido a `Prototip
 
 ## Qué no está implementado todavía
 
-- Ejecución del schema 6B en Supabase DEV (planificada, no iniciada).
+- Cierre formal de la Etapa 6B en DEV: alineación final con schema canónico v1.7.1 + commits de documentación post-DEV.
 - Reescritura de workflows n8n contra Supabase.
 - Integración con MercadoPago.
 - Integración con WhatsApp e Instagram.
@@ -139,20 +143,21 @@ El prototipo visual original de la futura web de reservas fue movido a `Prototip
 
 ## Próximo paso
 
-La base de datos actual (Sheets) y los workflows core están validados en DEV y TEST. El siguiente eje de trabajo es la **migración a Supabase (Etapa 6B)**, que debe completarse antes de habilitar canales reales o web pública.
+La base de datos actual (Sheets) y los workflows core están validados en DEV y TEST. La Etapa 6B en Supabase DEV está en cierre: Bloques 1-22 ejecutados y hotfix v1.7 aplicado. El siguiente eje de trabajo es **completar el cierre de 6B y arrancar la reescritura de workflows n8n contra Supabase**.
 
 Roadmap ordenado:
 
-1. **Etapa 6B en curso:**
-   - Ejecutar Supabase DEV bloque por bloque según `Docs/Implementacion/6B_PLAN_FASES.md`.
-   - Pasar los 36 tests funcionales y de concurrencia.
-   - Cerrar DEV formalmente.
-   - Reescribir workflows n8n contra Supabase (futuro `Docs/Implementacion/6B_REESCRITURA_WORKFLOWS.md`).
-   - Validar TEST.
+1. **Cierre de Etapa 6B (en curso):**
+   - Alinear DEV con `6B_SCHEMA_SQL.md v1.7.1` ejecutando la actualización de `obtener_disponibilidad_rango()`.
+   - Commitear documentación post-DEV (schema, bitácora, arquitectura, plan, pendientes).
+   - Confirmar cierre documental de Fase 4 (tests de concurrencia) y Fase 5 (cierre formal de DEV) según bitácora.
+   - Generar `Docs/Implementacion/6B_REESCRITURA_WORKFLOWS.md`.
+   - Reescribir workflows n8n contra Supabase.
+   - Validar en TEST.
    - Migrar PROD.
 
 2. **Posterior a base Supabase consolidada:**
-   - Activar `sistema_expirar_prereservas` en producción con Schedule Trigger.
+   - Activar `sistema_expirar_prereservas` en producción con Schedule Trigger (pg_cron en Supabase, requiere superuser).
    - Implementar la capa conversacional con Claude API conectada a los workflows determinísticos.
    - Integrar canales reales: WhatsApp e Instagram.
    - Integrar MercadoPago real.
@@ -193,15 +198,17 @@ Docs/
 ├── Implementacion/
 │   ├── README.md
 │   ├── PLAN_ETAPA_5_IMPLEMENTACION_REAL.md
-│   ├── 6B_SCHEMA_SQL.md                      ← Schema PostgreSQL completo (Etapa 6B)
-│   ├── 6B_PLAN_FASES.md                      ← Plan de ejecución bloque por bloque (Etapa 6B)
+│   ├── 6B_SCHEMA_SQL.md                      ← Schema PostgreSQL completo (v1.7.1)
+│   ├── 6B_PLAN_FASES.md                      ← Plan de ejecución bloque por bloque (v1.1, post-ejecución)
+│   ├── 6B_SCHEMA_SQL_AJUSTES_PENDIENTES.md   ← Pendientes documentales detectados en DEV
+│   ├── Pendiente_pre_produccion.md           ← Cambios a aplicar antes del despliegue productivo
 │   └── AppsScript/
 │       ├── validaciones_vita_delta_v3.gs     ← Validaciones de datos (Fase 4)
 │       ├── protecciones_vita_delta_v1.gs     ← Protecciones por entorno (Fase 5)
 │       └── auditoria_fase6_v2.gs             ← Auditoría de estructura y datos (Fase 6)
 │
-└── Bitacora/                                 ← (Futuro) Bitácora de ejecución de etapas
-    └── 6B_EJECUCION_DEV.md                   ← Se crea al arrancar Fase 0 de la ejecución 6B
+└── Bitacora/                                 ← Bitácora de ejecución de etapas
+    └── 6B_EJECUCION_DEV.md                   ← Activa — Bloques 1-22 ejecutados + hotfix v1.7
 
 Workflows/
 └── n8n/                                      ← Templates sanitizados para importar en n8n

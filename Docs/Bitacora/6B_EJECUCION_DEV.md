@@ -2,12 +2,14 @@
 # Bitácora de Ejecución — Etapa 6B Migración a Supabase (entorno DEV)
 
 **Entorno:** Supabase DEV (región `sa-east-1`)
-**Documento base:** `Docs/Implementacion/6B_SCHEMA_SQL.md v1.5`
+**Documento base inicial:** `Docs/Implementacion/6B_SCHEMA_SQL.md v1.5`
+**Documento canónico vigente:** `Docs/Implementacion/6B_SCHEMA_SQL.md v1.7.1`
 **Plan de ejecución:** `Docs/Implementacion/6B_PLAN_FASES.md v1.1`
 **Inicio:** Mayo 2026
 
 > Bitácora sanitizada. Sin credenciales, sin URLs de proyecto, sin IDs internos.
 > Cada entrada documenta: bloque ejecutado, resultado, verificación, decisión de avanzar o frenar.
+> Nota: la ejecución comenzó con schema v1.5. Durante DEV se detectaron ajustes reales y documentales que fueron incorporados sucesivamente hasta `6B_SCHEMA_SQL.md v1.7.1`.
 
 ---
 
@@ -771,7 +773,11 @@ Si en producción se quiere cambiar el tiempo durante el cual una pre-reserva qu
 
 **Para el deploy final — pg_cron:** la programación del job (`SELECT cron.schedule('expirar-prereservas', '*/5 * * * *', 'SELECT expirar_prereservas_vencidas()')`) NO se ejecutó en DEV. pg_cron en Supabase requiere ser superuser. Queda como tarea de Setup Final cuando se prepare el ambiente de producción.
 
+**Actualización posterior:** esta observación quedó superada en el Bloque 22. El schedule de pg_cron sí fue ejecutado en DEV y validado end-to-end. Ver entrada del Bloque 22.
+
 **Decisión:** avanzar a Bloque 19 (último de Fase 2 — triggers automáticos).
+
+
 
 ---
 
@@ -923,6 +929,7 @@ Migrar horizonte de 60 días (hardcoded) en `vista_disponibilidad` y `vista_cale
 | 21.3b | Cuenta de cobro real con CVU correcto | playario / 0000003100010587293072 / activa=true | exacto ✓ |
 | 21.4a/b/c | Socios (Franco, Remo, Rodrigo), temporada baseline, plantilla prereserva_creada | 3 socios, 1 temporada, 1 plantilla | exacto ✓ |
 
+
 **Comportamiento operativo a tener en cuenta — `orden_limpieza`:**
 
 Las 5 cabañas tienen `orden_limpieza` asignado (Bamboo=1, Tokio=5). Este campo es **un default sugerido** para Jennifer, no una regla rígida. En la práctica operativa, Jennifer va a priorizar según:
@@ -938,6 +945,7 @@ El `orden_limpieza` funciona como **tiebreaker** cuando todos los demás factore
 **Aprendizaje operativo de la sesión:**
 
 Mi conteo inicial de "9 claves originales + 1 nueva = 10" fue incorrecto. El seed del documento tenía 9 claves originales, después sacamos 1 (`hora_checkout_ultimo_dia_bloque`) y agregamos 1 (`horizonte_disponibilidad_dias`). Total: 9 claves. Lección: **cuando se modifica un seed, recontar las claves resultantes y no quedarse con el conteo original**.
+Nota: en DEV, `configuracion_general` queda con 10 claves porque además de las 9 claves cargadas en Bloque 21 se agregó `hora_checkout_domingo` vía hotfix. En el schema canónico v1.7.1, el seed base mantiene 9 claves porque reemplaza `hora_checkout_ultimo_dia_bloque` por `hora_checkout_domingo`.
 
 **Pendientes actualizados en `Pendientes_Pre_Produccion.md`:**
 
@@ -1085,8 +1093,25 @@ Supabase detectó incorrectamente las **variables locales PL/pgSQL** `v_config`,
 
 - Item nuevo en `Pendientes_Pre_Produccion.md`: incluir `hora_checkout_domingo = 16:00` en el seed productivo cuando se despliegue producción.
 - Bug de Supabase a reportar al encargado del documento `6B_SCHEMA_SQL.md`: la regla `hora_checkout_domingo` no estaba en el schema canónico v1.6 y debería agregarse a la próxima versión.
+**Actualización posterior:** ambos pendientes quedaron resueltos documentalmente en `6B_SCHEMA_SQL.md v1.7` y mantenidos en `v1.7.1`. La clave `hora_checkout_domingo` ya forma parte del seed canónico y D47 quedó registrada como decisión del schema.
 - Lección operativa nueva a documentar: Supabase Dashboard reescribe queries con `CREATE OR REPLACE FUNCTION` agregando `ALTER TABLE ENABLE RLS` sobre variables locales con prefijo `v_`. **Workaround: usar DROP + CREATE en lugar de CREATE OR REPLACE.**
 
 **Decisión:** **Hotfix cerrado. Fase 3 sigue completa.** El sistema queda operativo con la regla de check-out de domingo.
 
 ---
+
+### Hotfix post-Fase 3 — Alineación DEV con `6B_SCHEMA_SQL.md v1.7.1`
+
+**Estado:** Cerrado.
+
+**Motivo:** alinear `obtener_disponibilidad_rango()` con D47 (`fecha_out` domingo → checkout base 16:00).
+
+**Acción ejecutada:** `CREATE OR REPLACE FUNCTION obtener_disponibilidad_rango(...)`.
+
+**Resultado:** OK. La función fue actualizada sin necesidad de `DROP FUNCTION`.
+
+**Verificación:**
+- `regla_d47_aplicada = true`
+- Domingo 2026-06-07 devuelve `hora_checkout_base = 16:00:00`
+
+**Estado:** DEV alineado con schema v1.7.1.

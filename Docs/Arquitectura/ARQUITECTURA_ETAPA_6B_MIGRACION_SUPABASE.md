@@ -3,7 +3,7 @@
 
 **Versión:** 1.0
 **Fecha:** Mayo 2026
-**Estado:** Arquitectura consolidada — ejecución DEV iniciada; Bloque 13 cerrado; Bloques 14-22 pendientes
+**Estado:** Arquitectura consolidada — Supabase DEV ejecutado en Bloques 1-22 (Fases 0-3 cerradas), hotfix v1.7 aplicado. Schema canónico actual: `6B_SCHEMA_SQL.md v1.7.1`. Alineación final de DEV con v1.7.1 pendiente (actualización de `obtener_disponibilidad_rango()`). Documentación en cierre post-DEV.
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** `Docs/Arquitectura/ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1`
@@ -213,7 +213,7 @@ Las credenciales de Supabase (Project ID, password, anon key, service role key, 
 
 ## 5. COMPONENTES DE LA SOLUCIÓN
 
-Descripción a alto nivel de qué construye la Etapa 6B. El detalle SQL completo vive en `6B_SCHEMA_SQL.md v1.6.1`.
+Descripción a alto nivel de qué construye la Etapa 6B. El detalle SQL completo vive en `6B_SCHEMA_SQL.md v1.7.1`.
 
 ### Tablas (20 tablas)
 
@@ -267,7 +267,7 @@ Datos imprescindibles para que el sistema arranque:
 
 - 5 cabañas con capacidades correctas (Bamboo/Madre Selva/Arrebol = 3/5; Guatemala/Tokio = 2/4).
 - 3 socios (Franco, Rodrigo, "Socio 3" placeholder).
-- 9 claves de `configuracion_general` (horarios default, expiración default de pre-reserva, escalonamiento de check-ins, etc.).
+- 9 claves de `configuracion_general` (horarios default, regla operativa dominical `hora_checkout_domingo = 16:00`, expiración default de pre-reserva, escalonamiento de check-ins, etc.).
 - 1 cuenta de cobro placeholder.
 - 1 temporada baseline.
 - 1 plantilla de mensaje de ejemplo.
@@ -295,7 +295,7 @@ Detalle en `6B_PLAN_FASES.md v1.1`.
 
 ## 6. FUNCIONES CRÍTICAS
 
-Resumen breve de cada función. El SQL completo vive en `6B_SCHEMA_SQL.md v1.6.1`.
+Resumen breve de cada función. El SQL completo vive en el schema canónico actual.
 
 ### `upsert_huesped(payload JSONB)`
 
@@ -309,6 +309,8 @@ Flexible para callers diversos (bot conversacional, consultas preliminares) — 
 
 Flujo: extrae payload → valida nombre y contacto → idempotency pre-check → toma lock global + lock por cabaña → idempotency post-check (cubre carrera con el pre-check) → resuelve huésped vía `upsert_huesped` → valida cabaña/capacidad → valida disponibilidad → calcula horarios desde `configuracion_general` → INSERT → maneja `unique_violation` → log.
 
+**Regla operativa dominical (D47, v1.7):** si `fecha_out` es domingo, el checkout máximo se calcula como `hora_checkout_domingo = 16:00` (leído desde `configuracion_general`) en lugar del default 10:00. La lógica usa `CASE WHEN EXTRACT(DOW FROM v_fecha_out) = 0`. Refleja la logística de lancha colectiva.
+
 Devuelve `{ok, idempotent_match, recovery_path, id_pre_reserva, id_huesped, estado, expira_en, hora_checkin, hora_checkout}`.
 
 ### `confirmar_reserva(payload JSONB)`
@@ -316,6 +318,8 @@ Devuelve `{ok, idempotent_match, recovery_path, id_pre_reserva, id_huesped, esta
 **Convierte pre-reserva en reserva confirmada.** Soporta camino estricto (solo con pago confirmado) y camino combinado (con `permitir_pago_en_revision=true` + `validado_por`).
 
 Flujo: extrae payload → set_config para contexto de logs → **lock global PRIMERO (orden crítico v1.5)** → SELECT FOR UPDATE de la pre-reserva → lock por cabaña → verifica pago → revalida disponibilidad excluyendo la propia pre-reserva → INSERT en reservas copiando todos los campos operativos (mascotas, ninos, notas) → UPDATE pre-reserva a `convertida` → UPDATE pago con `id_reserva` → UPDATE huésped (total_reservas, primera_reserva_fecha) → log.
+
+La regla dominical D47 se hereda automáticamente: `hora_checkout` se copia desde la pre-reserva sin transformaciones.
 
 Devuelve `{ok, id_reserva, id_pre_reserva}`.
 
@@ -352,6 +356,10 @@ Usa `SELECT FOR UPDATE` internamente. **Debe llamarse solo desde funciones que y
 ### `obtener_disponibilidad_rango(fecha_desde, fecha_hasta, id_cabana)`
 
 Función de solo lectura. Devuelve disponibilidad por día para una cabaña (o todas) en un rango. Usada por vistas y eventualmente por la web pública para mostrar calendarios.
+
+**Alineación con D47 (v1.7.1):** el campo `hora_checkout_base` del resultado se calcula con `CASE WHEN EXTRACT(DOW FROM m.fecha) = 0 THEN TIME '16:00' ELSE TIME '10:00' END` para mantener consistencia con la regla dominical aplicada en `crear_prereserva`. Sin este ajuste, `vista_disponibilidad` mostraría 10:00 también para domingos, contradiciendo la regla operativa real.
+
+**Nota operativa:** la alineación de `obtener_disponibilidad_rango` con v1.7.1 queda como cambio canónico en el schema, pero en DEV todavía debe ejecutarse `CREATE OR REPLACE FUNCTION obtener_disponibilidad_rango(...)` para que la función en runtime refleje la nueva lógica. Ver Sección 12 (Estado actual) y Sección 14 (Próximo paso).
 
 ### `normalizar_telefono(input TEXT)`
 
@@ -510,7 +518,7 @@ Si se mezclara 6B con la reescritura de n8n, ante cualquier bug sería difícil 
 
 ### Hijos de esta etapa
 
-- **`Docs/Implementacion/6B_SCHEMA_SQL.md v1.6.1`** — Schema completo, funciones, triggers, vistas, seed. Aprobado.
+- **`Docs/Implementacion/6B_SCHEMA_SQL.md v1.7.1`** — Schema completo, funciones, triggers, vistas, seed. Documento canónico actual.
 - **`Docs/Implementacion/6B_PLAN_FASES.md v1.1`** — Plan operativo bloque por bloque, 36 tests, criterios de éxito/freno. Aprobado y sanitizado.
 - **`Docs/Implementacion/6B_REESCRITURA_WORKFLOWS.md`** — Futuro. NO existe todavía. Se genera después de cerrar DEV.
 
@@ -536,13 +544,20 @@ Si se mezclara 6B con la reescritura de n8n, ante cualquier bug sería difícil 
 
 ## 12. ESTADO ACTUAL
 
-### Schema aprobado técnicamente
+### Ejecución en Supabase DEV
 
-`6B_SCHEMA_SQL.md v1.6.1` cerró una secuencia de iteraciones quirúrgicas sobre el schema PostgreSQL de la Etapa 6B y queda como documento técnico base vigente para continuar la ejecución en Supabase DEV.
+Las cuatro fases iniciales de ejecución están cerradas:
 
-El documento está en estado: **"Corrección documental sobre v1.6. Bloque 13 ejecutado en DEV. Pendiente Bloques 14-22. Sin cambios operativos."**
+- **Fase 0** (Preparación) — cerrada.
+- **Fase 1** (Infraestructura base, Bloques 1-8) — cerrada.
+- **Fase 2** (Funciones y triggers, Bloques 9-19) — cerrada.
+- **Fase 3** (Vistas, seed y cron, Bloques 20-22) — cerrada.
 
-Las iteraciones cubrieron, en orden:
+Todos los Bloques 1-22 del schema canónico fueron ejecutados y bitacoreados en `Docs/Bitacora/6B_EJECUCION_DEV.md`. Adicionalmente, durante la Fase 3 (post-cierre) se aplicó el hotfix v1.7 sobre DEV: incorporación de `hora_checkout_domingo = 16:00` (regla operativa real de Vita Delta por logística de lancha colectiva) y actualización de `crear_prereserva()` para aplicar `CASE WHEN EXTRACT(DOW FROM v_fecha_out) = 0`.
+
+### Schema canónico actual
+
+`6B_SCHEMA_SQL.md v1.7.1` es el documento técnico vigente. Las iteraciones cubrieron, en orden:
 
 - `v1.1`: consolidación de ajustes técnicos estructurales sobre tablas, funciones, pagos, huéspedes, idempotencia y carga manual segura.
 - `v1.2`: endurecimiento operativo de validaciones, bloqueos, semántica de `pago_en_revision`, contexto de logs y motor de precios como pieza futura obligatoria.
@@ -551,8 +566,14 @@ Las iteraciones cubrieron, en orden:
 - `v1.5`: corrección crítica del orden de locks para que el lock global se tome antes de cualquier `SELECT ... FOR UPDATE`, evitando deadlocks entre funciones críticas.
 - `v1.6`: corrección del bug detectado en ejecución real del Bloque 13: `pg_advisory_xact_lock(integer, bigint)` no existe, por lo que el lock por cabaña debe usar cast explícito `::INTEGER`.
 - `v1.6.1`: corrección documental pura para alinear la narrativa de la Sección 10 con el SQL real y la invariante de locks. No modifica SQL ejecutable, schema ni comportamiento.
+- `v1.7`: incorporación de `hora_checkout_domingo = 16:00` como regla operativa (D47), seed actualizado, nota operativa sobre comportamiento del Supabase Dashboard al modificar funciones existentes (workaround `DROP + CREATE` en runs separados).
+- `v1.7.1`: alineación de `obtener_disponibilidad_rango()` con D47 (cálculo dominical del `hora_checkout_base`) y advertencia adicional en Sección 15 sobre `DROP FUNCTION` cuando la función tiene dependencias (triggers, vistas, otras funciones).
 
-Estado operativo actual: el Bloque 13 (`crear_prereserva`) ya fue ejecutado, corregido y verificado en Supabase DEV. Los Bloques 14 a 22 deben ejecutarse desde `6B_SCHEMA_SQL.md v1.6.1`.
+### Alineación pendiente de DEV con v1.7.1
+
+Supabase DEV tiene Bloques 1-22 ejecutados y hotfix v1.7 aplicado. **Queda pendiente la alineación final con v1.7.1 mediante la actualización de `obtener_disponibilidad_rango()`**, para que `vista_disponibilidad` refleje correctamente checkout dominical 16:00.
+
+La actualización es un `CREATE OR REPLACE FUNCTION obtener_disponibilidad_rango(...)` manteniendo la misma firma. Si el Supabase Dashboard interfiere con la ejecución (como ocurrió durante el hotfix v1.7 con `crear_prereserva`), no usar `DROP ... CASCADE` porque la función está siendo usada por `vista_disponibilidad`; evaluar workaround específico preservando esa dependencia. Ver Sección 15 del schema canónico.
 
 ### Plan de fases aprobado y sanitizado
 
@@ -567,15 +588,7 @@ Estado operativo actual: el Bloque 13 (`crear_prereserva`) ya fue ejecutado, cor
 
 ### Arquitectura 6B consolidada
 
-Este documento (`ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md v1.0`) cierra la trilogía de documentos de la etapa: schema (qué), plan (cómo) y arquitectura (por qué).
-
-### Próximo paso
-
-Tres opciones, en orden de preferencia:
-
-1. **Ejecutar Fase 0 → Bloque 1 → bitácora → avance bloque por bloque** en Supabase DEV siguiendo `6B_PLAN_FASES.md v1.1`. Es la opción recomendada.
-2. Subir los documentos sanitizados al repo de GitHub si todavía no lo hiciste.
-3. (No recomendado) Empezar a redactar `6B_REESCRITURA_WORKFLOWS.md` antes de cerrar DEV. Esto introduce riesgo: si ejecutar el schema revela algo que requiere una nueva versión del schema, la reescritura quedaría desactualizada antes de empezar.
+Este documento (`ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md v1.0`) cierra la trilogía de documentos de la etapa: schema (qué), plan (cómo) y arquitectura (por qué). Se mantiene en `v1.0` por decisión operativa aunque su contenido ha sido actualizado para reflejar el estado de ejecución post-DEV.
 
 ---
 
@@ -585,7 +598,7 @@ Tres opciones, en orden de preferencia:
 
 **Riesgo:** un bloque falla a mitad de camino y deja el schema en estado parcial.
 
-**Mitigación:** cada bloque tiene su rollback documentado en v1.6.1. El plan de fases (v1.1) exige verificación post-ejecución antes de avanzar. Si algo falla, se detiene la ejecución y se evalúa: rollback de bloque, reset del proyecto (si DEV está vacío), o investigación con bitácora.
+**Mitigación:** cada bloque tiene su rollback documentado en el schema canónico actual. El plan de fases (v1.1) exige verificación post-ejecución antes de avanzar. Si algo falla, se detiene la ejecución y se evalúa: rollback de bloque, reset del proyecto (si DEV está vacío), o investigación con bitácora.
 
 ### Mala configuración de secrets
 
@@ -638,33 +651,39 @@ Si por error se sube algo: rotar credenciales inmediatamente en Supabase, hacer 
 
 **Riesgo:** Supabase suspende un proyecto inactivo o un accidente borra DEV.
 
-**Mitigación:** el schema completo está en `6B_SCHEMA_SQL.md v1.6.1` versionado en GitHub. Recrear DEV es ejecutar el plan de fases desde Fase 0. El seed mínimo se carga vía Bloque 21. Tiempo total de recreación: 4-6 horas. No se pierde nada irrecuperable.
+**Mitigación:** el schema completo está en `6B_SCHEMA_SQL.md v1.7.1` versionado en GitHub. Recrear DEV es ejecutar el plan de fases desde Fase 0. El seed mínimo se carga vía Bloque 21. Tiempo total de recreación: 4-6 horas. No se pierde nada irrecuperable.
 
 ---
 
 ## 14. PRÓXIMO PASO
 
-Plan secuencial recomendado:
+Con la ejecución DEV cerrada (Bloques 1-22, Fases 0-3) y el hotfix v1.7 aplicado, el camino crítico inmediato es **cerrar la etapa documentalmente y alinear DEV con v1.7.1**. Plan secuencial:
 
-1. **Subir documentos sanitizados a GitHub.**
-   - `Docs/Implementacion/6B_SCHEMA_SQL.md v1.6.1` (revisado para sanitización, limpio).
-   - `Docs/Implementacion/6B_PLAN_FASES.md v1.1` (sanitizado).
-   - `Docs/Arquitectura/ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md v1.0` (este documento).
+1. **Cerrar documentación post-DEV.**
+   - Confirmar que la trilogía (`6B_SCHEMA_SQL.md v1.7.1`, `6B_PLAN_FASES.md v1.1`, `ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md v1.0`) refleja el estado real del sistema.
+   - Confirmar que `6B_SCHEMA_SQL_AJUSTES_PENDIENTES.md` y `Pendiente_pre_produccion.md` están actualizados respecto a v1.7.1.
+   - Confirmar que la bitácora de ejecución (`Docs/Bitacora/6B_EJECUCION_DEV.md`) tiene cerradas las entradas de Bloques 1-22 + hotfix v1.7.
 
-2. **Ejecutar Fase 0** del plan de fases.
-   - Verificar precondiciones (proyecto Supabase DEV creado, extensiones disponibles, credenciales fuera del repo).
-   - Smoke test del SQL Editor.
-   - NO ejecutar SQL todavía.
+2. **Alinear DEV con v1.7.1.**
+   - Ejecutar `CREATE OR REPLACE FUNCTION obtener_disponibilidad_rango(...)` en Supabase DEV manteniendo la misma firma.
+   - Verificar que `vista_disponibilidad` ahora muestra `hora_checkout_base = 16:00` para domingos.
+   - Si el Supabase Dashboard interfiere (ver Sección 15 del schema): NO usar `DROP ... CASCADE` porque la función tiene `vista_disponibilidad` como dependiente. Evaluar workaround específico.
+   - Documentar el resultado de esta actualización en la bitácora.
 
-3. **Ejecutar Bloque 1** (extensiones).
-   - Habilitar `btree_gist` y `pg_cron`.
-   - Verificación post-ejecución.
+3. **Commitear los documentos actualizados al repositorio.**
+   - Schema canónico v1.7.1.
+   - Bitácora actualizada con el cierre de alineación v1.7.1.
+   - Arquitectura actualizada (este documento).
+   - Plan de fases (sin cambios respecto a v1.1).
+   - Pendientes pre-producción.
+   - Archivo de ajustes pendientes documentales.
 
-4. **Avanzar bloque por bloque** con bitácora, siguiendo Fases 1 → 2 → 3 → 4 → 5 del plan.
+4. **Definir o cerrar Fase 4 / Fase 5 si corresponde.**
+   - Fase 4 (tests de concurrencia con `pg_sleep`) y Fase 5 (cierre formal de DEV como base operativa) ya están descritas en `6B_PLAN_FASES.md v1.1`. Evaluar si se ejecutan ahora, se difieren a la etapa de hardening previa a TEST, o se redefinen alcance.
 
-5. **Cerrar DEV** formalmente (Fase 5): "Supabase DEV listo como base de datos operativa".
-
-6. **Recién después, generar `6B_REESCRITURA_WORKFLOWS.md`** para empezar a adaptar n8n a la nueva base de datos. No antes.
+5. **Preparar `6B_REESCRITURA_WORKFLOWS.md`.**
+   - Documento operativo para adaptar workflows n8n existentes contra Supabase como nueva fuente de verdad.
+   - Punto de partida natural una vez cerrada la base de datos. NO se inicia antes porque cualquier cambio inesperado en el schema obligaría a reescribir el documento de workflows.
 
 Las etapas posteriores (motor de precios en PostgreSQL, web pública, MercadoPago real, contabilidad, RLS, Supabase Auth, migración productiva) tienen cada una su propio plan a definir cuando llegue el momento.
 
@@ -673,6 +692,7 @@ Las etapas posteriores (motor de precios en PostgreSQL, web pública, MercadoPag
 **FIN DEL DOCUMENTO — `ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md v1.0`**
 
 **Trazabilidad:**
-- v1.0 — Primera redacción consolidada (2026-05-22). Cierra documentalmente la trilogía de la Etapa 6B: schema (v1.6.1), plan (v1.1) y arquitectura (v1.0). Sanitizado para GitHub desde el inicio.
+- v1.0 — Primera redacción consolidada (2026-05-22). Cierra documentalmente la trilogía de la Etapa 6B: schema (v1.6.1 al momento de redacción inicial), plan (v1.1) y arquitectura (v1.0). Sanitizado para GitHub desde el inicio.
+- v1.0 (actualización documental post-DEV, 2026-05-24) — Sin bump de versión por decisión operativa. Se actualizan: estado en header (Bloques 1-22 ejecutados, hotfix v1.7 aplicado, alineación v1.7.1 pendiente en DEV), Sección 5 (seed con `hora_checkout_domingo`), Sección 6 (D47 en `crear_prereserva` y alineación v1.7.1 de `obtener_disponibilidad_rango`), Sección 11 (referencia al schema canónico v1.7.1), Sección 12 (historia completa hasta v1.7.1 + estado real de Fases 0-3 cerradas), Sección 13 (mitigación referenciando schema canónico actual), Sección 14 (próximo paso reescrito para reflejar cierre post-DEV en lugar de inicio de ejecución). No se rediseña arquitectura, principios, estrategia anti-double-booking, motor de precios, RLS ni workflows.
 
-**Estado:** Arquitectura consolidada — base de datos lista para ejecución.
+**Estado:** Arquitectura consolidada — Supabase DEV ejecutado en Bloques 1-22 (Fases 0-3 cerradas), hotfix v1.7 aplicado, alineación final con v1.7.1 pendiente. Documentación en cierre post-DEV.

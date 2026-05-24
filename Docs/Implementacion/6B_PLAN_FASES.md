@@ -3,14 +3,31 @@
 
 **Versión:** 1.1
 **Fecha:** Mayo 2026
-**Estado:** Propuesta para revisión — NO EJECUTAR TODAVÍA
-**Documento base:** `Docs/Implementacion/6B_SCHEMA_SQL.md v1.6.1` (aprobado)
+**Estado:** Plan ejecutado en Supabase DEV — Fases 0-3 cerradas; Fase 4/5 según bitácora; documento conservado como referencia operativa histórica.
+**Documento base:** `Docs/Implementacion/6B_SCHEMA_SQL.md v1.7.1`
 **Entorno objetivo:** Supabase DEV (proyecto `__SUPABASE_PROJECT_ID_DEV__`, región `sa-east-1`)
 **Autores:** Franco (titular) + Claude (arquitecto)
 
-> **IMPORTANTE:** Este documento describe **cómo ejecutar el SQL aprobado**, no genera SQL nuevo. La ejecución se hace bloque por bloque en Supabase DEV con verificación post-ejecución. **No ejecutar nada hasta tener este plan aprobado.**
+> **IMPORTANTE:** Este documento describe **cómo ejecutar el SQL aprobado**, no genera SQL nuevo. La ejecución se hace bloque por bloque en Supabase DEV con verificación post-ejecución.
+
+> **NOTA DE EJECUCIÓN POST-DEV:** Este plan fue utilizado como guía operativa para la ejecución en Supabase DEV. Bloques 1-22 ejecutados y bitacoreados. Hotfix v1.7 aplicado (`hora_checkout_domingo = 16:00`). **Pendiente alinear `obtener_disponibilidad_rango()` con `6B_SCHEMA_SQL.md v1.7.1`** mediante `CREATE OR REPLACE FUNCTION` si todavía no fue ejecutado en DEV. El detalle de cada bloque vive en `Docs/Bitacora/6B_EJECUCION_DEV.md`.
 
 > **NOTA DE SANITIZACIÓN (v1.1):** Este documento está sanitizado para GitHub. Las credenciales reales (Project ID, Project URL, database password, anon key, service role key, connection strings) deben vivir **fuera del repositorio**: en un gestor de contraseñas, en `.env` no versionado (cubierto por `.gitignore`), o en credentials de n8n cuando aplique. Los placeholders del estilo `__SUPABASE_PROJECT_ID_DEV__` deben reemplazarse localmente al momento de ejecutar; nunca commitear los valores reales.
+
+---
+
+## ACTUALIZACIÓN POST-EJECUCIÓN DEV
+
+Este plan fue utilizado como guía de ejecución para Supabase DEV. La ejecución avanzó por los 22 bloques, con hallazgos documentados en bitácora y consolidaciones posteriores del schema hasta `6B_SCHEMA_SQL.md v1.7.1`.
+
+Esta actualización no cambia el plan operativo original. Solo actualiza estado, referencias y próximos pasos para que el documento no parezca pendiente de ejecución. El plan original se conserva como referencia operativa para:
+
+- Auditar el procedimiento usado en DEV.
+- Recrear DEV desde cero si fuera necesario.
+- Ejecutar TEST cuando llegue el momento.
+- Ejecutar PROD cuando llegue el momento.
+
+---
 
 ---
 
@@ -69,7 +86,7 @@ Versión de sanitización para GitHub. **Cero cambios operativos.** Mismo plan, 
 
 ### Qué se va a ejecutar
 
-Los 22 bloques SQL del documento `6B_SCHEMA_SQL.md v1.6.1`, ejecutados uno por uno en Supabase DEV (no en producción), con verificación post-ejecución en cada paso. El plan se organiza en 5 fases:
+Los 22 bloques SQL del documento `6B_SCHEMA_SQL.md v1.7.1`, ejecutados uno por uno en Supabase DEV (no en producción), con verificación post-ejecución en cada paso. El plan se organiza en 5 fases:
 
 - **Fase 0** — Preparación (no ejecuta SQL).
 - **Fase 1** — Infraestructura base (Bloques 1-8): extensiones, enums, tablas, constraints.
@@ -103,6 +120,8 @@ Un Supabase DEV con schema completo, funciones críticas operativas, seed mínim
 ---
 
 ## 2. PRECONDICIONES ANTES DE EJECUTAR
+
+> **Nota post-ejecución:** esta sección se conserva como referencia histórica del procedimiento usado. DEV ya fue ejecutado siguiendo este plan; no debe interpretarse como pendiente inicial. Los pasos siguen siendo útiles para recrear DEV/TEST/PROD en el futuro.
 
 Checklist obligatorio. **No avanzar a Fase 0 hasta cumplir todos los puntos.**
 
@@ -143,7 +162,7 @@ Si alguna no aparece como disponible:
 
 ### 2.4 Documentación local
 
-- [ ] Tener copia local de `Docs/Implementacion/6B_SCHEMA_SQL.md v1.6.1`.
+- [ ] Tener copia local de `Docs/Implementacion/6B_SCHEMA_SQL.md v1.7.1`.
 - [ ] Tener este documento (`6B_PLAN_FASES.md`) abierto durante la ejecución.
 - [ ] Tener claro que el SQL se ejecuta **por bloques**, no copiando todo el archivo de una vez.
 
@@ -164,11 +183,13 @@ Si alguna no aparece como disponible:
 
 ## 3. CONVENCIÓN DE EJECUCIÓN
 
+> **Nota post-ejecución:** esta sección se conserva como referencia histórica del procedimiento usado. DEV ya fue ejecutado siguiendo este plan; no debe interpretarse como pendiente inicial. Los pasos siguen siendo útiles para recrear DEV/TEST/PROD en el futuro.
+
 Reglas obligatorias para cada bloque:
 
 ### 3.1 Un bloque a la vez
 
-- Copiar el SQL del bloque desde `6B_SCHEMA_SQL.md v1.6.1`.
+- Copiar el SQL del bloque desde `6B_SCHEMA_SQL.md v1.7.1`.
 - Pegar en SQL Editor de Supabase.
 - Ejecutar.
 - **No** copiar el siguiente bloque hasta haber verificado el actual.
@@ -183,7 +204,7 @@ Cada ejecución muestra mensajes en Supabase. **Leerlos antes de continuar.**
 
 ### 3.3 Correr la verificación post-ejecución
 
-Cada bloque del documento SQL v1.6.1 incluye un **query de verificación** (sección "Verificación post-ejecución" dentro del bloque). Es obligatorio correrlo.
+Cada bloque del documento SQL v1.7.1 incluye un **query de verificación** (sección "Verificación post-ejecución" dentro del bloque). Es obligatorio correrlo.
 
 Si el resultado del query de verificación NO coincide con el esperado:
 - **Frenar.**
@@ -196,7 +217,7 @@ Cualquier error técnico (no esperado) durante la ejecución de un bloque o su v
 - **NO ejecutar el siguiente bloque.**
 - **NO modificar el SQL a mano "para que ande".**
 - Documentar el error literal (mensaje, código `SQLSTATE`, contexto).
-- Revisar el bloque, el documento v1.6.1, y este plan antes de cualquier acción.
+- Revisar el bloque, el documento v1.7.1, y este plan antes de cualquier acción.
 
 ### 3.5 No continuar por intuición
 
@@ -230,14 +251,16 @@ Mientras se ejecuta este plan en Supabase DEV, **no tocar workflows n8n** que ap
 
 ## 4. TABLA DE BLOQUES SQL
 
-Tabla de los 22 bloques del documento v1.6.1. Cada bloque tiene:
+> **Nota post-ejecución:** esta sección se conserva como referencia histórica del procedimiento usado. DEV ya fue ejecutado siguiendo este plan; no debe interpretarse como pendiente inicial. Los pasos siguen siendo útiles para recrear DEV/TEST/PROD en el futuro.
+
+Tabla de los 22 bloques del documento v1.7.1. Cada bloque tiene:
 - **#** — número de bloque.
 - **Nombre** — corto, identificable.
 - **Crea/modifica** — qué hace.
 - **Depende de** — qué bloques deben haberse ejecutado antes.
 - **Riesgo** — bajo / medio / alto.
 - **Verificación post-ejecución** — query a correr.
-- **Rollback** — disponible en el documento v1.6.1.
+- **Rollback** — disponible en el documento v1.7.1.
 - **Criterio para avanzar** — qué tiene que estar OK para pasar al siguiente.
 - **Criterio para frenar** — qué dispara una pausa.
 
@@ -324,6 +347,8 @@ Tabla de los 22 bloques del documento v1.6.1. Cada bloque tiene:
 
 ## 5. ORDEN RECOMENDADO DE EJECUCIÓN (5 FASES)
 
+> **Nota post-ejecución:** esta sección se conserva como referencia histórica del procedimiento usado. DEV ya fue ejecutado siguiendo este plan (Fases 0-3 cerradas, Fase 4/5 según bitácora); no debe interpretarse como pendiente inicial. Los pasos siguen siendo útiles para recrear DEV/TEST/PROD en el futuro.
+
 ### FASE 0 — Preparación (NO ejecuta SQL)
 
 Objetivo: verificar que el entorno está listo. **Sin SQL todavía.**
@@ -344,7 +369,7 @@ Objetivo: verificar que el entorno está listo. **Sin SQL todavía.**
    ```
    Debe devolver 1 fila con la fecha actual, nombre del DB y versión de PostgreSQL.
 5. Confirmar que no estamos en producción (verificar nombre del proyecto).
-6. Tener `6B_SCHEMA_SQL.md v1.6.1` abierto en otra ventana.
+6. Tener `6B_SCHEMA_SQL.md v1.7.1` abierto en otra ventana.
 7. Tener este documento abierto.
 
 **Criterio para avanzar a Fase 1:** todos los puntos del checklist OK.
@@ -395,9 +420,9 @@ Objetivo: crear toda la lógica almacenada. **Esta fase es la más sensible.**
 
 **Orden estricto (ver dependencias en Sección 4):**
 
-1. **Bloque 9** — `normalizar_telefono` + columna + trigger. **Correr el test funcional** con los 6 casos del documento v1.6.1. Si alguno falla, frenar.
+1. **Bloque 9** — `normalizar_telefono` + columna + trigger. **Correr el test funcional** con los 6 casos del documento v1.7.1. Si alguno falla, frenar.
 
-2. **Bloque 10** — `upsert_huesped`. Correr los 3 tests funcionales del documento v1.5.
+2. **Bloque 10** — `upsert_huesped`. Correr los 3 tests funcionales del documento v1.7.1.
 
 3. **Bloque 11** — `validar_disponibilidad`. Solo verificar que compila. (Tests reales en Fase 4 con datos del seed.)
 
@@ -1334,9 +1359,9 @@ COMMIT;
 
 > **No usar `DROP SCHEMA CASCADE` ni equivalentes destructivos sin entender el estado actual.**
 
-El rollback debe ser proporcional al problema. Cada bloque del documento v1.6.1 incluye su propio rollback documentado. Usar ese primero.
+El rollback debe ser proporcional al problema. Cada bloque del documento v1.7.1 incluye su propio rollback documentado. Usar ese primero.
 
-### 7.2 Rollback por bloque (incluido en v1.6.1)
+### 7.2 Rollback por bloque (incluido en v1.7.1)
 
 Cada bloque del documento SQL tiene una sección "**Rollback:**" con el SQL exacto para revertir. Ejemplos:
 
@@ -1452,6 +1477,8 @@ DROP TYPE IF EXISTS estado_prereserva_enum;
 
 ## 8. CRITERIOS DE ÉXITO DE 6B EJECUCIÓN DEV
 
+> **Estado post-ejecución:** estos criterios fueron usados para validar DEV. El detalle real de qué pasó en cada bloque vive en `Docs/Bitacora/6B_EJECUCION_DEV.md`. Esta sección se conserva como referencia del estándar de éxito; no se inventan resultados en este documento — la bitácora es la fuente de verdad de la ejecución real.
+
 DEV está listo como base de datos operativa cuando se cumplen todos estos puntos:
 
 ### 8.1 Infraestructura
@@ -1560,7 +1587,7 @@ Para que quede explícito, los siguientes ítems quedan **fuera del alcance** de
 - **Integración real con MercadoPago.** Solo se simula con `medio_pago='mp_link'` y `proveedor='mercadopago'` en pagos manuales.
 - **Integración real con WhatsApp.** Solo se simulan envíos con plantillas.
 - **Integración real con Instagram DMs.**
-- **RLS (Row Level Security) completo.** Documentado como principio en v1.6.1; se implementa cuando exista Supabase Auth.
+- **RLS (Row Level Security) completo.** Documentado como principio en el schema canónico; se implementa cuando exista Supabase Auth.
 - **Supabase Auth.** No se configura ahora.
 - **Contabilidad completa.** Documentada como contemplada futura (D32) pero no implementada.
 - **Migración productiva de Sheets.** Pertenece a etapa posterior, con plan propio.
@@ -1570,19 +1597,21 @@ Para que quede explícito, los siguientes ítems quedan **fuera del alcance** de
 
 ---
 
-## 11. PRÓXIMO PASO DESPUÉS DE APROBAR ESTE PLAN
+## 11. PRÓXIMO PASO
 
-Una vez aprobado este documento:
+Con la ejecución DEV cerrada (Fases 0-3) y el hotfix v1.7 aplicado, el camino crítico inmediato es **cerrar la etapa documentalmente y alinear DEV con v1.7.1**. Plan secuencial:
 
-1. **Ejecutar Fase 0** (preparación, no ejecuta SQL).
-2. **Ejecutar Bloque 1** en Supabase DEV.
-3. **Correr verificación post-ejecución** del Bloque 1.
-4. **Avanzar bloque por bloque** siguiendo este plan, con bitácora.
-5. **Completar Fase 4** (tests).
-6. **Cierre formal de Fase 5.**
-7. **Recién después:** generar `Docs/Implementacion/6B_REESCRITURA_WORKFLOWS.md` para empezar a adaptar n8n a la nueva base.
+1. **Completar alineación final con `6B_SCHEMA_SQL.md v1.7.1`** si todavía está pendiente. Ejecutar `CREATE OR REPLACE FUNCTION obtener_disponibilidad_rango(...)` en Supabase DEV manteniendo la misma firma. Verificar que `vista_disponibilidad` ahora muestra `hora_checkout_base = 16:00` para domingos. Si el Supabase Dashboard interfiere, no usar `DROP ... CASCADE` (la función tiene `vista_disponibilidad` como dependiente; ver Sección 15 del schema canónico). Documentar el resultado en la bitácora.
 
-**Importante:** este orden es secuencial. No empezar la reescritura de workflows n8n hasta tener DEV cerrado. Hacer las dos cosas en paralelo introduce riesgos de debugging que no compensan.
+2. **Commitear documentación post-DEV**: schema (`v1.7.1`), bitácora actualizada, arquitectura (`v1.0` actualizada), plan (este documento, `v1.1` con actualización post-ejecución) y pendientes pre-producción.
+
+3. **Confirmar cierre documental de Fase 4/Fase 5 según bitácora.** Evaluar si los tests de concurrencia con `pg_sleep` y el cierre formal de DEV se ejecutaron, se difieren a hardening previo a TEST, o se redefine el alcance.
+
+4. **Generar `Docs/Implementacion/6B_REESCRITURA_WORKFLOWS.md`** como documento operativo para adaptar workflows n8n contra Supabase como nueva fuente de verdad.
+
+5. **Iniciar etapa de adaptación de workflows n8n contra Supabase DEV.** Punto de partida natural una vez cerrada la base de datos. NO se inicia antes porque cualquier cambio inesperado en el schema obligaría a reescribir el documento de workflows.
+
+Las etapas posteriores (motor de precios en PostgreSQL, web pública, MercadoPago real, contabilidad, RLS, Supabase Auth, migración productiva) tienen cada una su propio plan a definir cuando llegue el momento.
 
 ---
 
@@ -1591,7 +1620,8 @@ Una vez aprobado este documento:
 **Trazabilidad:**
 - v1.0 — Primera propuesta de plan de fases (2026-05-22).
 - v1.1 — Sanitización para GitHub: Project ID y Project URL reales reemplazados por placeholders. Nota de sanitización agregada. Cero cambios operativos.
+- v1.1 (actualización post-ejecución DEV, 2026-05-24) — Referencias actualizadas a `6B_SCHEMA_SQL.md v1.7.1`; plan marcado como ejecutado/conservado como referencia; próximo paso actualizado hacia cierre documental y reescritura de workflows. Notas post-ejecución agregadas en Secciones 2, 3, 4, 5 y 8 para aclarar que las secciones se conservan como referencia histórica. Cero cambios estructurales; el plan operativo original se preserva como referencia para recrear DEV/TEST/PROD. Se mantiene versión 1.1 por decisión operativa.
 
-**Estado:** Propuesta para revisión — NO EJECUTAR TODAVÍA.
+**Estado:** Plan ejecutado en Supabase DEV; conservado como referencia operativa para recrear DEV/TEST/PROD y auditar la ejecución.
 
 **Estado para GitHub:** Sanitizado. Los placeholders `__SUPABASE_PROJECT_ID_DEV__`, `__SUPABASE_PROJECT_URL_DEV__`, `__SUPABASE_DB_PASSWORD__`, `__SUPABASE_CONNECTION_STRING__`, `__SUPABASE_ANON_KEY__` y `__SUPABASE_SERVICE_ROLE_KEY__` deben reemplazarse localmente al momento de ejecutar y nunca commitearse con valores reales.
