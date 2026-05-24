@@ -633,3 +633,53 @@ Esto habilita queries futuras tipo "cancelaciones por motivo en último mes" o "
 **Decisión:** avanzar a Bloque 16 (`crear_bloqueo` — alto riesgo) en próxima sesión con cabeza fresca.
 
 ---
+
+### Bloque 16 — Función `crear_bloqueo`
+
+**Estado:** Cerrado. **Función operativa de gestión de disponibilidad.** Permite crear bloqueos específicos (1 cabaña) o totales (todas) con validaciones de conflicto contra reservas, pre-reservas y bloqueos existentes.
+
+**SQL ejecutado:** Función `crear_bloqueo(payload JSONB) RETURNS JSONB` (~225 líneas). Implementa 5 secciones: extracción y validación de payload, locks (global siempre + por cabaña con `::INTEGER` si aplica), validaciones de conflicto en 2 ramas (específico vs total), INSERT con captura defensiva de `exclusion_violation`, log con `tipo_bloqueo` diferenciado.
+
+**Documento usado:** `6B_SCHEMA_SQL.md v1.6`. El cast `::INTEGER` en `pg_advisory_xact_lock(1, v_id_cabana::INTEGER)` venía aplicado desde la corrección documental del Bloque 13.
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Verificaciones post-ejecución (12 pasos):**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 16.1 | Función registrada | `crear_bloqueo, jsonb, VOLATILE, 1` | exacto ✓ |
+| 16.2 | Setup en 5 pasos (2 cabañas, config, pre-reserva vigente en B, reserva confirmada en A, bloqueo previo en A diciembre) | id_cabana_A=10, id_cabana_B=11, pre_reserva 8 sobre B, reserva 3 sobre A (via confirmar_reserva), bloqueo 2 en A diciembre | exacto ✓ — setup atómico en pasos chicos |
+| 16.3 | T-BL-1: Bloqueo específico OK en Cabaña A, septiembre (libre) | `ok:true, id_bloqueo:3, tipo_bloqueo:cabana_especifica` | exacto ✓ |
+| 16.4 | T-BL-2: Bloqueo total OK en enero 2027 (libre) | `ok:true, id_bloqueo:4, id_cabana:null, tipo_bloqueo:total` | exacto ✓ |
+| 16.5 | T-BL-3/4/5: errores de payload (UNION ALL) | `payload_invalido`, `fechas_invalidas`, `motivo_invalido` | exacto ✓ |
+| 16.6 | T-BL-6: Conflicto con reserva (Cabaña A en noviembre) | `error:conflicto_con_reserva, reservas_en_conflicto:[3]` | exacto ✓ — ID operativo reportado |
+| 16.7 | T-BL-7: Conflicto con pre-reserva (Cabaña B en octubre) | `error:conflicto_con_prereserva, prereservas_en_conflicto:[8], motivo:descriptivo` | exacto ✓ |
+| 16.8 | T-BL-8: Bloqueo solapado (Cabaña A en diciembre) | `error:bloqueo_solapado, bloqueos_en_conflicto:[2], motivo:descriptivo` | exacto ✓ — incluye nota "(específico o total)" |
+| 16.9 | T-BL-9: Cabaña inexistente | `error:cabana_no_existe` | exacto ✓ |
+| 16.10 | Estado final tabla bloqueos | 3 bloqueos (id 2 setup, id 3 T-BL-1, id 4 T-BL-2). Tests rechazados no escribieron. | exacto ✓ |
+| 16.11 | Logs (5: 3 de setup + 2 de bloqueos exitosos) | Logs con `tipo_bloqueo` diferenciado, `modificado_por` = creado_por del payload | exacto ✓ |
+| 16.12 | Limpieza + sanity check global | 11 tablas en 0 | exacto ✓ |
+
+**Comportamientos clave validados:**
+
+1. **Diferenciación de flujos específico vs total:** La función bifurca correctamente según `id_cabana IS NULL`. El específico toma lock por cabaña con `::INTEGER` (corrección v1.6), valida solo en esa cabaña. El total no toma lock por cabaña, valida contra todas las cabañas.
+
+2. **Detección de conflictos con IDs operativos:** Los 3 tipos de conflicto (`conflicto_con_reserva`, `conflicto_con_prereserva`, `bloqueo_solapado`) devuelven arrays con los IDs específicos del conflicto. Esto permite a n8n/operadores actuar quirúrgicamente (mover reserva específica, cancelar pre-reserva específica, etc.).
+
+3. **Validaciones secuenciales con corte temprano:** Si una validación falla, las siguientes no se ejecutan. El JSON output contiene la **primera causa de conflicto encontrada**, no todas. Diseño correcto: operacionalmente se resuelve un problema a la vez.
+
+4. **Motivos descriptivos en los conflictos:** Además del código de error y los IDs, los errores `conflicto_con_prereserva` y `bloqueo_solapado` incluyen un campo `motivo` con texto humano ("Cancelarlas antes de bloquear...", "Ya hay un bloqueo activo (específico o total)..."). Ayuda contextual para el usuario operativo.
+
+5. **EXCLUDE constraint como red de seguridad:** El INSERT está envuelto en `BEGIN ... EXCEPTION WHEN exclusion_violation` aunque las validaciones manuales ya cubren todos los casos conocidos. Es defensa estructural residual para race conditions extremas o bugs no detectados.
+
+**Decisión de diseño confirmada — Bloqueos totales sin LOCK TABLE:** La versión v1.4 eliminó el `LOCK TABLE bloqueos IN ACCESS EXCLUSIVE MODE` que antes se usaba para bloqueos totales. La serialización ahora pasa exclusivamente por el lock global de disponibilidad `pg_advisory_xact_lock(10, 0)`. Esto evita contención brusca contra otras operaciones de lectura mientras se valida un bloqueo total. Las validaciones manuales se mantienen.
+
+**Detalle técnico — Lock por cabaña sobre cabaña inexistente:** En T-BL-9 la función toma el lock por cabaña `pg_advisory_xact_lock(1, 99999::INTEGER)` **antes** de verificar que la cabaña existe. Esto no es problema: los advisory locks son virtuales (solo identifican un número), no requieren que el registro físico exista, y se liberan al fin de la transacción. Mantener el orden uniforme "global → por cabaña → validar" simplifica el flujo sin penalización real.
+
+**Diseño operativo del log — `modificado_por` con identidad humana:** A diferencia de otras funciones del schema donde `modificado_por` recibe el nombre de la función (ej. `crear_prereserva`, `confirmar_reserva`), `crear_bloqueo` usa el valor del campo `creado_por` del payload. Razón operativa: los bloqueos son acciones humanas explícitas (Vicky decide mantener una cabaña, Franco se queda una semana). Saber quién originó el bloqueo es más relevante que saber qué función lo procesó.
+
+**Decisión:** avanzar a Bloque 17 (`registrar_pago`) en próxima sesión.
+
+---
+
