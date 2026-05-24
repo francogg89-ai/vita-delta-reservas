@@ -774,3 +774,61 @@ Si en producción se quiere cambiar el tiempo durante el cual una pre-reserva qu
 **Decisión:** avanzar a Bloque 19 (último de Fase 2 — triggers automáticos).
 
 ---
+
+### Bloque 19 — Triggers automáticos (último de Fase 2)
+
+**Estado:** Cerrado. **Capa de automatización transversal del sistema.** Provee `updated_at` automático en 9 tablas y log automático de transiciones de estado en 3 tablas críticas (pre_reservas, reservas, pagos).
+
+**SQL ejecutado:** 2 funciones de trigger (`set_updated_at`, `log_cambio_estado`) + 12 triggers (9 BEFORE UPDATE para updated_at + 3 AFTER UPDATE OF estado para log_cambio_estado). Sin cambios respecto a `6B_SCHEMA_SQL.md v1.6`.
+
+**Resultado de ejecución:** `Success. No rows returned`.
+
+**Verificaciones post-ejecución (6 verifies + 1 corrección):**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 19.1 | 2 funciones trigger registradas | `set_updated_at, log_cambio_estado` con `retorna: trigger, n_argumentos: 0` | exacto ✓ |
+| 19.2 | Triggers registrados en information_schema | 13 únicos (9 updated_at + 3 log estado + 1 telefono_norm del B9) | exacto ✓ |
+| 19.3 (intento inicial) | UPDATE manual en config dispara set_updated_at | error: columna `created_at` no existe en `configuracion_general` | **bug del test** — la tabla configuracion_general NO tiene created_at |
+| 19.3 (corregido sobre huespedes) | UPDATE manual en huespedes dispara set_updated_at | `updated_at_avanzo: false` (timestamps idénticos al microsegundo) | **comportamiento inesperado** — investigado |
+| 19.3-bis (en 2 transacciones separadas) | INSERT y UPDATE en runs separados | `trigger_funciono: true, segundos_diferencia: 29` | exacto ✓ — confirma que el trigger funciona |
+| 19.4 | Setup mínimo (cabaña 14 + config + pre_reserva 15) | ok | exacto ✓ |
+| 19.5 | Cancelar y verificar **DOBLE LOG** | log automático del trigger + log explícito de cancelar_prereserva con contextos complementarios | exacto ✓ ⭐ |
+| 19.6 | Limpieza + sanity check global | 11 tablas en 0 | exacto ✓ |
+
+**Comportamiento clave validado — doble log con contextos complementarios:**
+
+Cuando se ejecuta `cancelar_prereserva` (B15) sobre una pre-reserva, se generan 2 logs:
+
+- **Log automático del trigger `trg_log_pre_reservas_estado`** (id_log 28 en el test): 
+  - `tabla_afectada: pre_reservas`, `campo_modificado: estado`
+  - `valor_anterior: pendiente_pago`, `valor_nuevo: cancelada_por_cliente`
+  - `modificado_por: cancelar_prereserva` (heredado del contexto seteado por la función vía D38)
+  - `evento_explicito: null` (no es log explícito)
+
+- **Log explícito de `cancelar_prereserva`** (id_log 29):
+  - `evento_explicito: prereserva_cancelada`
+  - Detalle con `motivo`, `descripcion`, `pagos_asociados`
+  - Sin información de transición (porque ese rol lo cubre el trigger)
+
+**Esto es redundancia útil:** el trigger captura "qué cambió" de forma pura. La función captura "por qué cambió y con qué contexto operativo". Combinados, dan auditoría completa para reportes futuros.
+
+**Mecanismo del trigger — herencia de contexto vía D38:**
+
+El trigger `log_cambio_estado` lee `current_setting('app.modificado_por', TRUE)` y `current_setting('app.source_event', TRUE)`. Como las funciones B13-B18 setean esos valores al inicio (PERFORM set_config), el trigger los hereda **automáticamente**. Si un UPDATE manual se hace desde el SQL Editor sin contexto seteado, el trigger usa los defaults `'trigger_auto'` y `'estado_change'`.
+
+**Lección operativa nueva — comportamiento de NOW() en transacciones implícitas de Supabase:**
+
+En PostgreSQL, `NOW()` devuelve el timestamp de **inicio de transacción**, no el momento de ejecución del statement. Cuando varios statements corren en la misma pestaña del SQL Editor de Supabase, el sistema los envuelve en una transacción implícita y `NOW()` retorna el mismo valor exacto para todos. **Esto significó que en Verify 19.3 (intento sobre huespedes), aunque el trigger BEFORE UPDATE se disparaba y actualizaba `updated_at`, el valor que terminaba seteado era idéntico al `created_at` del INSERT inicial.**
+
+Patrón de validación correcto para triggers de `updated_at`:
+1. Ejecutar el INSERT en un Run.
+2. Esperar al menos 1 segundo (en la práctica unos segundos).
+3. Ejecutar el UPDATE en un Run separado (nueva transacción).
+4. Comparar timestamps.
+
+El test 19.3-bis confirmó el funcionamiento del trigger en transacciones separadas con `segundos_diferencia: 29`.
+
+**Decisión:** FASE 2 COMPLETA. Avanzar a Fase 3 (vistas SQL + seed mínimo + pg_cron schedule) en próxima sesión.
+
+---
