@@ -75,3 +75,28 @@ Detecta automáticamente solapamientos reales y aborta el INSERT con
 en lógica de aplicación.
 
 Validado empíricamente en Bloque 20 (Fase 3).
+
+## Sobre `orden_limpieza` y operativa de limpieza
+
+El campo `cabanas.orden_limpieza` define un orden default sugerido para
+la rutina de limpieza diaria de Jennifer. No es regla rígida.
+
+### Orden default (Vita Delta)
+1. Bamboo
+2. Madre Selva
+3. Arrebol
+4. Guatemala
+5. Tokio
+
+### Pero en la práctica, Jennifer prioriza dinámicamente según:
+- Hora de checkout efectiva (`vista_limpieza_semana`)
+- Cantidad de personas (cabañas grandes 5p > chicas 2p en tiempo)
+- Mascotas (requieren más limpieza)
+- Hora de check-in del entrante del mismo día
+- Notas especiales de la reserva
+
+### Para cambiar el orden default
+\`\`\`sql
+UPDATE cabanas SET orden_limpieza = 3 WHERE nombre = 'Bamboo';
+UPDATE cabanas SET orden_limpieza = 1 WHERE nombre = 'Tokio';
+\`\`\`
