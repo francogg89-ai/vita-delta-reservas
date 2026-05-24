@@ -533,3 +533,52 @@ Durante la ejecución del Bloque 13 se detectó un bug de tipado en `pg_advisory
 A partir del Bloque 14, la ejecución continúa usando `6B_SCHEMA_SQL.md v1.6`.
 
 ---
+
+### Bloque 14 — Función `confirmar_reserva`
+
+**Estado:** Cerrado. **Segunda función crítica de Fase 2. Junto con `crear_prereserva` (B13) forma el flujo completo de "creación → confirmación" de reservas.**
+
+**SQL ejecutado:** Función `confirmar_reserva(payload JSONB) RETURNS JSONB` (~200 líneas). Convierte una pre-reserva en reserva confirmada. Implementa 11 secciones: extracción payload, setear contexto para triggers (D38), lock global (10,0) ANTES del FOR UPDATE (invariante v1.5), SELECT FOR UPDATE pre-reserva + validación de estado, lock por cabaña con `::INTEGER`, verificación de pago (camino estricto o combinado), revalidación de disponibilidad excluyendo la propia pre-reserva, INSERT en reservas con captura defensiva de exclusion_violation, UPDATE pre-reserva → 'convertida', asociar pago con id_reserva, transformación de pago en_revision → confirmado si camino combinado, UPDATE huésped (total_reservas + primera_reserva_fecha vía COALESCE), log con diferenciador `camino: estricto|combinado`.
+
+**Documento usado:** `6B_SCHEMA_SQL.md v1.6.1` (con el fix `pg_advisory_xact_lock(1, v_pre.id_cabana::INTEGER)` aplicado proactivamente desde el documento gracias al reporte del Bloque 13).
+
+**Resultado de ejecución:** `Success. No rows returned`. Sin popup destructive.
+
+**Verificaciones post-ejecución (12 pasos):**
+
+| # | Test | Resultado esperado | Resultado obtenido |
+|---|---|---|---|
+| 14.1 | Función registrada en `pg_proc` | `confirmar_reserva, jsonb, VOLATILE, 1` | exacto ✓ |
+| 14.2 | Setup completo (cabaña + 6 config + pre-reserva via `crear_prereserva` + pago confirmado) | id_cabana=7, pre_reserva=3, huesped=9, pago=1 confirmado | exacto ✓ (con corrección: removí re-INSERT de config tras error de unicidad) |
+| 14.3 | **T-CR-1: Camino estricto exitoso** | `ok:true, id_reserva:1, id_pre_reserva:3, id_huesped:9` | exacto ✓ — primera reserva del sistema |
+| 14.4 | Verificación cruzada (4 tablas afectadas) | `reservas.estado=confirmada`, `pre_reservas.estado=convertida`, `pagos.id_reserva=1`, `huespedes.total_reservas=1` | exacto ✓ — `monto_saldo=50000` calculado por la función, `primera_reserva_fecha` poblada via COALESCE |
+| 14.5 | T-CR-2: Idempotencia operativa (confirmar dos veces) | `ok:false, error:estado_invalido, estado_actual:convertida` | exacto ✓ — resistencia a retries de n8n |
+| 14.6 | T-CR-3: Pre-reserva inexistente | `ok:false, error:prereserva_no_existe` | exacto ✓ |
+| 14.7 | Setup para camino combinado (pre-reserva 4 + pago en_revision id=2) | pre-reserva 4 creada con `hora_checkin: 13:00` (lunes), pago 2 en `en_revision` | exacto ✓ |
+| 14.8 | **T-CR-4: Camino combinado exitoso** | `ok:true, id_reserva:2, id_pre_reserva:4, id_huesped:10` | exacto ✓ |
+| 14.9 | Verificación cruzada del camino combinado | **`pago_2.estado` cambió de `en_revision` a `confirmado`**, `validado_por=Vicky`, `validado_en` seteado | exacto ✓ — comportamiento distintivo del camino combinado validado |
+| 14.10 | T-CR-5: Sin pago confirmado y sin permitir combinado | `ok:false, error:sin_pago_confirmado` | exacto ✓ |
+| 14.11 | Logs (5 esperados, 0 de errores controlados) | 3 prereserva_creada + 2 reserva_confirmada (estricto + combinado) | exacto ✓ — errores controlados no loguean (diseño correcto) |
+| 14.12 | Limpieza extendida + sanity check global | 11 tablas en 0 | exacto ✓ |
+
+**Comportamientos clave validados:**
+
+1. **Diferencia entre los dos caminos:** en T-CR-1 (estricto), el pago ya estaba `confirmado` y solo se le asoció `id_reserva`. En T-CR-4 (combinado), el pago se transformó de `en_revision` a `confirmado` automáticamente, con `validado_por='Vicky'` y `validado_en=NOW()`. Esto provee auditoría completa para revisión humana posterior de confirmaciones "a riesgo".
+
+2. **Regla especial de domingo aplicada:** en Verify 14.10, la pre-reserva para fecha 2026-11-01 (domingo) se creó con `hora_checkin: 18:00:00` en vez del default 13:00. Confirma que `crear_prereserva` lee correctamente `hora_checkin_domingo` desde `configuracion_general` cuando `EXTRACT(DOW)=0`.
+
+3. **Cálculo de `monto_saldo`:** la función calcula `monto_saldo = monto_total - monto_sena` internamente (no viene en el payload). En T-CR-1: 100000 - 50000 = 50000. En T-CR-4: 120000 - 60000 = 60000. Lógica de negocio centralizada en la función.
+
+4. **`primera_reserva_fecha` con COALESCE:** se setea solo en la primera reserva confirmada por huésped. En confirmaciones siguientes del mismo huésped, NO se sobreescribe (queda la primera). Diseño correcto para uso operativo (Franco quiere saber desde cuándo es cliente).
+
+**Logs diferenciados por camino:**
+- Logs id=4 y id=6 contienen `detalle.camino` con valor `'estricto'` o `'combinado'`.
+- Permite auditar en producción cómo se confirmó cada reserva. Las combinadas pueden necesitar revisión periódica.
+
+**Observación operativa — Popup destructive:** A partir del Bloque 10 confirmado en Bloque 14: las llamadas `SELECT crear_prereserva(...)` y `SELECT confirmar_reserva(...)` NO disparan popup destructive de Supabase aunque internamente escriban, porque sintácticamente son SELECTs. El popup solo aparece en INSERT/UPDATE/DELETE/DROP/ALTER directos. Esto facilita la velocidad operacional de los tests funcionales, pero requiere atención: si por error se ejecuta una función crítica en PROD, no hay confirmación visual.
+
+**Observación operativa — Error de re-ejecución de bloques con UNIQUE:** Durante Verify 14.2, al reintentar el setup completo después de un paso 1 exitoso, el segundo run chocó con `uq_cabanas_nombre` (la cabaña ya existía). Lección consolidada: **después de un run exitoso, los statements anteriores quedan commiteados en la base. Reducir la pestaña a solo lo faltante en runs siguientes**.
+
+**Decisión:** avanzar a Bloque 15 (`cancelar_prereserva`) en próxima sesión.
+
+---
