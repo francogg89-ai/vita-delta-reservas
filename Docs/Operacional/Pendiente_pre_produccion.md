@@ -178,6 +178,30 @@ Valores sugeridos para producción (ajustar según decisión operativa):
 - `prereserva_expiracion_minutos`: 60 (revisable según patrones reales)
 - `horizonte_disponibilidad_dias`: 120 (ver punto 1.1)
 
+### 4.4 Agregar clave `hora_checkout_domingo` al seed productivo
+
+**Estado actual:** clave cargada en DEV vía hotfix v1.7. Falta agregarla
+al seed productivo (Bloque 21).
+
+**Cuando se despliegue producción, agregar al seed:**
+
+\`\`\`sql
+INSERT INTO configuracion_general (clave, valor, descripcion, categoria) VALUES
+  ('hora_checkout_domingo', '16:00', 
+   'Check-out cuando domingo es último día (vs default 10:00)', 'horarios');
+\`\`\`
+
+**Razón operativa:** los clientes que se van un domingo se quedan hasta las
+16:00 (última lancha colectiva). Sin esta clave, `crear_prereserva` usaría el
+default hardcoded 16:00 (vía COALESCE) y funcionaría igual, pero queda registro
+explícito en `configuracion_general`.
+
+**Función dependiente:** `crear_prereserva` v1.7 lee esta clave en sección 2.
+Si la clave no existe, se genera un warning en `log_cambios` pero la función
+no falla.
+
+**Origen:** Hotfix v1.7 (Fase 3, post-cierre).
+
 ---
 
 ## 5. Seguridad
