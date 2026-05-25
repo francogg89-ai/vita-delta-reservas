@@ -1,0 +1,113 @@
+{
+  "name": "vita_w01_consultar_disponibilidad_supabase",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -32,
+        208
+      ],
+      "id": "6b4fb7e7-6003-4637-9df5-86ef152be45b",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W1 — Build Input\n// Edita los valores de `input` para probar distintos payloads.\n// El resto del workflow toma estos valores tal cual.\n//\n// CONVENCIÓN id_cabana:\n//   - id_cabana > 0  -> filtrar por esa cabaña (ej. 17 = Bamboo)\n//   - id_cabana = 0  -> TODAS las cabañas\n// Esta convención es un workaround del límite de n8n Query Parameters\n// (no soporta NULL real). La función SQL recibe NULL gracias a\n// NULLIF($3::BIGINT, 0) en la query.\n\n// === EDITAR ESTOS VALORES PARA CADA PRUEBA ===\nconst input = {\n  fecha_desde: \"2026-06-07\",\n  fecha_hasta: \"2026-06-14\",\n  id_cabana: 17,\n  source_event: \"n8n_w01_consultar_disponibilidad_manual\"\n};\n// =============================================\n\nreturn [{ json: input }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        208
+      ],
+      "id": "b4d2f915-bfa9-4573-9cc2-8d9ebaf73ae0",
+      "name": "Build Input"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT *\nFROM obtener_disponibilidad_rango(\n  $1::DATE,\n  $2::DATE,\n  NULLIF($3::BIGINT, 0)\n);",
+        "options": {
+          "queryReplacement": "={{ $json.fecha_desde }},={{ $json.fecha_hasta }},={{ $json.id_cabana }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        416,
+        208
+      ],
+      "id": "eb712479-4c20-46de-8db3-5941a6e863f9",
+      "name": "Call obtener_disponibilidad_rango",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// W1 — Build Response\n// Agrupa las N filas devueltas por obtener_disponibilidad_rango() en un único\n// objeto con la estructura definida en\n// Docs/Implementacion/6C_REESCRITURA_WORKFLOWS_SUPABASE.md v1.2 Sección 5.6.\n//\n// NOTA W1: source_event NO se registra en log_cambios porque la función es\n// read-only y no recibe ese parámetro. Queda solo para trazabilidad en n8n.\n//\n// n8n no reinterpreta semántica: lo que la función devuelve (tipo_dia, estado,\n// horas, etc.) llega tal cual al output.\n//\n// CONVENCIÓN id_cabana en la respuesta:\n//   - Si Build Input mandó id_cabana = 0 (todas), respondemos id_cabana: null.\n//   - Si Build Input mandó id_cabana > 0, respondemos ese valor.\n//\n// FILTER DEFENSIVO: si el nodo Postgres tiene \"Always Output Data\" activado y\n// la función devolvió 0 filas, n8n manda un item con json vacío. Lo filtramos\n// para que total_dias y dias reflejen el conteo real.\n\nconst buildInput = $('Build Input').first().json;\nconst dias = items\n  .map(item => item.json)\n  .filter(d => d && Object.keys(d).length > 0);\nconst idCabanaInput = buildInput.id_cabana;\nconst idCabanaOut = (idCabanaInput === 0 || idCabanaInput === '0') ? null : idCabanaInput;\n\nreturn [\n  {\n    json: {\n      ok: true,\n      workflow: 'vita_w01_consultar_disponibilidad_supabase',\n      source_event: buildInput.source_event,\n      result: {\n        rango: {\n          fecha_desde: buildInput.fecha_desde,\n          fecha_hasta: buildInput.fecha_hasta\n        },\n        id_cabana: idCabanaOut,\n        total_dias: dias.length,\n        dias: dias\n      },\n      executed_at: new Date().toISOString()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        208
+      ],
+      "id": "a49d3815-5bb7-4e6f-8e1c-5aab3492416c",
+      "name": "Build Response"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Build Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Input": {
+      "main": [
+        [
+          {
+            "node": "Call obtener_disponibilidad_rango",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call obtener_disponibilidad_rango": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "__WORKFLOW_VERSION_ID__",
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "id": "__WORKFLOW_ID__",
+  "tags": []
+}
