@@ -181,12 +181,6 @@ Conexión n8n cloud → Supabase DEV operativa y validada empíricamente. El pat
 
 *Bitácora abierta el 2026-05-25 con el cierre de W0.*
 
-
-Entrada W1 para 6C_EJECUCION.md
-
-Cómo usar este archivo: copiar el bloque de abajo y pegarlo al final de Docs/Bitacora/6C_EJECUCION.md, después de la entrada de W0. Actualizar también la tabla "Estado general de la etapa" del encabezado del archivo, cambiando la fila de W1 a estado ✅ OK con fecha de cierre.
-
-
 Actualización de la tabla "Estado general de la etapa"
 En la tabla del encabezado del archivo, reemplazar la fila de W1:
 | W1 — Consultar disponibilidad | `obtener_disponibilidad_rango()` + vistas | — | — |
@@ -343,3 +337,181 @@ Los IDs internos de los nodos (UUIDs) se preservan: identifican nodos dentro del
 Workflow operativo, los 4 tests del documento de diseño pasaron. Patrón base validado y reutilizable. Próximo paso: **W2 — Crear pre-reserva**, que va a ser la primera invocación a una función que **escribe** en Supabase. Va a usar el mismo patrón base, sumando el manejo de errores de negocio (`p_status = "ok"` vs `"no_disponible"` vs `"superpuesto_con_reserva"`, etc.) según `6C_REESCRITURA_WORKFLOWS_SUPABASE.md v1.2` Sección 11.
 
 Generado como cierre formal de W1 — 2026-05-25.
+
+
+Actualización de la tabla "Estado general de la etapa"
+En la tabla del encabezado del archivo, reemplazar la fila de W2:
+| W2 — Crear pre-reserva | `crear_prereserva()` | — | — |
+Por:
+| W2 — Crear pre-reserva | `crear_prereserva(jsonb)` | ✅ OK | 2026-05-25 |
+
+Bloque a pegar después de la entrada de W1
+markdown## W2 — Crear pre-reserva
+
+**Estado:** ✅ OK
+**Fecha de cierre:** 2026-05-25
+**Propósito:** primera invocación a una función de **escritura** desde n8n. Crea pre-reservas con idempotencia, validación de disponibilidad y manejo defensivo de errores de negocio. Establece el patrón para W3, W4, W5, W6 (todas las funciones write con payload JSONB).
+
+### Decisión clave previa al diseño: alineación con contrato real
+
+Durante el diseño inicial se asumió erróneamente que `crear_prereserva()` usaba parámetros posicionales con retorno `p_status`. Antes de armar el JSON se hizo una verificación read-only contra DEV:
+
+```sql
+SELECT
+  p.oid::regprocedure AS firma,
+  pg_get_function_result(p.oid) AS retorna
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND p.proname = 'crear_prereserva';
+```
+
+Resultado: `crear_prereserva(jsonb) → jsonb`. **Confirmó el contrato JSONB del documento 6C v1.2 y descartó el diseño posicional.** Lección operativa: en cada función nueva, verificar firma real antes de diseñar el workflow.
+
+Adicionalmente, se inspeccionó el cuerpo completo de la función con `pg_get_functiondef()` para extraer:
+- Lista exacta de claves esperadas en el payload (obligatorias vs opcionales).
+- Códigos de error documentados.
+- Forma del JSONB de salida en cada caso (happy, idempotente, error).
+- Detalle de cómo gestiona al huésped (vía `upsert_huesped(jsonb)` interno).
+
+### Decisiones de diseño tomadas
+
+| Decisión | Justificación |
+|---|---|
+| Llamada con `SELECT crear_prereserva($1::jsonb) AS resultado` | Contrato real de la función. n8n manda 1 único parámetro (el payload completo). |
+| Estructura de 5 nodos: Manual Trigger → Build Input → **Build Payload** → Postgres → Build Response | El nodo Build Payload computa `idempotency_key` y `source_event` y reanida `huesped` desde campos planos. Build Input mantiene solo "datos de negocio". |
+| `idempotency_key` se genera en Build Payload con la convención cerrada `{canal}_{id_evento}_{id_cabana}_{fecha_in}_{fecha_out}` | 6C v1.2 Sección 5.4. n8n es responsable de la idempotencia en escritura, no el caller. |
+| `canal = "manual_dev"` para pruebas DEV | Prefijo en idempotency_key. Aísla el espacio de keys de pruebas del de canales reales (`web`, `whatsapp`, etc.). |
+| `canal_origen = "manual"` (literal en el payload) | Queda en `pre_reservas.canal_origen`. Indica que la pre-reserva se generó por workflow manual desde DEV. |
+| `canal_pago_esperado = "transferencia_mp"` | Consistente con 6C v1.2 (MercadoPago vía transferencia). |
+| `source_event = "n8n_w02_crear_prereserva_manual"` (NO incluye DEV) | El source_event identifica el workflow + disparador, no el ambiente. El ambiente se infiere por el `canal` en idempotency_key. |
+| Wrapper externo: `ok = true` tanto para creación nueva como para idempotent match | El consumidor (bot, web) está mejor servido sabiendo "la pre-reserva existe" que distinguiendo creación vs idempotencia en `ok`. El detalle queda en `result.idempotent_match`. |
+| Campos opcionales (`notas`, `detalle_mascotas`, `hora_*_solicitada`) se mandan como `null` cuando vienen vacíos | Helper `nv()` en Build Payload los normaliza. La función SQL los procesa con `NULLIF`. |
+| Postgres node con `Always Output Data: ON` | Defensivo, consistente con W1. Aplica si algún día la función devuelve fila vacía por algún corner case. |
+
+### Estructura del workflow
+Manual Trigger → Build Input (Code) → Build Payload (Code) → Call crear_prereserva (Postgres) → Build Response (Code)
+
+### Query SQL invocada
+
+```sql
+SELECT crear_prereserva($1::jsonb) AS resultado;
+```
+
+**Parameter binding:** un único parámetro con `={{ JSON.stringify($json.payload) }}`. Funcionó limpio sin los gotchas de Query Parameters con valores vacíos que afectaron W1 (ver L-6C-06 en `Lecciones_Aprendidas.md`).
+
+### Convenciones de identificación aplicadas
+
+| Campo | Valor en pruebas DEV | Dónde aparece |
+|---|---|---|
+| `canal` (interno W2, prefijo idempotency_key) | `manual_dev` | `idempotency_key` |
+| `id_evento` (interno W2) | `test_w02_001`, `test_w02_003`, etc. | `idempotency_key` |
+| `canal_origen` (payload a la función) | `manual` | `pre_reservas.canal_origen` |
+| `canal_pago_esperado` (payload) | `transferencia_mp` | `pre_reservas.canal_pago_esperado` |
+| `source_event` (computado) | `n8n_w02_crear_prereserva_manual` | `pre_reservas.source_event` + `log_cambios.source_event` |
+
+### Tests ejecutados
+
+Los 5 tests definidos durante el diseño de W2.
+
+**Test 1 — Happy path**
+
+Payload: `id_cabana=17`, `fecha_in=2026-07-10` (viernes), `fecha_out=2026-07-13` (lunes), `personas=2`, huésped nuevo, sin horas solicitadas.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | true | true | ✅ |
+| `result.ok` | true | true | ✅ |
+| `result.idempotent_match` | false | false | ✅ |
+| `result.id_pre_reserva` | > 0 | 25 | ✅ |
+| `result.id_huesped` | > 0 (nuevo) | 34 | ✅ |
+| `result.estado` | "pendiente_pago" | "pendiente_pago" | ✅ |
+| `result.hora_checkin` (viernes, no domingo) | "13:00:00" | "13:00:00" | ✅ |
+| `result.hora_checkout` (lunes, no domingo) | "10:00:00" | "10:00:00" | ✅ |
+| `result.recovery_path` | null | null | ✅ |
+| `result.expira_en` | NOW + ~60 min | `2026-05-25T22:11:01` (creación a las 21:11) | ✅ |
+
+**Test 2 — Idempotencia**
+
+Sin cambiar nada del Build Input, se re-ejecutó el workflow.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | true | true | ✅ |
+| `result.idempotent_match` | true | true | ✅ |
+| `result.id_pre_reserva` | 25 (mismo que Test 1) | 25 | ✅ |
+| `result.id_huesped` | 34 (mismo que Test 1) | 34 | ✅ |
+| `result.expira_en` | igual a Test 1 (no se renueva TTL) | `2026-05-25T22:11:01` (idéntico) | ✅ |
+| `result.recovery_path` | "pre_lock" | "pre_lock" | ✅ |
+| `result.hora_checkin` y `hora_checkout` | no presentes en el output idempotente | no presentes | ✅ |
+
+**Lectura operativa:** la idempotencia se detectó en el pre-check (paso 3 de la función), antes de tomar los advisory locks. El `expira_en` no se renovó: un cliente que reintenta no obtiene "más tiempo" por reintentar, lo cual es correcto.
+
+**Test 3 — Conflicto (mismas fechas + cabaña, distinto `id_evento`)**
+
+Payload: igual a Test 1 pero `id_evento="test_w02_003"`. El `idempotency_key` cambia, así que no entra por el pre-check de idempotencia; debe llegar a la validación de disponibilidad y rebotar.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "no_disponible" | "no_disponible" | ✅ |
+| `result.conflictos` | array con info del conflicto | `[{fuente: "pre_reservas"}]` | ✅ |
+
+**Observación:** el detalle de `conflictos` es escueto (solo `fuente`). Si el bot/web necesita comunicar al usuario "ocupado por una reserva confirmada" vs "ocupado por una pre-reserva activa", el campo `fuente` ya da esa distinción. Si necesitara más detalle (qué fechas exactas), habría que enriquecer `validar_disponibilidad()`. **Pendiente futuro, no bloqueante.**
+
+**Test 4 — Cabaña inexistente**
+
+Payload: `id_cabana=9999` (no existe en `cabanas`), `id_evento="test_w02_004"`.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "cabana_no_existe" | "cabana_no_existe" | ✅ |
+
+**Lectura operativa:** la validación de cabaña ocurre en el paso 6 (después de tomar los locks, después del double-check de idempotencia). Salida limpia sin pre-reserva fantasma.
+
+**Test 5 — Rango invertido**
+
+Payload: `fecha_in=2026-07-13`, `fecha_out=2026-07-10`, `id_evento="test_w02_005"`.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "fechas_invalidas" | "fechas_invalidas" | ✅ |
+
+**Lectura operativa:** la validación de fechas ocurre en el paso 1 (validaciones tempranas), antes de tocar `configuracion_general` o cualquier lock. No hay efectos colaterales.
+
+### Lo que W2 demuestra (validaciones reutilizables para W3+)
+
+1. **`JSON.stringify($json.payload)` como query parameter funciona limpio** en n8n cloud + Postgres typeVersion 2.6. Sirve como contrapunto a L-6C-03: el problema con Query Parameters no era el tamaño ni el tipo del valor, sino los valores vacíos/null.
+2. **Idempotencia funciona end-to-end** con la convención cerrada en 6C v1.2. El mismo `idempotency_key` siempre devuelve la misma pre-reserva sin renovar TTL.
+3. **El patrón de 5 nodos** (Manual Trigger → Build Input → Build Payload → Postgres → Build Response) queda validado como template para todas las funciones de escritura con payload JSONB.
+4. **`upsert_huesped(jsonb)` se ejecuta dentro de `crear_prereserva()`**, no se llama por separado desde n8n. El payload de W2 lleva `huesped` anidado y la función se encarga.
+5. **El wrapper externo (`ok`, `workflow`, `source_event`, `idempotency_key`, `error`, `result`, `executed_at`)** queda estable como contrato para los consumidores (bot, web).
+6. **`recovery_path`** permite diagnóstico post-mortem operativo: distingue idempotencia detectada antes del lock, después del lock, o por unique_violation. Útil cuando una pre-reserva resulta inesperadamente idempotente.
+
+### Gotchas descubiertos durante la ejecución de W2
+
+No se descubrieron gotchas nuevos durante la implementación de W2. La verificación read-only del contrato real de `crear_prereserva()` antes de armar el JSON evitó el bug de diseño (posicional vs JSONB). Esta verificación queda incorporada como **patrón estándar para todos los workflows siguientes que invoquen funciones SQL**.
+
+Se confirmó una **observación positiva** (no es gotcha): el binding de payload grande como string serializado via `={{ JSON.stringify($json.payload) }}` funciona sin los problemas que vimos en W1 con Query Parameters separados por comas. Esta observación se documenta como L-6C-06 en `Lecciones_Aprendidas.md`.
+
+### Estado de DEV al cierre de W2
+
+Una pre-reserva activa quedó en DEV como producto de los tests:
+
+| id_pre_reserva | id_huesped | idempotency_key | estado | expira_en |
+|---|---|---|---|---|
+| 25 | 34 | `manual_dev_test_w02_001_17_2026-07-10_2026-07-13` | pendiente_pago | 2026-05-25T22:11:01Z |
+
+**Implicación operativa para W3+:** si W3 (registrar_pago), W4 (confirmar_reserva) o W5 (cancelar_prereserva) necesitan operar sobre una pre-reserva activa, esta es la candidata. Tras los 60 minutos de TTL, el job `expirar_prereservas` la marcará como `expirada` automáticamente.
+
+### Template exportado al repo
+
+Template sanitizado en `Workflows/n8n/supabase/vita_w02_crear_prereserva_supabase.template.json`. Placeholders reemplazados al sanitizar siguen la convención del repo (ver `Workflows/n8n/supabase/README.md`).
+
+### Conclusión W2
+
+Workflow operativo, los 5 tests pasaron a la primera. Patrón base de escritura con JSONB validado y reutilizable. Próximo paso: **W3 — Registrar pago**, que va a operar sobre la pre-reserva 25 (o una nueva si esta expira antes de implementar W3). W3 introduce el caso v1.3 (pagos tardíos sobre pre-reservas terminales) y la lógica de transición de estado `pendiente_pago → pago_en_revision`.
+
+Generado como cierre formal de W2 — 2026-05-25.

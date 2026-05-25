@@ -143,11 +143,6 @@ con la regla de `hora_checkout_domingo`.
 
 Bloque para Lecciones_Aprendidas.md — Gotchas de la integración n8n ↔ Supabase
 
-Cómo usar este archivo: copiar el bloque de abajo y agregarlo a Docs/Operacional/Lecciones_Aprendidas.md respetando el formato de las entradas previas. Si el archivo no tiene una sección "n8n ↔ Supabase", crearla en un lugar lógico.
-
-
-Bloque a agregar
-markdown## Integración n8n cloud ↔ Supabase
 
 Estas lecciones surgieron durante la Etapa 6C (Reescritura de Workflows n8n contra Supabase DEV).
 Aplican a n8n cloud + pooler transaccional de Supabase.
@@ -288,3 +283,51 @@ L-6C-01 a L-6C-04 son gotchas accionables (problema → solución). L-6C-05 es i
 Los IDs (L-6C-01, etc.) son útiles para referenciar desde código o bitácora más adelante (ej. en comentarios del JSON del workflow: // Workaround L-6C-03).
 
 Generado como parte del cierre de W1 — 2026-05-25.
+
+markdown### L-6C-06 — Payload JSONB grande vía `JSON.stringify` en queryReplacement funciona limpio
+
+**Cuándo aplica:** al invocar funciones SQL que reciben un único parámetro JSONB (típicamente funciones de escritura tipo `crear_prereserva(jsonb)`, `registrar_pago(jsonb)`, `confirmar_reserva(jsonb)`, etc.).
+
+**Contexto:** después de descubrir las limitaciones de Query Parameters con valores vacíos/null en L-6C-03, surgía la duda de si el patrón de mandar un payload JSONB grande como string serializado iba a tener problemas similares.
+
+**Resultado empírico (W2, 5 tests pasados a la primera):**
+
+Patrón usado:
+
+```sql
+SELECT crear_prereserva($1::jsonb) AS resultado;
+```
+
+Con queryReplacement:
+={{ JSON.stringify($json.payload) }}
+
+**Funciona limpio**, sin omisión de parámetros ni errores de serialización, aun con payloads de 15+ campos incluyendo objetos anidados (ej. `huesped: { nombre, telefono, email }`), valores numéricos, booleanos, strings con caracteres especiales, y campos opcionales en `null`.
+
+**Conclusión:**
+
+El problema documentado en L-6C-03 era **el valor vacío específico**, no el tamaño ni el tipo del parámetro. Un string JSON serializado, por más grande que sea, **nunca es "vacío"** desde la perspectiva de n8n (siempre tiene comillas, llaves, contenido). Por eso n8n no lo omite y PostgreSQL lo recibe como string para castear a `jsonb`.
+
+**Aplicar este patrón en todos los workflows de escritura que sigan (W3, W4, W5, W6).**
+
+**Detalles del patrón estándar para funciones JSONB:**
+
+1. En `Build Payload` construir el objeto `payload` como literal JS y exponerlo:
+```javascript
+   return [{ json: { payload, idempotency_key, source_event, input } }];
+```
+2. En el Postgres node:
+   - Query: `SELECT funcion_nombre($1::jsonb) AS resultado;`
+   - queryReplacement: `={{ JSON.stringify($json.payload) }}`
+3. En `Build Response` leer la respuesta: `items[0].json.resultado` y mapear su `ok`/`error` al wrapper externo.
+
+**No requiere ningún workaround.** Es el camino estándar para funciones write con payload JSONB.
+
+**Descubierto:** 2026-05-25, durante W2 Tests 1–5.
+
+Notas para el mantenedor del archivo
+
+L-6C-06 cierra la duda abierta implícitamente por L-6C-03: el problema de Query Parameters NO afecta payloads JSONB serializados.
+L-6C-03 sigue vigente para parámetros sueltos (números, fechas, strings opcionales). El workaround 0 = todas documentado allí sigue siendo la solución correcta para esos casos.
+Los dos patrones coexisten: lecturas con parámetros sueltos (W1, W7) usan el patrón de L-6C-03; escrituras con payload JSONB (W2, W3+) usan el patrón de L-6C-06.
+
+Generado como parte del cierre de W2 — 2026-05-25.

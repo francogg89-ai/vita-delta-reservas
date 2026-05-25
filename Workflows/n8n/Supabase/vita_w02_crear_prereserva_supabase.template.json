@@ -1,0 +1,132 @@
+{
+  "name": "vita_w02_crear_prereserva_supabase",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        0
+      ],
+      "id": "a2000000-0001-4000-8000-000000000001",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W2 — Build Input\n// Edita los valores de `input` para probar distintos payloads.\n//\n// CONVENCIONES DEV:\n//   - canal = \"manual_dev\"     -> prefijo de idempotency_key para pruebas DEV (no contamina canales reales)\n//   - canal_origen = \"manual\"   -> queda registrado en pre_reservas.canal_origen\n//   - source_event = \"n8n_w02_crear_prereserva_manual\" -> NO incluye el ambiente DEV\n//\n// CAMPOS HUÉSPED:\n//   - huesped_nombre OBLIGATORIO\n//   - al menos uno entre huesped_telefono / huesped_email OBLIGATORIO\n//\n// HORAS SOLICITADAS:\n//   - Dejar como string vacío para que la función aplique los defaults v1.7.1.\n//   - Llenar (formato \"HH:MM:SS\") para probar el caso hora_fuera_de_rango.\n\n// === EDITAR ESTOS VALORES PARA CADA PRUEBA ===\nconst input = {\n  // Identificación del evento (compone idempotency_key)\n  canal: \"manual_dev\",\n  id_evento: \"test_w02_001\",\n\n  // Datos de la pre-reserva\n  id_cabana: 17,\n  fecha_in: \"2026-07-10\",\n  fecha_out: \"2026-07-13\",\n  personas: 2,\n  monto_total: 150000,\n  monto_sena: 50000,\n  canal_origen: \"manual\",\n  canal_pago_esperado: \"transferencia_mp\",\n\n  // Huésped\n  huesped_nombre: \"Juan Pérez Test\",\n  huesped_telefono: \"+5491134567890\",\n  huesped_email: \"juan.test@example.com\",\n\n  // Opcionales\n  notas: \"\",\n  mascotas: false,\n  detalle_mascotas: \"\",\n  ninos: false,\n  notas_reserva: \"\",\n\n  // Horas solicitadas (vacío = usar defaults de la función)\n  hora_checkin_solicitada: \"\",\n  hora_checkout_solicitada: \"\"\n};\n// =============================================\n\nreturn [{ json: input }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        0
+      ],
+      "id": "a2000000-0001-4000-8000-000000000002",
+      "name": "Build Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W2 — Build Payload\n// Toma el input editable de Build Input y construye:\n//   1. idempotency_key (convención 6C v1.2 Sección 5.4):\n//        {canal}_{id_evento}_{id_cabana}_{fecha_in}_{fecha_out}\n//   2. source_event (convención 6C v1.2 Sección 5.5):\n//        n8n_w02_crear_prereserva_manual\n//   3. payload JSONB completo según contrato de crear_prereserva(jsonb).\n//\n// CONTRATO PAYLOAD: ver firma real de crear_prereserva en 6B_SCHEMA_SQL.md\n// v1.7.1 Sección 13 (Bloque 11).\n//\n// Campos opcionales vacíos -> null (la función los procesa con NULLIF).\n\nconst input = $input.first().json;\n\nconst idempotency_key =\n  `${input.canal}_${input.id_evento}_${input.id_cabana}_${input.fecha_in}_${input.fecha_out}`;\n\nconst source_event = 'n8n_w02_crear_prereserva_manual';\n\n// Helper: convierte string vacío en null, deja el resto tal cual\nconst nv = (v) => (v === '' || v === undefined ? null : v);\n\nconst payload = {\n  id_cabana: input.id_cabana,\n  fecha_in: input.fecha_in,\n  fecha_out: input.fecha_out,\n  personas: input.personas,\n  monto_total: input.monto_total,\n  monto_sena: input.monto_sena,\n  canal_origen: input.canal_origen,\n  canal_pago_esperado: input.canal_pago_esperado,\n  source_event,\n  idempotency_key,\n  notas: nv(input.notas),\n  mascotas: input.mascotas,\n  detalle_mascotas: nv(input.detalle_mascotas),\n  ninos: input.ninos,\n  notas_reserva: nv(input.notas_reserva),\n  hora_checkin_solicitada: nv(input.hora_checkin_solicitada),\n  hora_checkout_solicitada: nv(input.hora_checkout_solicitada),\n  huesped: {\n    nombre: input.huesped_nombre,\n    telefono: nv(input.huesped_telefono),\n    email: nv(input.huesped_email)\n  }\n};\n\nreturn [{\n  json: {\n    payload,\n    idempotency_key,\n    source_event,\n    input  // se preserva para trazabilidad en Build Response\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        0
+      ],
+      "id": "a2000000-0001-4000-8000-000000000003",
+      "name": "Build Payload"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT crear_prereserva($1::jsonb) AS resultado;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.payload) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        260,
+        0
+      ],
+      "id": "a2000000-0001-4000-8000-000000000004",
+      "name": "Call crear_prereserva",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// W2 — Build Response\n// Interpreta el JSONB que devuelve crear_prereserva() y arma el wrapper estándar\n// según 6C v1.2 Sección 5.6.\n//\n// Contrato de salida de la función:\n//   - happy:        { ok: true, idempotent_match: false, id_pre_reserva, id_huesped,\n//                     estado, expira_en, hora_checkin, hora_checkout, recovery_path: null }\n//   - idempotente:  { ok: true, idempotent_match: true, id_pre_reserva, id_huesped,\n//                     estado, expira_en, recovery_path: \"pre_lock\"|\"post_lock\"|\"unique_violation\" }\n//   - error:        { ok: false, error: \"<codigo>\", ...detalle según error }\n//\n// CONVENCIÓN DEL WRAPPER:\n//   - ok = true cuando la pre-reserva existe AHORA (creada o ya existente por idempotencia).\n//   - ok = false con error_code cuando no se pudo crear.\n//   - Se preservan idempotency_key y source_event para trazabilidad.\n//   - result siempre lleva el JSONB completo de la función, sin reinterpretar.\n//\n// FILTER DEFENSIVO: si el Postgres node tiene Always Output Data y la función\n// no devolvió fila (caso muy improbable), items[0].json no tendrá .resultado.\n\nconst buildPayload = $('Build Payload').first().json;\nconst pgItem = items[0]?.json;\nconst resultado = pgItem?.resultado;\n\nif (!resultado || typeof resultado !== 'object') {\n  return [{\n    json: {\n      ok: false,\n      workflow: 'vita_w02_crear_prereserva_supabase',\n      source_event: buildPayload.source_event,\n      idempotency_key: buildPayload.idempotency_key,\n      error: 'sin_respuesta_de_funcion',\n      result: null,\n      executed_at: new Date().toISOString()\n    }\n  }];\n}\n\nconst ok = resultado.ok === true;\n\nreturn [{\n  json: {\n    ok,\n    workflow: 'vita_w02_crear_prereserva_supabase',\n    source_event: buildPayload.source_event,\n    idempotency_key: buildPayload.idempotency_key,\n    error: ok ? null : (resultado.error || 'error_desconocido'),\n    result: resultado,\n    executed_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "id": "a2000000-0001-4000-8000-000000000005",
+      "name": "Build Response"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Build Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Input": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "Call crear_prereserva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call crear_prereserva": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
