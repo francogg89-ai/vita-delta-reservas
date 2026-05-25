@@ -515,3 +515,173 @@ Template sanitizado en `Workflows/n8n/supabase/vita_w02_crear_prereserva_supabas
 Workflow operativo, los 5 tests pasaron a la primera. Patrón base de escritura con JSONB validado y reutilizable. Próximo paso: **W3 — Registrar pago**, que va a operar sobre la pre-reserva 25 (o una nueva si esta expira antes de implementar W3). W3 introduce el caso v1.3 (pagos tardíos sobre pre-reservas terminales) y la lógica de transición de estado `pendiente_pago → pago_en_revision`.
 
 Generado como cierre formal de W2 — 2026-05-25.
+
+Actualización de la tabla "Estado general de la etapa"
+En la tabla del encabezado del archivo, reemplazar la fila de W3:
+| W3 — Registrar pago | `registrar_pago()` | — | — |
+Por:
+| W3 — Registrar pago | `registrar_pago(jsonb)` | ✅ OK | 2026-05-25 |
+
+Bloque a pegar después de la entrada de W2
+markdown## W3 — Registrar pago
+
+**Estado:** ✅ OK
+**Fecha de cierre:** 2026-05-25
+**Propósito:** invocar `registrar_pago()` para crear pagos asociados a pre-reservas activas. Es la primera función write que NO usa idempotency_key — la deduplicación queda como responsabilidad del caller (webhook MP en producción).
+
+### Verificación previa de contrato real
+
+Aplicando el patrón establecido en W2, se verificó la firma real antes de diseñar:
+
+```sql
+SELECT
+  p.oid::regprocedure AS firma,
+  pg_get_function_result(p.oid) AS retorna
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND p.proname = 'registrar_pago';
+```
+
+Resultado: `registrar_pago(jsonb) → jsonb`. Mismo patrón que `crear_prereserva`.
+
+Adicionalmente se ejecutó `pg_get_functiondef()` para inspeccionar el cuerpo y se descubrió:
+
+1. La función **no recibe `idempotency_key`**. La deduplicación queda fuera del scope de la función.
+2. La función acepta `id_pre_reserva` **O** `id_reserva` (mutuamente excluyentes en términos de uso, aunque la función no lo fuerza).
+3. Implementa el **caso v1.3**: si la pre-reserva está en estado terminal (`vencida`, `cancelada_por_cliente`, etc.), el pago se acepta con `warning: "prereserva_no_activa"` y queda en `en_revision` para revisión humana.
+4. Promueve la pre-reserva de `pendiente_pago` → `pago_en_revision` automáticamente cuando se registra un pago sobre una pre-reserva activa.
+
+### Verificación adicional: CHECK constraints en `pagos`
+
+Antes de armar Build Input se ejecutó query read-only sobre constraints:
+
+```sql
+SELECT con.conname, pg_get_constraintdef(con.oid)
+FROM pg_constraint con
+JOIN pg_class rel ON rel.oid = con.conrelid
+WHERE rel.relname = 'pagos' AND con.contype = 'c';
+```
+
+Resultado relevante:
+
+- `chk_pagos_tipo`: `tipo IN ('sena', 'saldo', 'extra', 'reembolso', 'ajuste')`
+- `chk_pagos_medio`: `medio_pago IN ('transferencia_bancaria', 'transferencia_mp', 'mp_link', 'cripto', 'efectivo')`
+
+Detalle relevante: el valor `transferencia` (sin sufijo) **no es válido**. Hay que usar `transferencia_bancaria` o `transferencia_mp`. Este detalle se documentó en el comentario del Build Input.
+
+### Decisiones de diseño tomadas
+
+| Decisión | Justificación |
+|---|---|
+| W3 **no genera** `idempotency_key` | La función `registrar_pago` no la recibe. La deduplicación queda como responsabilidad del caller (webhook MP en producción debe deduplicar por `payment_id`). |
+| Wrapper externo incluye `id_evento_dev` (no `idempotency_key`) | Trazabilidad de qué prueba generó qué pago. Convención local a W3. |
+| Wrapper externo incluye `warning` en el nivel raíz | El caso v1.3 devuelve `warning: "prereserva_no_activa"`. Elevarlo al nivel del wrapper hace que sea visible sin entrar a `result`. |
+| `tipo = "sena"`, `medio_pago = "transferencia_mp"`, `moneda = "ARS"` como defaults para pruebas DEV | Valores que pasan los CHECK constraints. Coherente con el caso de uso real (seña inicial vía MercadoPago). |
+| **Normalización defensiva** de campos obligatorios en Build Payload (`nv()` aplicado a `tipo`, `medio_pago`, `monto_esperado`, `monto_recibido`) | Workaround del bug de validación SQL descubierto durante Test 2 — ver sección "Hallazgo importante". |
+| `estado_inicial = ""` (vacío) en pruebas manuales DEV | Deja el pago en `en_revision`. Solo se debería usar `"confirmado"` cuando viene del webhook de MP con confirmación verificada. |
+
+### Estructura del workflow
+
+Mismo patrón de 5 nodos validado en W2:
+Manual Trigger → Build Input (Code) → Build Payload (Code) → Call registrar_pago (Postgres) → Build Response (Code)
+
+### Query SQL invocada
+
+```sql
+SELECT registrar_pago($1::jsonb) AS resultado;
+```
+
+Mismo patrón que W2 con `={{ JSON.stringify($json.payload) }}`. Funcionó limpio (ver L-6C-06).
+
+### Tests ejecutados
+
+**Test 1 — Happy path: pago de seña sobre pre-reserva 25**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | true | true | ✅ |
+| `result.ok` | true | true | ✅ |
+| `result.id_pago` | > 0 (nuevo) | 11 | ✅ |
+| `result.estado` | "en_revision" | "en_revision" | ✅ |
+| `warning` en wrapper | null | null | ✅ |
+| `id_evento_dev` en wrapper | "manual_dev_test_w03_001" | "manual_dev_test_w03_001" | ✅ |
+
+Efecto colateral esperado y validado: la pre-reserva 25 pasó de `pendiente_pago` → `pago_en_revision`.
+
+**Test 2 — Falta obligatorio (`tipo = ""`)**
+
+Primera ejecución (con W3 versión inicial, sin normalización defensiva en obligatorios):
+
+> `new row for relation "pagos" violates check constraint "chk_pagos_tipo"` — error crudo de Postgres, sin JSONB estructurado.
+
+**Hallazgo:** la función `registrar_pago()` no aplica `NULLIF` a `tipo` ni `medio_pago` en el extract del payload. El string vacío pasa la validación `v_tipo IS NULL` (porque `""` no es NULL) y termina chocando contra el CHECK constraint en el INSERT.
+
+Fix aplicado en W3 (Build Payload v1.1): normalizar también los campos obligatorios con `nv()` para que `""` se convierta a `null` explícito en el JSON. Así `payload->>'tipo'` devuelve NULL real y la validación de la función rebota limpio.
+
+Segunda ejecución (post-fix):
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "payload_invalido" | "payload_invalido" | ✅ |
+| Sin error crudo de Postgres | sí | sí | ✅ |
+
+**Test 3 — Pre-reserva inexistente (`id_pre_reserva = 99999`)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "prereserva_no_existe" | "prereserva_no_existe" | ✅ |
+
+**Test 4 — Sin referencia (`id_pre_reserva = null, id_reserva = null`)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "referencia_requerida" | "referencia_requerida" | ✅ |
+| `result.motivo` | descriptivo | "Debe venir id_pre_reserva o id_reserva" | ✅ |
+
+### Hallazgo importante: bug de validación en `registrar_pago()`
+
+Durante Test 2 se descubrió que la función **no aplica `NULLIF` a los campos obligatorios de texto** (`tipo`, `medio_pago`) en el extract del payload. Esto permite que strings vacíos `""` pasen la validación inicial y choquen contra los CHECK constraints en el INSERT, generando errores crudos de Postgres en vez de JSONB estructurado.
+
+**Mitigación aplicada (W3 nivel workflow):** normalización defensiva en Build Payload — los campos obligatorios pasan por `nv()` que convierte `""` a `null` explícito. Así `payload->>'campo'` devuelve NULL real y la validación de la función rebota limpio.
+
+**Pendiente real (SQL nivel schema):** la función debería aplicar `NULLIF(TRIM(payload->>'campo'), '')` para ser robusta sin depender del caller. Esto es estructural y aplica también a otras funciones write del schema. **Documentado en `Pendiente_pre_produccion.md` como punto de hardening pre-TEST/PROD.** No se aplicó hotfix durante 6C para no abrir schema fuera de contexto.
+
+### Lo que W3 demuestra (validaciones reutilizables para W4+)
+
+1. **Patrón de 5 nodos** sigue funcionando para funciones write sin idempotency_key.
+2. **JSONB stringify** sigue funcionando limpio (consistente con L-6C-06).
+3. **Normalización defensiva en Build Payload** es necesaria cuando la función SQL no aplica `NULLIF` a sus obligatorios. **Aplicar este patrón en todos los workflows write siguientes** hasta que el hardening SQL pre-producción se complete.
+4. **El caso v1.3** (pre-reserva terminal con pago tardío) está implementado en la función, pero **diferido para test posterior** porque requiere una pre-reserva en estado terminal (lo cual requiere W5 cancelar_prereserva, o esperar expiración natural).
+
+### Gotchas descubiertos durante W3
+
+#### Gotcha 1 — `registrar_pago()` no es robusta ante strings vacíos en obligatorios
+
+Detallado en sección "Hallazgo importante" arriba. **No es un gotcha de n8n, es un gotcha del schema SQL.** Mitigado en W3 con normalización defensiva, pendiente de hardening estructural.
+
+Este patrón puede aplicar a otras funciones write del schema que no se hayan revisado. Anotar en `Pendiente_pre_produccion.md` para auditar todas las funciones antes de TEST/PROD.
+
+### Estado de DEV al cierre de W3
+
+| Recurso | ID | Estado |
+|---|---|---|
+| Pre-reserva 25 | 25 | `pago_en_revision` (cambió de `pendiente_pago` al ejecutar Test 1) |
+| Pago 11 | 11 | `en_revision`, asociado a pre-reserva 25, monto 50000 ARS, medio `transferencia_mp` |
+
+**Implicación operativa para W4 (`confirmar_reserva`):** la pre-reserva 25 está ahora en `pago_en_revision`, que es el estado esperado para que W4 pueda promoverla a reserva confirmada. **W4 podrá operar sobre esta pre-reserva directamente.**
+
+### Template exportado al repo
+
+Template sanitizado en `Workflows/n8n/supabase/vita_w03_registrar_pago_supabase.template.json`. Placeholders reemplazados al sanitizar siguen la convención del repo.
+
+Detalle: el `Build Input` del template tiene los valores del happy path (Test 1), no los del Test 2. Es deliberado: el template debe importarse y ejecutarse exitosamente al primer intento.
+
+### Conclusión W3
+
+Workflow operativo, los 4 tests pasaron (uno requirió fix en Build Payload, documentado). Patrón base sigue siendo reutilizable. Próximo paso: **W4 — Confirmar reserva** (`confirmar_reserva()`), que va a promover la pre-reserva 25 a reserva confirmada usando el pago 11 como justificante.
+
+Generado como cierre formal de W3 — 2026-05-25.

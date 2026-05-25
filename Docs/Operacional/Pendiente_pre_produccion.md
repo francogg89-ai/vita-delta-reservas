@@ -334,3 +334,82 @@ MERCADOPAGO_ACCESS_TOKEN=__MERCADOPAGO_ACCESS_TOKEN__
   `Pendientes_Completados.md` con fecha de implementación.
 - **En la revisión pre-deploy:** verificar que TODOS los items se hayan
   resuelto o tengan decisión explícita de postergación.
+
+  ## Hardening de validación en funciones SQL write
+
+**Descubierto durante:** 6C — implementación de W3 (registrar_pago).
+**Fecha:** 2026-05-25.
+**Prioridad:** alta antes de TEST/PROD.
+**Bitácora detallada:** `Docs/Bitacora/6C_EJECUCION.md` — entrada W3, sección "Hallazgo importante".
+
+### Problema
+
+Las funciones de escritura del schema no son uniformes en cómo manejan strings vacíos en campos obligatorios. Específicamente, `registrar_pago()` extrae los campos obligatorios `tipo` y `medio_pago` así:
+
+```sql
+v_tipo := payload->>'tipo';
+v_medio_pago := payload->>'medio_pago';
+```
+
+Sin `NULLIF` y sin `TRIM`. Si el payload trae estos campos como `""` (string vacío), la validación posterior:
+
+```sql
+IF v_tipo IS NULL OR v_medio_pago IS NULL OR ... THEN
+  RETURN jsonb_build_object('ok', false, 'error', 'payload_invalido');
+END IF;
+```
+
+No los detecta como faltantes, porque `""` no es `NULL`. La función avanza hasta el INSERT y choca contra los CHECK constraints (`chk_pagos_tipo`, `chk_pagos_medio`), generando un error crudo de Postgres en vez de un JSONB estructurado.
+
+**Impacto:** un cliente que mande payload con campo obligatorio vacío recibe error 500 técnico en vez de `{ok: false, error: 'payload_invalido'}` controlado.
+
+### Mitigación temporal aplicada (6C)
+
+En W3 — Build Payload normaliza con `nv()` los campos obligatorios antes de mandar al payload (convierte `""` a `null` explícito). Esto hace que `payload->>'campo'` devuelve NULL real y la validación de la función rebota limpio.
+
+**Limitación de la mitigación:** solo cubre el camino de W3. Si en el futuro otro consumidor de la función (otro workflow, llamada directa SQL, etc.) manda payload con string vacío, el agujero sigue.
+
+### Fix estructural a aplicar antes de TEST/PROD
+
+Auditar todas las funciones write del schema y asegurar que los campos obligatorios de texto se normalicen con `NULLIF(TRIM(payload->>'campo'), '')` en el extract inicial:
+
+```sql
+-- Patrón correcto
+v_tipo := NULLIF(TRIM(payload->>'tipo'), '');
+v_medio_pago := NULLIF(TRIM(payload->>'medio_pago'), '');
+```
+
+**Pattern de referencia:** `crear_prereserva()` v1.7 ya aplica este patrón al nombre del huésped:
+
+```sql
+IF v_huesped_payload IS NULL OR NULLIF(TRIM(v_huesped_payload->>'nombre'), '') IS NULL THEN
+  RETURN jsonb_build_object('ok', false, 'error', 'huesped_nombre_requerido', ...);
+END IF;
+```
+
+### Funciones a auditar
+
+Al menos las siguientes (lista completa pendiente al revisar el schema):
+
+- [ ] `registrar_pago()` — confirmado: aplica al menos a `tipo` y `medio_pago`.
+- [ ] `crear_prereserva()` — revisar campos obligatorios distintos a `huesped.nombre`.
+- [ ] `confirmar_reserva()` — revisar al implementar W4.
+- [ ] `cancelar_prereserva()` — revisar al implementar W5.
+- [ ] `crear_bloqueo()` — revisar al implementar W6.
+- [ ] `upsert_huesped()` — revisar campos obligatorios.
+
+### Estrategia recomendada de implementación
+
+Hacerlo como cierre formal post-6C, análogo al cierre de 6B v1.7.1:
+
+1. Generar plan de cambio con snapshots de cada función previo a modificar.
+2. Aplicar `CREATE OR REPLACE FUNCTION` con el patrón unificado.
+3. Re-ejecutar los tests de cada workflow (W2-W6) para confirmar que el comportamiento de "happy path" no cambia.
+4. Confirmar que los tests negativos ahora devuelven `{ok: false, error: 'payload_invalido'}` aun **sin** la mitigación de Build Payload en n8n.
+5. Una vez confirmado, podemos **opcionalmente** retirar la mitigación defensiva de los workflows (los `nv()` en obligatorios). No es estrictamente necesario — pueden coexistir.
+
+### Decisión a tomar antes del fix
+
+¿La función debería rechazar también strings con solo whitespace (`"   "`)? El patrón con `TRIM` lo haría. **Recomendación: sí**, porque un campo con solo espacios no tiene valor semántico. Pero si algún caso de negocio real lo necesita, ajustar.
+
+Generado como parte del cierre de W3 — 2026-05-25.

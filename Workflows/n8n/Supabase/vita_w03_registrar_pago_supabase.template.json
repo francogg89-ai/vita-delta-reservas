@@ -1,0 +1,137 @@
+{
+  "name": "vita_w03_registrar_pago_supabase",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "f6239a20-ac0f-4f18-b7c1-c7b67125daf8",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W3 — Build Input\n// Edita los valores de `input` para probar distintos payloads.\n//\n// CONVENCIONES DEV:\n//   - canal y id_evento solo se usan para id_evento_dev (trazabilidad de pruebas)\n//   - W3 NO genera idempotency_key. La función registrar_pago() no la espera.\n//     En producción, el webhook de MercadoPago debe deduplicar por payment_id\n//     ANTES de llamar a W3.\n//   - source_event fijo: \"n8n_w03_registrar_pago_manual\"\n//\n// REFERENCIA (uno u otro, no ambos):\n//   - id_pre_reserva: pago de seña sobre pre-reserva activa\n//   - id_reserva: pago posterior a la confirmación (saldo, extra, etc.)\n//\n// VALORES ACEPTADOS POR CHECK CONSTRAINT EN `pagos`:\n//   - tipo:       'sena' | 'saldo' | 'extra' | 'reembolso' | 'ajuste'\n//   - medio_pago: 'transferencia_bancaria' | 'transferencia_mp' | 'mp_link' | 'cripto' | 'efectivo'\n//\n// ESTADO INICIAL:\n//   - Vacío -> queda en 'en_revision' (default para pagos manuales sin verificación).\n//   - 'confirmado' + monto_recibido = monto_esperado -> queda confirmado, validado por sistema_auto.\n//     Solo usar 'confirmado' cuando viene de MP webhook con confirmación, no para pruebas manuales.\n\n// === EDITAR ESTOS VALORES PARA CADA PRUEBA ===\nconst input = {\n  // Identificación del evento (solo para trazabilidad de pruebas)\n  canal: \"manual_dev\",\n  id_evento: \"test_w03_001\",\n\n  // Referencia (uno u otro, no ambos)\n  id_pre_reserva: 25,\n  id_reserva: null,\n\n  // Datos del pago\n  tipo: \"sena\",\n  medio_pago: \"transferencia_mp\",\n  monto_esperado: 50000,\n  monto_recibido: 50000,\n  moneda: \"ARS\",\n  es_automatico: false,\n\n  // Estado inicial (vacío = en_revision; \"confirmado\" solo para flujos automáticos verificados)\n  estado_inicial: \"\",\n\n  // Opcionales\n  comprobante_url: \"\",\n  referencia_externa: \"\",\n  notas: \"Pago de prueba W3 Test 1\",\n  proveedor: \"\",\n  cuenta_destino: \"\",\n  validado_por: \"\"\n};\n// =============================================\n\nreturn [{ json: input }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "9a85f95f-66fe-4c42-83cf-27379adf84d8",
+      "name": "Build Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W3 — Build Payload\n// Toma el input editable de Build Input y construye:\n//   1. source_event (convención 6C v1.2 Sección 5.5):\n//        n8n_w03_registrar_pago_manual\n//   2. id_evento_dev: solo para trazabilidad de pruebas en el wrapper\n//      (NO se manda a la función SQL).\n//   3. payload JSONB según contrato de registrar_pago(jsonb).\n//\n// CONTRATO PAYLOAD: ver firma real de registrar_pago en 6B_SCHEMA_SQL.md\n// v1.7.1 (Bloque correspondiente).\n//\n// CAMPOS OBLIGATORIOS (la función rebota con 'payload_invalido' si faltan):\n//   tipo, medio_pago, monto_esperado, monto_recibido, source_event\n//   + al menos uno de id_pre_reserva / id_reserva\n//\n// CAMPOS OPCIONALES (la función los procesa con NULLIF):\n//   moneda (default 'ARS'), es_automatico (default false), estado_inicial,\n//   comprobante_url, referencia_externa, tx_hash, validado_por, notas,\n//   proveedor, cuenta_destino\n//\n// W3 NO genera idempotency_key. La función no la espera ni la valida.\n// En producción, la deduplicación es responsabilidad del webhook caller.\n//\n// NORMALIZACIÓN DEFENSIVA (W3 v1.1):\n// Aplicamos nv() a TODOS los campos obligatorios (incluyendo tipo, medio_pago,\n// monto_esperado, monto_recibido), no solo a los opcionales. Razón:\n// registrar_pago() NO aplica NULLIF a 'tipo' ni 'medio_pago', por lo que un\n// string vacío \"\" pasa la validación inicial y termina chocando contra el\n// CHECK constraint chk_pagos_tipo / chk_pagos_medio, generando un error\n// crudo de Postgres en vez de un JSONB controlado.\n// Al mandar null explícito desde n8n, payload->>'tipo' devuelve NULL real\n// y la validación devuelve {ok:false, error:'payload_invalido'} limpio.\n//\n// Pendiente futuro: hardening de registrar_pago() para aplicar\n// NULLIF(TRIM(...), '') en campos obligatorios de texto. Registrado en\n// Pendiente_pre_produccion.md.\n\nconst input = $input.first().json;\n\nconst source_event = 'n8n_w03_registrar_pago_manual';\n\n// id_evento_dev: trazabilidad de la prueba, queda en el wrapper externo,\n// NO se manda a la función SQL.\nconst id_evento_dev = `${input.canal}_${input.id_evento}`;\n\n// Helper: convierte string vacío en null, deja el resto tal cual\nconst nv = (v) => (v === '' || v === undefined ? null : v);\n\nconst payload = {\n  // Referencias (uno u otro, no ambos)\n  id_pre_reserva: input.id_pre_reserva,\n  id_reserva: input.id_reserva,\n\n  // Obligatorios (con normalización defensiva por bug de validación SQL)\n  tipo: nv(input.tipo),\n  medio_pago: nv(input.medio_pago),\n  monto_esperado: nv(input.monto_esperado),\n  monto_recibido: nv(input.monto_recibido),\n  source_event,\n\n  // Opcionales\n  moneda: input.moneda,\n  es_automatico: input.es_automatico,\n  estado_inicial: nv(input.estado_inicial),\n  comprobante_url: nv(input.comprobante_url),\n  referencia_externa: nv(input.referencia_externa),\n  tx_hash: null,\n  notas: nv(input.notas),\n  proveedor: nv(input.proveedor),\n  cuenta_destino: nv(input.cuenta_destino),\n  validado_por: nv(input.validado_por)\n};\n\nreturn [{\n  json: {\n    payload,\n    source_event,\n    id_evento_dev,\n    input  // se preserva para trazabilidad en Build Response\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "05f3bcad-d763-48f9-93f4-c1cc9d0a8622",
+      "name": "Build Payload"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT registrar_pago($1::jsonb) AS resultado;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.payload) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        0
+      ],
+      "id": "dbf1416e-8998-476c-949c-315117399b1d",
+      "name": "Call registrar_pago",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// W3 — Build Response\n// Interpreta el JSONB que devuelve registrar_pago() y arma el wrapper externo.\n//\n// Contrato de salida de la función:\n//   - happy:           { ok: true, id_pago, estado: 'en_revision'|'confirmado' }\n//   - v1.3 (terminal): { ok: true, id_pago, estado: 'en_revision',\n//                        warning: 'prereserva_no_activa',\n//                        prereserva_estado: '<estado_terminal>' }\n//   - error:           { ok: false, error: '<codigo>', ...detalle }\n//\n// CONVENCIONES DEL WRAPPER:\n//   - ok = resultado.ok (la función devuelve ok=true también para casos v1.3).\n//   - error solo se llena cuando resultado.ok = false.\n//   - id_evento_dev se incluye para trazabilidad de qué prueba generó qué pago.\n//   - result siempre lleva el JSONB completo de la función.\n//   - warning del caso v1.3 se eleva al nivel del wrapper para que sea visible\n//     sin tener que entrar a result.\n//\n// W3 NO incluye idempotency_key en el wrapper (no aplica).\n\nconst buildPayload = $('Build Payload').first().json;\nconst pgItem = items[0]?.json;\nconst resultado = pgItem?.resultado;\n\nif (!resultado || typeof resultado !== 'object') {\n  return [{\n    json: {\n      ok: false,\n      workflow: 'vita_w03_registrar_pago_supabase',\n      source_event: buildPayload.source_event,\n      id_evento_dev: buildPayload.id_evento_dev,\n      error: 'sin_respuesta_de_funcion',\n      warning: null,\n      result: null,\n      executed_at: new Date().toISOString()\n    }\n  }];\n}\n\nconst ok = resultado.ok === true;\n\nreturn [{\n  json: {\n    ok,\n    workflow: 'vita_w03_registrar_pago_supabase',\n    source_event: buildPayload.source_event,\n    id_evento_dev: buildPayload.id_evento_dev,\n    error: ok ? null : (resultado.error || 'error_desconocido'),\n    warning: resultado.warning || null,\n    result: resultado,\n    executed_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "99e6199c-475e-4bad-b8a1-4eefc296ceff",
+      "name": "Build Response"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Build Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Input": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "Call registrar_pago",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call registrar_pago": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "__WORKFLOW_VERSION_ID__",
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "id": "__WORKFLOW_ID__",
+  "tags": []
+}
