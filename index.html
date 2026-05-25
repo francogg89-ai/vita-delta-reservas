@@ -688,9 +688,9 @@
   <p class="hero-subtitle">Un sistema operativo para digitalizar, automatizar y escalar las reservas del complejo de cabañas — sin depender de mensajes manuales ni tablas improvisadas.</p>
   <div class="hero-badges">
     <span class="badge badge-green"><span class="badge-dot"></span>Arquitectura cerrada</span>
-    <span class="badge badge-green"><span class="badge-dot"></span>DEV y TEST validados</span>
-    <span class="badge badge-green"><span class="badge-dot"></span>5 workflows validados</span>
-    <span class="badge badge-green"><span class="badge-dot"></span>Reserva definitiva validada</span>
+    <span class="badge badge-green"><span class="badge-dot"></span>Backend Supabase DEV implementado</span>
+    <span class="badge badge-green"><span class="badge-dot"></span>Etapa 6B cerrada</span>
+    <span class="badge badge-amber"><span class="badge-dot"></span>Etapa 6C en marcha · W0 y W1 validados</span>
   </div>
 </section>
 
@@ -702,22 +702,22 @@
     <div class="summary-card reveal">
       <div class="summary-icon">🏗️</div>
       <h3>No es solo una web</h3>
-      <p>Es una arquitectura operativa completa: disponibilidad, pre-reservas, precios, pagos futuros, bot y calendario.</p>
+      <p>Es una arquitectura operativa completa: backend en PostgreSQL/Supabase, disponibilidad en tiempo real, pre-reservas, pagos, bot futuro y operación interna.</p>
     </div>
     <div class="summary-card reveal">
-      <div class="summary-icon">⚙️</div>
-      <h3>Funciona en DEV y TEST</h3>
-      <p>Los primeros cinco workflows están validados en entornos separados. El sistema ya registra consultas, bloquea fechas, registra pagos y confirma reservas definitivas.</p>
+      <div class="summary-icon">🗄️</div>
+      <h3>Base técnica construida</h3>
+      <p>El backend en Supabase DEV está implementado: schema, funciones, triggers, vistas y expiración automática de pre-reservas. Ya no es Google Sheets — es PostgreSQL real.</p>
     </div>
     <div class="summary-card reveal">
       <div class="summary-icon">📐</div>
       <h3>Diseñado para crecer</h3>
-      <p>Cada pieza es modular. Se puede migrar a una base de datos real sin reescribir la lógica central.</p>
+      <p>Cada pieza es modular. El mismo backend que funciona hoy en DEV es el que irá a producción, con los mismos workflows y la misma lógica.</p>
     </div>
     <div class="summary-card reveal">
       <div class="summary-icon">🔐</div>
       <h3>La IA no decide sola</h3>
-      <p>La inteligencia artificial conversa, pero los workflows operan. Ninguna reserva se confirma sin pasar por el motor determinístico.</p>
+      <p>La inteligencia artificial conversa, pero los workflows operan y PostgreSQL aplica las reglas. Ninguna reserva se confirma sin pasar por lógica determinística.</p>
     </div>
   </div>
 </section>
@@ -758,7 +758,7 @@
       <div class="arch-icon arch-icon-user">👤</div>
       <div class="arch-text">
         <h4>Huésped o interesado</h4>
-        <p>Entra por WhatsApp, Instagram, formulario web o bot conversacional.</p>
+        <p>Futuro punto de entrada: WhatsApp, Instagram, formulario web o bot conversacional.</p>
       </div>
     </div>
 
@@ -767,8 +767,8 @@
     <div class="arch-layer">
       <div class="arch-icon arch-icon-ai">🤖</div>
       <div class="arch-text">
-        <h4>IA / Formulario (futuro)</h4>
-        <p>Interpreta la consulta y la traduce a llamadas estructuradas. No toma decisiones críticas.</p>
+        <h4>IA / Canal de entrada (futuro)</h4>
+        <p>Interpreta la consulta y la traduce a llamadas estructuradas. No toma decisiones críticas ni confirma reservas por sí sola.</p>
       </div>
     </div>
 
@@ -777,18 +777,18 @@
     <div class="arch-layer">
       <div class="arch-icon arch-icon-n8n">⚙️</div>
       <div class="arch-text">
-        <h4>Motor n8n — workflows determinísticos</h4>
-        <p>Verifica disponibilidad, crea consultas, registra pre-reservas, valida pagos y confirma reservas con reglas fijas.</p>
+        <h4>n8n — orquestador de workflows</h4>
+        <p>Coordina el flujo operativo: consulta disponibilidad, crea pre-reservas, registra pagos y confirma reservas. Delega las reglas críticas a la base de datos.</p>
       </div>
     </div>
 
     <div class="arch-connector"></div>
 
     <div class="arch-layer">
-      <div class="arch-icon arch-icon-sheets">📊</div>
+      <div class="arch-icon arch-icon-sheets">🐘</div>
       <div class="arch-text">
-        <h4>Google Sheets — base de datos operativa</h4>
-        <p>RESERVAS, DISPONIBILIDAD_CACHE, TARIFAS, CONSULTAS. Fuente de verdad única y auditable por cualquier persona del equipo.</p>
+        <h4>Supabase / PostgreSQL — fuente de verdad</h4>
+        <p>El backend real. Aquí viven las reglas de negocio, las funciones atómicas, los triggers de auditoría y la expiración automática de pre-reservas vía pg_cron.</p>
       </div>
     </div>
 
@@ -797,8 +797,8 @@
     <div class="arch-layer">
       <div class="arch-icon arch-icon-humans">👥</div>
       <div class="arch-text">
-        <h4>Equipo humano — auditoría y operación</h4>
-        <p>Franco, Rodrigo y Vicky ven el estado real en tiempo real. Jennifer recibe el calendario de limpieza.</p>
+        <h4>Vistas operativas y equipo humano</h4>
+        <p>Franco y Rodrigo verifican pagos y aprueban confirmaciones. Las vistas SQL muestran el estado operativo en tiempo real.</p>
       </div>
     </div>
 
@@ -807,22 +807,22 @@
 
 <!-- ─── WORKFLOWS VALIDADOS ─── -->
 <section class="workflows">
-  <div class="section-label">Ya funcionando</div>
-  <h2 class="section-title">Workflows validados en DEV y TEST</h2>
+  <div class="section-label">Etapa 6C — Workflows contra Supabase</div>
+  <h2 class="section-title">Workflows n8n contra el backend real</h2>
   <div class="wf-grid">
 
     <div class="wf-card reveal">
       <div class="wf-header">
         <span class="wf-status">Validado ✓</span>
-        <div class="wf-name">db_recalcular_disponibilidad · v8</div>
-        <div class="wf-title">Motor de Disponibilidad</div>
+        <div class="wf-name">vita_w00_smoke_test_supabase · W0</div>
+        <div class="wf-title">Smoke Test Supabase</div>
       </div>
       <div class="wf-body">
-        <p class="wf-desc">Regenera completa la tabla DISPONIBILIDAD_CACHE para todas las cabañas y fechas. Se ejecuta automáticamente después de cada operación que afecte disponibilidad. Garantiza que nunca haya datos desincronizados.</p>
+        <p class="wf-desc">Verifica la conectividad básica de n8n contra Supabase DEV. Confirma que los workflows pueden hablar con el backend real antes de ejecutar cualquier lógica operativa.</p>
         <div class="wf-tags">
-          <span class="wf-tag">Recalcula todo</span>
-          <span class="wf-tag">Sin parámetros extra</span>
-          <span class="wf-tag">Fuente única</span>
+          <span class="wf-tag">Conectividad</span>
+          <span class="wf-tag">Validación base</span>
+          <span class="wf-tag">Cerrado</span>
         </div>
       </div>
     </div>
@@ -830,66 +830,81 @@
     <div class="wf-card reveal">
       <div class="wf-header">
         <span class="wf-status">Validado ✓</span>
-        <div class="wf-name">db_crear_consulta · v3</div>
-        <div class="wf-title">Registro de Consulta</div>
+        <div class="wf-name">vita_w01_consultar_disponibilidad · W1</div>
+        <div class="wf-title">Consulta de Disponibilidad</div>
       </div>
       <div class="wf-body">
-        <p class="wf-desc">Cuando alguien pregunta por disponibilidad, este workflow registra la consulta o recupera una consulta activa existente. Evita duplicados y deja trazabilidad de todos los interesados, incluso los que no reservan.</p>
+        <p class="wf-desc">Consulta disponibilidad al vuelo usando la función <em>obtener_disponibilidad_rango()</em> en PostgreSQL. No hay cache que mantener: la fuente de verdad responde en tiempo real. Incluye regla D47: checkout domingo 16:00.</p>
         <div class="wf-tags">
-          <span class="wf-tag">Anti-duplicados</span>
-          <span class="wf-tag">Historial</span>
-          <span class="wf-tag">Trazabilidad</span>
+          <span class="wf-tag">Tiempo real</span>
+          <span class="wf-tag">Sin cache</span>
+          <span class="wf-tag">D47 aplicado</span>
+          <span class="wf-tag">Cerrado</span>
         </div>
       </div>
     </div>
 
     <div class="wf-card reveal">
       <div class="wf-header">
-        <span class="wf-status">Validado ✓</span>
-        <div class="wf-name">db_crear_prereserva · v2</div>
-        <div class="wf-title">Pre-reserva Temporal</div>
+        <span class="wf-status" style="background:rgba(200,134,42,0.2);border-color:rgba(200,134,42,0.4);color:var(--amber-light);">En diseño →</span>
+        <div class="wf-name">vita_w02_crear_prereserva · W2</div>
+        <div class="wf-title">Crear Pre-reserva</div>
       </div>
       <div class="wf-body">
-        <p class="wf-desc">Crea una pre-reserva con fecha de vencimiento, verificando disponibilidad en dos capas antes de bloquear las fechas. Si hay conflicto, rechaza la operación. Llama automáticamente al motor de disponibilidad al finalizar.</p>
+        <p class="wf-desc">Llamará a <em>crear_prereserva()</em> en Supabase: valida disponibilidad, registra al huésped vía upsert y bloquea las fechas en una sola operación atómica. n8n genera el <em>idempotency_key</em>.</p>
         <div class="wf-tags">
-          <span class="wf-tag">Doble verificación</span>
-          <span class="wf-tag">Bloqueo temporal</span>
-          <span class="wf-tag">Vencimiento</span>
-          <span class="wf-tag">Anti-solapamiento</span>
+          <span class="wf-tag">Atómico</span>
+          <span class="wf-tag">Idempotente</span>
+          <span class="wf-tag">Pendiente</span>
         </div>
       </div>
     </div>
 
     <div class="wf-card reveal">
       <div class="wf-header">
-        <span class="wf-status">Validado ✓</span>
-        <div class="wf-name">db_registrar_pago · v1</div>
-        <div class="wf-title">Registro de Pago</div>
+        <span class="wf-status" style="background:rgba(200,134,42,0.2);border-color:rgba(200,134,42,0.4);color:var(--amber-light);">En diseño →</span>
+        <div class="wf-name">vita_w03_registrar_pago · W3</div>
+        <div class="wf-title">Registrar Pago</div>
       </div>
       <div class="wf-body">
-        <p class="wf-desc">Registra el pago reportado por el huésped y lo deja en estado <em>en_revision</em>. La pre-reserva pasa de <em>pendiente_pago</em> a <em>pago_en_revision</em> y sigue bloqueando disponibilidad aunque la fecha de vencimiento original haya expirado. El pago queda pendiente de revisión manual antes de confirmar la reserva.</p>
+        <p class="wf-desc">Registrará el pago reportado por el huésped. La pre-reserva pasará a estado <em>pago_en_revision</em> y el bloqueo de fechas se extiende mientras el equipo verifica la transferencia.</p>
         <div class="wf-tags">
-          <span class="wf-tag">Pago en revisión</span>
-          <span class="wf-tag">Bloqueo extendido</span>
           <span class="wf-tag">Revisión manual</span>
-          <span class="wf-tag">Trazabilidad</span>
+          <span class="wf-tag">Bloqueo extendido</span>
+          <span class="wf-tag">Pendiente</span>
         </div>
       </div>
     </div>
 
     <div class="wf-card reveal">
       <div class="wf-header">
-        <span class="wf-status">Validado ✓</span>
-        <div class="wf-name">db_confirmar_reserva · v1</div>
-        <div class="wf-title">Confirmación Definitiva</div>
+        <span class="wf-status" style="background:rgba(200,134,42,0.2);border-color:rgba(200,134,42,0.4);color:var(--amber-light);">En diseño →</span>
+        <div class="wf-name">vita_w04_confirmar_reserva · W4</div>
+        <div class="wf-title">Confirmar Reserva</div>
       </div>
       <div class="wf-body">
-        <p class="wf-desc">Confirma la reserva definitiva a partir de una PRE_RESERVA en <em>pago_en_revision</em> y un PAGO en <em>en_revision</em>. Crea la RESERVA confirmada, convierte la pre-reserva al estado <em>convertida</em> y marca el pago como <em>confirmado</em>. Recalcula la cache de disponibilidad al finalizar.</p>
+        <p class="wf-desc">Llamará a <em>confirmar_reserva()</em> tras la aprobación manual del pago. Crea la reserva definitiva, convierte la pre-reserva y marca el pago como confirmado en una operación atómica.</p>
         <div class="wf-tags">
-          <span class="wf-tag">Reserva confirmada</span>
-          <span class="wf-tag">Pago validado</span>
-          <span class="wf-tag">Trazabilidad</span>
-          <span class="wf-tag">Recalcula cache</span>
+          <span class="wf-tag">Reserva definitiva</span>
+          <span class="wf-tag">Atómico</span>
+          <span class="wf-tag">Pendiente</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="wf-card reveal">
+      <div class="wf-header">
+        <span class="wf-status" style="background:rgba(200,134,42,0.2);border-color:rgba(200,134,42,0.4);color:var(--amber-light);">En diseño →</span>
+        <div class="wf-name">vita_w05–w07 · W5 / W6 / W7</div>
+        <div class="wf-title">Cancelar · Bloqueo · Vistas</div>
+      </div>
+      <div class="wf-body">
+        <p class="wf-desc">W5 cancela pre-reservas manualmente. W6 crea bloqueos operativos (mantenimiento, cierre temporal). W7 expone vistas operativas del estado real del complejo para el equipo interno.</p>
+        <div class="wf-tags">
+          <span class="wf-tag">Cancelación</span>
+          <span class="wf-tag">Bloqueos</span>
+          <span class="wf-tag">Vistas internas</span>
+          <span class="wf-tag">Pendiente</span>
         </div>
       </div>
     </div>
@@ -961,58 +976,78 @@
         <td><span class="chip chip-done">✓ Completo</span></td>
       </tr>
       <tr>
-        <td>Google Sheets (DEV y TEST)</td>
-        <td>24 hojas, encabezados, validaciones y protecciones</td>
+        <td>Google Sheets (legacy)</td>
+        <td>Etapa prototipo cerrada — ya no es la fuente de verdad operativa</td>
+        <td><span class="chip chip-done">✓ Superado</span></td>
+      </tr>
+      <tr>
+        <td>Supabase DEV — Schema</td>
+        <td>PostgreSQL v1.7.1: tablas, enums, índices, constraints</td>
         <td><span class="chip chip-done">✓ Completo</span></td>
       </tr>
       <tr>
-        <td>Motor de disponibilidad</td>
-        <td>db_recalcular_disponibilidad v8 validado</td>
+        <td>Supabase DEV — Funciones</td>
+        <td>crear_prereserva(), confirmar_reserva(), obtener_disponibilidad_rango() y más</td>
         <td><span class="chip chip-done">✓ Completo</span></td>
       </tr>
       <tr>
-        <td>Registro de consultas</td>
-        <td>db_crear_consulta v3 validado</td>
-        <td><span class="chip chip-done">✓ Completo</span></td>
-      </tr>
-      <tr>
-        <td>Pre-reservas</td>
-        <td>db_crear_prereserva v2 con doble verificación</td>
-        <td><span class="chip chip-done">✓ Completo</span></td>
-      </tr>
-      <tr>
-        <td>Documentación técnica</td>
-        <td>Contratos de API, templates, decisiones cerradas</td>
-        <td><span class="chip chip-done">✓ Completo</span></td>
-      </tr>
-      <tr>
-        <td>Registro de pagos</td>
-        <td>db_registrar_pago v1 — pago en revisión, bloqueo extendido</td>
-        <td><span class="chip chip-done">✓ Completo</span></td>
-      </tr>
-      <tr>
-        <td>Confirmación definitiva</td>
-        <td>db_confirmar_reserva v1 — reserva confirmada tras validación manual</td>
+        <td>Supabase DEV — Reglas y triggers</td>
+        <td>D47 (checkout domingo 16:00), auditoría, validaciones en base</td>
         <td><span class="chip chip-done">✓ Completo</span></td>
       </tr>
       <tr>
         <td>Expiración automática</td>
-        <td>sistema_expirar_prereservas</td>
+        <td>pg_cron expira pre-reservas vencidas cada 5 minutos</td>
+        <td><span class="chip chip-done">✓ Completo</span></td>
+      </tr>
+      <tr>
+        <td>W0 — Smoke test Supabase</td>
+        <td>Conectividad n8n ↔ Supabase DEV validada</td>
+        <td><span class="chip chip-done">✓ Completo</span></td>
+      </tr>
+      <tr>
+        <td>W1 — Disponibilidad</td>
+        <td>Consulta al vuelo con obtener_disponibilidad_rango() — validado</td>
+        <td><span class="chip chip-done">✓ Completo</span></td>
+      </tr>
+      <tr>
+        <td>W2 — Crear pre-reserva</td>
+        <td>vita_w02_crear_prereserva contra Supabase</td>
         <td><span class="chip chip-pending">→ Pendiente</span></td>
       </tr>
       <tr>
-        <td>Bot conversacional</td>
-        <td>WhatsApp / Instagram con IA</td>
+        <td>W3 — Registrar pago</td>
+        <td>vita_w03_registrar_pago</td>
+        <td><span class="chip chip-pending">→ Pendiente</span></td>
+      </tr>
+      <tr>
+        <td>W4 — Confirmar reserva</td>
+        <td>vita_w04_confirmar_reserva</td>
+        <td><span class="chip chip-pending">→ Pendiente</span></td>
+      </tr>
+      <tr>
+        <td>W5–W7 — Cancelar / Bloqueo / Vistas</td>
+        <td>Operaciones complementarias</td>
+        <td><span class="chip chip-pending">→ Pendiente</span></td>
+      </tr>
+      <tr>
+        <td>Canales reales</td>
+        <td>WhatsApp, Instagram, bot IA conectado</td>
         <td><span class="chip chip-future">◦ Futuro</span></td>
       </tr>
       <tr>
         <td>Web pública de reservas</td>
-        <td>Formulario real conectado al motor</td>
+        <td>Frontend conectado al backend real</td>
         <td><span class="chip chip-future">◦ Futuro</span></td>
       </tr>
       <tr>
-        <td>Pagos automáticos</td>
-        <td>MercadoPago integrado</td>
+        <td>MercadoPago automático</td>
+        <td>Integración de pagos automatizados</td>
+        <td><span class="chip chip-future">◦ Futuro</span></td>
+      </tr>
+      <tr>
+        <td>Producción</td>
+        <td>RLS, Auth, entorno productivo</td>
         <td><span class="chip chip-future">◦ Futuro</span></td>
       </tr>
     </tbody>
