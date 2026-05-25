@@ -1115,3 +1115,90 @@ Supabase detectó incorrectamente las **variables locales PL/pgSQL** `v_config`,
 - Domingo 2026-06-07 devuelve `hora_checkout_base = 16:00:00`
 
 **Estado:** DEV alineado con schema v1.7.1.
+
+---
+
+Entrada de bitácora — Cierre 6B: alineación de DEV con v1.7.1
+
+Cómo usar este archivo: copiar el bloque de abajo y pegarlo al final de Docs/Bitacora/6B_EJECUCION_DEV.md, respetando el formato/estilo de las entradas previas. Si tu bitácora usa otro formato (ej. cabecera distinta, secciones diferentes), adaptá la estructura pero conservá los datos clave.
+
+
+2026-05-25 — Cierre 6B: alineación de DEV con 6B_SCHEMA_SQL.md v1.7.1
+Tipo: cierre final de Etapa 6B (no inicio de 6C).
+Objetivo: actualizar obtener_disponibilidad_rango() para que hora_checkout_base aplique la regla D47 (16:00 los domingos), alineando la lectura de disponibilidad con la regla operativa que crear_prereserva() ya aplica desde v1.7.
+Documento de referencia: PLAN_CIERRE_6B_ALINEACION_v1.7.1.md v1.1.
+Camino usado: principal (CREATE OR REPLACE FUNCTION). Sin fallback necesario.
+Resultado: OK.
+Snapshots pre-cambio guardados
+
+Snapshot de obtener_disponibilidad_rango() v1.7 → guardado en local (archivo .md con el SQL completo de la función previa).
+Snapshot de vista_disponibilidad (definición pre-cambio, con horizonte 60 días hardcoded) → guardado en local.
+
+Análisis de dependencias previo (read-only)
+Paso 2.1.a — pg_depend:
+
+1 fila con objid = 18732 (OID interno, corresponde a la regla _RETURN de vista_disponibilidad), deptype = n.
+Confirmación: pg_depend no muestra la vista por nombre porque la dependencia pasa por pg_rewrite.
+
+Paso 2.1.b — pg_get_viewdef:
+
+6 vistas inspeccionadas.
+Única dependiente: vista_disponibilidad (usa_funcion = true).
+Las otras 5 vistas (vista_calendario, vista_calendario_semanal, vista_limpieza_semana, vista_ocupacion, vista_prereservas_activas) no consultan la función.
+
+Paso 2.2 — definición de vista_disponibilidad (snapshot):
+sqlSELECT id_cabana, fecha, estado, tipo_dia, temporada,
+       hora_checkin_base, hora_checkout_base,
+       id_reserva_activa, id_prereserva_activa
+FROM obtener_disponibilidad_rango(CURRENT_DATE, CURRENT_DATE + 60, NULL::bigint)
+     obtener_disponibilidad_rango(id_cabana, fecha, estado, tipo_dia, temporada,
+                                  hora_checkin_base, hora_checkout_base,
+                                  id_reserva_activa, id_prereserva_activa);
+Horizonte 60 días hardcoded confirmado (alineado con Pendiente_pre_produccion.md punto 1.1).
+Baseline funcional (Paso 3) — bug confirmado pre-cambio
+Query sobre domingo 2026-06-07 y lunes 2026-06-08, cabaña Bamboo (id=17):
+fechadowhora_checkin_basehora_checkout_base2026-06-070 (domingo)18:00:0010:00:00 ← bug presente2026-06-081 (lunes)13:00:0010:00:00
+Confirmado: la regla dominical de check-in ya existía en la función; la de check-out aún no. Coherente con v1.7.
+Cambio aplicado (Paso 4)
+CREATE OR REPLACE FUNCTION obtener_disponibilidad_rango(...) con el cuerpo de 6B_SCHEMA_SQL.md v1.7.1 Bloque 12.
+
+Diferencia única respecto a v1.7: línea de hora_checkout_base pasa de TIME '10:00' literal a CASE WHEN EXTRACT(DOW FROM m.fecha) = 0 THEN TIME '16:00' ELSE TIME '10:00' END.
+Firma de función: idéntica.
+Tipos de retorno: idénticos.
+Sin pop-up destructivo de Supabase Dashboard.
+Sin error de sintaxis (el bug del Dashboard sobre variables v_* no se reprodujo — la función no tiene DECLARE).
+Resultado SQL Editor: "Success. No rows returned".
+
+Verificaciones post-cambio (Paso 5)
+5.1 — La función fue actualizada:
+sqlSELECT pg_get_functiondef(p.oid) LIKE '%CASE WHEN EXTRACT(DOW FROM m.fecha) = 0 THEN TIME ''16:00''%' AS regla_d47_aplicada
+FROM pg_proc p
+WHERE p.proname = 'obtener_disponibilidad_rango';
+Resultado: regla_d47_aplicada = true. OK.
+5.2 — La vista sigue existiendo y funcionando:
+sqlSELECT COUNT(*) AS filas_vista FROM vista_disponibilidad;
+Resultado: filas_vista = 300 (5 cabañas × 60 días). OK. La dependencia se preservó como esperábamos con CREATE OR REPLACE.
+5.3 — Comportamiento dominical correcto en la función (post-cambio):
+fechadowhora_checkin_basehora_checkout_base2026-06-070 (domingo)18:00:0016:00:00 ✅2026-06-081 (lunes)13:00:0010:00:00 ✅
+Diferencia con baseline: solo hora_checkout_base del domingo cambia de 10:00 a 16:00. Cambio quirúrgico. OK.
+5.4 — Comportamiento dominical correcto en la vista (verificación crítica):
+sqlSELECT fecha, EXTRACT(DOW FROM fecha) AS dow, hora_checkout_base
+FROM vista_disponibilidad
+WHERE EXTRACT(DOW FROM fecha) = 0
+LIMIT 5;
+Resultado: 5 filas, fecha = 2026-05-31 (primer domingo del horizonte), una por cada cabaña activa, todas con hora_checkout_base = 16:00:00. OK.
+Confirmación: las vistas SQL no son materializadas; el cambio en la función se propaga automáticamente al consumir la vista, sin necesidad de recrearla.
+5.5 — Las otras vistas siguen funcionando (no-regresión):
+VistaFilasEstadovista_disponibilidad300OKvista_calendario0OK (sin reservas confirmadas en DEV)vista_prereservas_activas0OK (sin pre-reservas activas ahora)vista_ocupacion125OK (5 cabañas × 25 meses, en 0 noches ocupadas)vista_calendario_semanal35OK (5 cabañas × 7 días)vista_limpieza_semana0OK (sin movimientos en próximos 7 días)
+Ninguna vista falló por error de schema o dependencia rota. OK.
+Conclusión
+
+DEV alineado con 6B_SCHEMA_SQL.md v1.7.1.
+crear_prereserva() y obtener_disponibilidad_rango() ahora aplican D47 consistentemente, tanto en escritura como en lectura.
+vista_disponibilidad refleja el cambio automáticamente sin recreación.
+Etapa 6B cerrada formalmente.
+
+Próximo paso
+Iniciar Etapa 6C — Reescritura de Workflows n8n contra Supabase DEV — comenzando por W0 (Smoke test), según Docs/Implementacion/6C_REESCRITURA_WORKFLOWS_SUPABASE.md v1.2.
+
+Entrada generada por Franco + Claude como cierre de Etapa 6B post-ejecución v1.7.1.
