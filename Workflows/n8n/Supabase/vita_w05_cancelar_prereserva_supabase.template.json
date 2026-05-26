@@ -1,0 +1,137 @@
+{
+  "name": "vita_w05_cancelar_prereserva_supabase",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "94c1108a-0cc7-4428-bc5c-8d06065a1ab8",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W5 — Build Input\n// Edita los valores de `input` para probar distintos payloads.\n//\n// CONVENCIONES DEV:\n//   - canal y id_evento solo se usan para id_evento_dev (trazabilidad de pruebas)\n//   - W5 NO genera idempotency_key. La función cancelar_prereserva() no la espera.\n//     Tampoco implementa idempotent_match: re-cancelar una pre-reserva ya\n//     terminal devuelve error 'estado_no_cancelable'.\n//   - source_event fijo: \"n8n_w05_cancelar_prereserva_manual\"\n//\n// MOTIVOS VÁLIDOS (enum implícito en la función):\n//   - \"cliente\" -> pre-reserva pasa a 'cancelada_por_cliente'\n//   - \"bloqueo\" -> pre-reserva pasa a 'cancelada_por_bloqueo'\n//   Cualquier otro valor (incluido \"\" o null) rebota con error 'motivo_invalido'.\n//\n// EFECTO SOBRE PAGOS ASOCIADOS:\n//   La función NO modifica pagos. Solo los cuenta y los reporta en el output.\n//   Si una pre-reserva tiene pagos asociados al momento de cancelar, esos pagos\n//   quedan \"huérfanos\" tras la cancelación, esperando decisión humana (reembolso,\n//   anulación, etc.). El reembolso real es trabajo de un workflow operativo aparte.\n\n// === EDITAR ESTOS VALORES PARA CADA PRUEBA ===\nconst input = {\n  // Identificación del evento (solo para trazabilidad de pruebas)\n  canal: \"manual_dev\",\n  id_evento: \"test_w05_001\",\n\n  // Obligatorio (debe corresponder a una pre-reserva en estado pendiente_pago o pago_en_revision)\n  id_pre_reserva: 0,  // ← reemplazar por el ID de la pre-reserva nueva creada con W2 (Test 0)\n\n  // Motivo (obligatorio): \"cliente\" o \"bloqueo\"\n  motivo: \"cliente\",\n\n  // Descripción libre (opcional, queda en log_cambios)\n  descripcion: \"Cliente cancela por cambio de planes - test W5 happy path\"\n};\n// =============================================\n\nreturn [{ json: input }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "8666a35c-7af7-4227-b38e-f034ddc0b026",
+      "name": "Build Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W5 — Build Payload\n// Toma el input editable de Build Input y construye:\n//   1. source_event (convención 6C v1.2 Sección 5.5):\n//        n8n_w05_cancelar_prereserva_manual\n//   2. id_evento_dev: solo para trazabilidad de pruebas en el wrapper\n//      (NO se manda a la función SQL).\n//   3. payload JSONB según contrato de cancelar_prereserva(jsonb).\n//\n// CONTRATO PAYLOAD:\n//   Obligatorios: id_pre_reserva, motivo, source_event\n//   Opcionales:   descripcion (texto libre que queda en log_cambios)\n//\n// W5 NO genera idempotency_key. La función no la espera ni implementa\n// idempotent_match (mismo patrón que confirmar_reserva).\n//\n// NORMALIZACIÓN DEFENSIVA (continuación de patrón W3/W4):\n// Aplicamos nv() a todos los campos incluyendo los obligatorios.\n// La función cancelar_prereserva() no aplica NULLIF en sus extracts;\n// mientras el hardening SQL no se aplique (ver Pendiente_pre_produccion.md),\n// la defensa queda en n8n.\n//\n// Caso especial 'motivo': si viene como \"\" se manda como null, lo cual la\n// función detecta como payload_invalido en lugar de motivo_invalido. Es OK:\n// ambos son errores de payload mal armado, no de negocio.\n\nconst input = $input.first().json;\n\nconst source_event = 'n8n_w05_cancelar_prereserva_manual';\nconst id_evento_dev = `${input.canal}_${input.id_evento}`;\n\nconst nv = (v) => (v === '' || v === undefined ? null : v);\n\nconst payload = {\n  // Obligatorios (con normalización defensiva)\n  id_pre_reserva: nv(input.id_pre_reserva),\n  motivo: nv(input.motivo),\n  source_event,\n\n  // Opcionales\n  descripcion: nv(input.descripcion)\n};\n\nreturn [{\n  json: {\n    payload,\n    source_event,\n    id_evento_dev,\n    input  // se preserva para trazabilidad en Build Response\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "507aeea8-e58e-4003-9bde-1493ffc810f7",
+      "name": "Build Payload"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT cancelar_prereserva($1::jsonb) AS resultado;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.payload) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        0
+      ],
+      "id": "56c7f9ae-a675-4beb-8e98-b8feec50f5ee",
+      "name": "Call cancelar_prereserva",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// W5 — Build Response\n// Interpreta el JSONB que devuelve cancelar_prereserva() y arma el wrapper externo.\n//\n// Contrato de salida de la función:\n//   - happy: { ok: true, id_pre_reserva, estado_anterior, estado_nuevo,\n//              pagos_asociados_count, pagos_asociados_ids }\n//   - error: { ok: false, error: '<codigo>', ...detalle }\n//\n// CONVENCIONES DEL WRAPPER:\n//   - ok = resultado.ok\n//   - error solo se llena cuando resultado.ok = false\n//   - id_evento_dev para trazabilidad de pruebas\n//   - result siempre lleva el JSONB completo de la función\n//\n// W5 NO incluye idempotency_key (no aplica) ni warning (la función no\n// emite warnings — re-cancelar devuelve error \"estado_no_cancelable\").\n\nconst buildPayload = $('Build Payload').first().json;\nconst pgItem = items[0]?.json;\nconst resultado = pgItem?.resultado;\n\nif (!resultado || typeof resultado !== 'object') {\n  return [{\n    json: {\n      ok: false,\n      workflow: 'vita_w05_cancelar_prereserva_supabase',\n      source_event: buildPayload.source_event,\n      id_evento_dev: buildPayload.id_evento_dev,\n      error: 'sin_respuesta_de_funcion',\n      result: null,\n      executed_at: new Date().toISOString()\n    }\n  }];\n}\n\nconst ok = resultado.ok === true;\n\nreturn [{\n  json: {\n    ok,\n    workflow: 'vita_w05_cancelar_prereserva_supabase',\n    source_event: buildPayload.source_event,\n    id_evento_dev: buildPayload.id_evento_dev,\n    error: ok ? null : (resultado.error || 'error_desconocido'),\n    result: resultado,\n    executed_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "b7842c3d-30a8-4ad7-8104-69c21d5a9f7c",
+      "name": "Build Response"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Build Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Input": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "Call cancelar_prereserva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call cancelar_prereserva": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "__WORKFLOW_VERSION_ID__",
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "id": "__WORKFLOW_ID__",
+  "tags": []
+}

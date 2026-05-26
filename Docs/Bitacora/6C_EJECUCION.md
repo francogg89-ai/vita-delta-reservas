@@ -42,7 +42,7 @@ Cada entrada se cierra cuando el workflow está implementado, testeado y los cri
 | W2 — Crear pre-reserva | `crear_prereserva(jsonb)` | ✅ OK | 2026-05-25 |
 | W3 — Registrar pago | `registrar_pago(jsonb)` | ✅ OK | 2026-05-25 |
 | W4 — Confirmar reserva | `confirmar_reserva(jsonb)` | ✅ OK | 2026-05-26 |
-| W5 — Cancelar pre-reserva | `cancelar_prereserva()` | — | — |
+| W5 — Cancelar pre-reserva | `cancelar_prereserva(jsonb)` | ✅ OK | 2026-05-26 |
 | W6 — Crear bloqueo | `crear_bloqueo()` | — | — |
 | W7 — Vistas operativas | Vistas SQL | — | — |
 
@@ -870,3 +870,237 @@ Detalle: el `Build Input` del template tiene `id_evento: "test_w04_001"` (no el 
 ### Conclusión W4
 
 Workflow operativo, los 5 tests pasaron a la primera. Es el primero que valida una transición destructiva con múltiples efectos colaterales en cascada. El patrón base sigue robusto. Próximo paso: **W5 — Cancelar pre-reserva** (`cancelar_prereserva()`), que va a requerir crear una pre-reserva nueva con W2 antes de ejecutar (la 25 ya está terminal).
+
+
+markdown## W5 — Cancelar pre-reserva
+
+**Estado:** ✅ OK
+**Fecha de cierre:** 2026-05-26
+**Propósito:** invocar `cancelar_prereserva()` para marcar una pre-reserva activa como cancelada, liberando la disponibilidad asociada. Es el primer workflow que valida el ciclo de vida alternativo de pre-reserva: en lugar de promoverse a reserva (W4), se cancela y libera el rango.
+
+### Verificación previa de contrato real
+
+Aplicando el patrón establecido desde W2:
+
+```sql
+SELECT
+  p.oid::regprocedure AS firma,
+  pg_get_function_result(p.oid) AS retorna
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND p.proname = 'cancelar_prereserva';
+```
+
+Resultado: `cancelar_prereserva(jsonb) → jsonb`. Mismo patrón que W2/W3/W4.
+
+Inspección del cuerpo (`pg_get_functiondef`) reveló características distintivas:
+
+1. **El campo `motivo` es un enum implícito de 2 valores**: `'cliente'` o `'bloqueo'`. Cualquier otro valor (incluido `""` o `null`) rebota con `error: 'motivo_invalido'` e incluye `motivos_validos` en la respuesta.
+2. **Mapping motivo → estado_nuevo**:
+   - `"cliente"` → `cancelada_por_cliente`
+   - `"bloqueo"` → `cancelada_por_bloqueo`
+3. **NO modifica pagos asociados.** Solo los cuenta (`pagos_asociados_count`) y los reporta (`pagos_asociados_ids`). Si una pre-reserva tiene pagos al cancelarse, esos pagos quedan "huérfanos", esperando decisión humana (reembolso, anulación). El reembolso real es responsabilidad de un workflow operativo posterior.
+4. **Lock solo global** (`pg_advisory_xact_lock(10, 0)`). No toma lock por cabaña porque solo libera disponibilidad, no la pretende. Diferencia respecto a `crear_prereserva` y `confirmar_reserva`.
+5. **NO implementa `idempotent_match`**. Re-cancelar una pre-reserva terminal devuelve `error: 'estado_no_cancelable'` con `estado_actual` informativo. Mismo patrón que W4.
+6. **Estados aceptados para cancelar**: solo `pendiente_pago` o `pago_en_revision`. Si está en cualquier otro estado (incluido `convertida`, `vencida`, ya cancelada), rebota con `estado_no_cancelable`.
+
+### Pre-requisito operativo: crear pre-reserva nueva
+
+La pre-reserva 25 (usada en W2/W3/W4) está en estado `convertida` (terminal). Para testear el happy path de W5 se requería una pre-reserva en estado activo, así que se ejecutó W2 con un nuevo conjunto de datos:
+
+**Payload del Test 0 (W2 pre-requisito):**
+
+| Campo | Valor |
+|---|---|
+| `canal` | `manual_dev` |
+| `id_evento` | `test_w05_pre001` |
+| `id_cabana` | 18 (Madre Selva) |
+| `fecha_in` | `2026-08-05` |
+| `fecha_out` | `2026-08-08` (3 noches) |
+| `personas` | 2 |
+| `monto_total` | 120000 |
+| `monto_sena` | 40000 |
+| `canal_origen` | `manual` |
+| `canal_pago_esperado` | `transferencia_mp` |
+| `huesped_nombre` | `Test W5 Cliente` |
+| `huesped_telefono` | `+5491134567899` |
+| `huesped_email` | `test.w5@example.com` |
+
+Resultado: pre-reserva **26** creada en estado `pendiente_pago`, huésped **35** nuevo, `expira_en` 60 minutos después.
+
+**Decisión de elección de cabaña y fechas:** se eligió cabaña 18 (distinta a la 17 que tiene reserva 8) y fechas en agosto (sin colisión con la reserva 8 de julio). Esto permite que los tests de W5 no interfieran con datos previos.
+
+### Verificación previa SQL del estado de pre-reserva 25
+
+Antes de ejecutar el Test 4 (cancelar pre-reserva no cancelable), se verificó con query directa que la 25 sigue en `convertida`:
+
+```sql
+SELECT id_pre_reserva, estado FROM pre_reservas WHERE id_pre_reserva = 25;
+-- Resultado: estado = 'convertida' ✅
+```
+
+### Decisiones de diseño tomadas
+
+| Decisión | Justificación |
+|---|---|
+| Pre-requisito de crear pre-reserva nueva con W2, no reutilizar la 25 | La 25 está convertida (terminal). Solo sirve para el Test 4 (validar `estado_no_cancelable`). El happy path requiere una pre-reserva en `pendiente_pago` o `pago_en_revision`. |
+| `motivo: "cliente"` para el happy path | Es el caso operativo más frecuente (cliente que cambia de planes). El motivo `"bloqueo"` es funcionalmente equivalente, solo cambia el estado_nuevo resultante. Se difiere el test de `"bloqueo"` como prueba cruzada futura opcional. |
+| Wrapper externo sin `idempotency_key` ni `warning` | Coherente con el contrato de la función. |
+| Normalización defensiva con `nv()` aplicada a todos los campos | Continúa el patrón W3/W4 — la función no aplica `NULLIF` en su extract de obligatorios. |
+| Verificación cruzada con W1 post-cancelación | Confirma end-to-end que la cancelación libera la disponibilidad correctamente, no solo que la función devolvió `ok=true`. |
+| No incluir test de pagos asociados | Requeriría crear pre-reserva + pago (W2 + W3) + cancelación. Diferido como prueba cruzada al final de 6C. |
+
+### Estructura del workflow
+
+Mismo patrón de 5 nodos:
+Manual Trigger → Build Input (Code) → Build Payload (Code) → Call cancelar_prereserva (Postgres) → Build Response (Code)
+
+### Query SQL invocada
+
+```sql
+SELECT cancelar_prereserva($1::jsonb) AS resultado;
+```
+
+Mismo patrón JSONB + `JSON.stringify` ya validado en W2, W3, W4.
+
+### Tests ejecutados
+
+**Test 0 — Pre-requisito: crear pre-reserva nueva con W2**
+
+`ok=true, id_pre_reserva=26, id_huesped=35, estado=pendiente_pago, expira_en=2026-05-26T11:43:22Z`.
+
+**Test 1 — Falta obligatorio (`id_pre_reserva: null`)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "payload_invalido" | "payload_invalido" | ✅ |
+
+**Test 2 — Motivo inválido (`motivo: "fraude"`)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "motivo_invalido" | "motivo_invalido" | ✅ |
+| `result.motivos_validos` | `["cliente", "bloqueo"]` | exacto | ✅ |
+
+**Test 3 — Pre-reserva inexistente (`id_pre_reserva: 99999`)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "prereserva_no_existe" | "prereserva_no_existe" | ✅ |
+
+**Test 4 — Pre-reserva no cancelable (la 25 ya convertida)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "estado_no_cancelable" | "estado_no_cancelable" | ✅ |
+| `result.estado_actual` | "convertida" | "convertida" | ✅ |
+
+**Test 5 — Happy path: cancelar pre-reserva 26 (DESTRUCTIVO)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | true | true | ✅ |
+| `result.id_pre_reserva` | 26 | 26 | ✅ |
+| `result.estado_anterior` | "pendiente_pago" | "pendiente_pago" | ✅ |
+| `result.estado_nuevo` | "cancelada_por_cliente" | "cancelada_por_cliente" | ✅ |
+| `result.pagos_asociados_count` | 0 | 0 | ✅ |
+| `result.pagos_asociados_ids` | `[]` | `[]` | ✅ |
+
+**Tiempo entre creación y cancelación**: 7 min 36 seg (Test 0 a las 10:43:22, Test 5 a las 10:50:58). Muy dentro del TTL de 60 min, sin riesgo de expiración natural.
+
+**Test 6 — Re-cancelar (no-idempotencia)**
+
+Mismo Build Input que Test 5, ejecutado de nuevo.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "estado_no_cancelable" | "estado_no_cancelable" | ✅ |
+| `result.estado_actual` | "cancelada_por_cliente" | "cancelada_por_cliente" | ✅ |
+
+### Verificación cruzada end-to-end con W1
+
+Después del Test 5, se ejecutó W1 con payload:
+
+```javascript
+const input = {
+  fecha_desde: "2026-08-05",
+  fecha_hasta: "2026-08-08",
+  id_cabana: 18,
+  source_event: "n8n_w01_consultar_disponibilidad_manual_post_w05"
+};
+```
+
+**Resultado:**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `result.total_dias` | 3 | 3 | ✅ |
+| Estado de los 3 días | "disponible" | "disponible" × 3 | ✅ |
+| `id_reserva_activa` | null × 3 | null × 3 | ✅ |
+| `id_prereserva_activa` | null × 3 | null × 3 | ✅ |
+| `tipo_dia` 05-06 ago | "semana" | "semana" | ✅ |
+| `tipo_dia` 07 ago | "finde" (viernes) | "finde" | ✅ |
+
+**Conclusión end-to-end:** la cancelación efectivamente liberó la disponibilidad. La función `obtener_disponibilidad_rango` filtra pre-reservas en estados `cancelada_*` correctamente, así que la vista de disponibilidad refleja el cambio sin requerir intervención adicional.
+
+### Lo que W5 demuestra (validaciones reutilizables)
+
+1. **Patrón de 5 nodos** sigue funcionando para escritura simple con efectos colaterales acotados (solo `pre_reservas.estado` + `log_cambios`).
+2. **Enum implícito en campo de texto**: la función rechaza valores fuera del set permitido con error específico (`motivo_invalido`) que incluye los valores válidos en la respuesta. Patrón útil para futuros campos similares.
+3. **No-idempotencia explícita** (consistente con W4): la función devuelve `estado_no_cancelable` con `estado_actual` informativo en lugar de implementar `idempotent_match`.
+4. **Validación end-to-end con W1**: las cancelaciones efectivamente liberan disponibilidad, no solo cambian estado. La integración entre `cancelar_prereserva` y `obtener_disponibilidad_rango` (vía el filtro de estados activos) funciona sin acciones adicionales.
+5. **Pagos huérfanos como decisión de diseño**: la función no elimina ni anula pagos. Esto deja la decisión de reembolso al operador humano (futuro workflow específico).
+6. **Locks diferenciados**: W5 solo toma lock global porque libera disponibilidad. No toma lock por cabaña, distinto a W2 y W4 que sí necesitan exclusión por cabaña.
+
+### Gotchas descubiertos durante W5
+
+No se descubrieron gotchas nuevos. La verificación previa del contrato real + el patrón establecido funcionaron limpios. Una observación sub-acumulada respecto al `expira_en` ya estaba documentada en W4, no es nueva.
+
+### Observación menor sobre trazabilidad
+
+En Test 5 y Test 6 se ejecutó con exactamente el mismo `id_evento` (`test_w05_005_happy`). Esto es deliberado (es la prueba de no-idempotencia con mismo payload), pero deja dos entradas con `id_evento_dev` idéntico en los logs. Se distinguen por `executed_at`. **Misma sub-observación que se hizo en W4** — para futuras pruebas de re-ejecución conviene incrementar el `id_evento`.
+
+### Estado de DEV al cierre de W5
+
+| Recurso | ID | Estado |
+|---|---|---|
+| Pre-reserva | 25 | `convertida` (terminal, de W4) |
+| Pre-reserva | **26** | **`cancelada_por_cliente`** (terminal, de W5) |
+| Pago | 11 | `confirmado`, asociado a reserva 8 |
+| Reserva | 8 | `confirmada` |
+| Huésped | 34 | `total_reservas=1`, `primera_reserva_fecha=2026-07-10` |
+| Huésped | **35** | `total_reservas=0`, sin reservas activas (creado para la 26, ahora cancelada) |
+
+**Ciclo de vida completo de pre-reservas validado:**
+
+| Camino | Workflows | Estado terminal de pre-reserva | Ejemplo en DEV |
+|---|---|---|---|
+| Confirmación | W2 → W3 → W4 | `convertida` | Pre-reserva 25 |
+| Cancelación cliente | W2 → W5 | `cancelada_por_cliente` | Pre-reserva 26 |
+| Cancelación bloqueo | W2 → W5 | `cancelada_por_bloqueo` | (no probado en sesión) |
+| Expiración automática | W2 → cron | `vencida` | (no probado en sesión, infraestructura existe) |
+
+**Implicaciones para W6 (`crear_bloqueo`):**
+- No requiere recursos previos. Opera sobre rango + cabaña.
+- Cabaña 17 con reserva 8 en 10-13 jul, cabaña 18 con disponibilidad libre tras la cancelación de la 26. Hay muchos rangos/cabañas disponibles para Test happy path.
+
+**Implicaciones para W7 (`vistas operativas`):**
+- W7 son consultas read-only sobre vistas existentes. No depende del estado de pre-reservas ni reservas.
+
+### Template exportado al repo
+
+Template sanitizado en `Workflows/n8n/supabase/vita_w05_cancelar_prereserva_supabase.template.json`. Placeholders reemplazados al sanitizar siguen la convención del repo.
+
+Detalle: el `Build Input` del template tiene `id_pre_reserva: 0` como placeholder (no `26` del export real). Quien importe el template debe crear su propia pre-reserva con W2 y reemplazar ese valor antes de ejecutar el happy path. El comentario en el código lo aclara explícitamente.
+
+### Conclusión W5
+
+Workflow operativo, los 6 tests + verificación cruzada con W1 pasaron a la primera. Cierra el ciclo de vida alternativo de pre-reservas (cancelación vs confirmación). Próximo paso: **W6 — Crear bloqueo** (`crear_bloqueo()`), que va a operar sobre disponibilidad de forma "ofensiva" — bloqueando rangos sin pre-reserva ni reserva detrás (mantenimiento, decisiones operativas, eventos privados, etc.).
+
+Generado como cierre formal de W5 — 2026-05-26.
