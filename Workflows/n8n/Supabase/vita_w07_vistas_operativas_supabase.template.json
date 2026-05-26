@@ -75,7 +75,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "{{ $json.query }}",
+        "query": "={{ $json.query }}",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
