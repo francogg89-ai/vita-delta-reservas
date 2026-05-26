@@ -38,10 +38,10 @@ Cada entrada se cierra cuando el workflow está implementado, testeado y los cri
 | Workflow | Función SQL | Estado | Fecha cierre |
 |---|---|---|---|
 | W0 — Smoke test | `SELECT 1` | ✅ OK | 2026-05-25 |
-| W1 — Consultar disponibilidad | `obtener_disponibilidad_rango()` + vistas | — | — |
-| W2 — Crear pre-reserva | `crear_prereserva()` | — | — |
-| W3 — Registrar pago | `registrar_pago()` | — | — |
-| W4 — Confirmar reserva | `confirmar_reserva()` | — | — |
+| W1 — Consultar disponibilidad | `obtener_disponibilidad_rango()` | ✅ OK | 2026-05-25 |
+| W2 — Crear pre-reserva | `crear_prereserva(jsonb)` | ✅ OK | 2026-05-25 |
+| W3 — Registrar pago | `registrar_pago(jsonb)` | ✅ OK | 2026-05-25 |
+| W4 — Confirmar reserva | `confirmar_reserva(jsonb)` | ✅ OK | 2026-05-26 |
 | W5 — Cancelar pre-reserva | `cancelar_prereserva()` | — | — |
 | W6 — Crear bloqueo | `crear_bloqueo()` | — | — |
 | W7 — Vistas operativas | Vistas SQL | — | — |
@@ -181,10 +181,7 @@ Conexión n8n cloud → Supabase DEV operativa y validada empíricamente. El pat
 
 *Bitácora abierta el 2026-05-25 con el cierre de W0.*
 
-Actualización de la tabla "Estado general de la etapa"
-En la tabla del encabezado del archivo, reemplazar la fila de W1:
-| W1 — Consultar disponibilidad | `obtener_disponibilidad_rango()` + vistas | — | — |
-Por:
+
 | W1 — Consultar disponibilidad | `obtener_disponibilidad_rango()` | ✅ OK | 2026-05-25 |
 
 Bloque a pegar después de la entrada de W0
@@ -339,13 +336,7 @@ Workflow operativo, los 4 tests del documento de diseño pasaron. Patrón base v
 Generado como cierre formal de W1 — 2026-05-25.
 
 
-Actualización de la tabla "Estado general de la etapa"
-En la tabla del encabezado del archivo, reemplazar la fila de W2:
-| W2 — Crear pre-reserva | `crear_prereserva()` | — | — |
-Por:
-| W2 — Crear pre-reserva | `crear_prereserva(jsonb)` | ✅ OK | 2026-05-25 |
 
-Bloque a pegar después de la entrada de W1
 markdown## W2 — Crear pre-reserva
 
 **Estado:** ✅ OK
@@ -516,13 +507,7 @@ Workflow operativo, los 5 tests pasaron a la primera. Patrón base de escritura 
 
 Generado como cierre formal de W2 — 2026-05-25.
 
-Actualización de la tabla "Estado general de la etapa"
-En la tabla del encabezado del archivo, reemplazar la fila de W3:
-| W3 — Registrar pago | `registrar_pago()` | — | — |
-Por:
-| W3 — Registrar pago | `registrar_pago(jsonb)` | ✅ OK | 2026-05-25 |
 
-Bloque a pegar después de la entrada de W2
 markdown## W3 — Registrar pago
 
 **Estado:** ✅ OK
@@ -685,3 +670,203 @@ Detalle: el `Build Input` del template tiene los valores del happy path (Test 1)
 Workflow operativo, los 4 tests pasaron (uno requirió fix en Build Payload, documentado). Patrón base sigue siendo reutilizable. Próximo paso: **W4 — Confirmar reserva** (`confirmar_reserva()`), que va a promover la pre-reserva 25 a reserva confirmada usando el pago 11 como justificante.
 
 Generado como cierre formal de W3 — 2026-05-25.
+
+## W4 — Confirmar reserva
+
+**Estado:** ✅ OK
+**Fecha de cierre:** 2026-05-26
+**Propósito:** invocar `confirmar_reserva()` para promover una pre-reserva activa a reserva confirmada, asociándola con su pago. Es la transición más sensible del sistema: convierte un estado transitorio en uno permanente, con múltiples efectos colaterales atómicos.
+
+### Verificación previa de contrato real
+
+Aplicando el patrón establecido desde W2:
+
+```sql
+SELECT
+  p.oid::regprocedure AS firma,
+  pg_get_function_result(p.oid) AS retorna
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND p.proname = 'confirmar_reserva';
+```
+
+Resultado: `confirmar_reserva(jsonb) → jsonb`. Mismo patrón que W2 y W3.
+
+Inspección del cuerpo (`pg_get_functiondef`) reveló características distintivas respecto a W2/W3:
+
+1. **Dos caminos de confirmación** (estricto vs combinado), ramificados por el flag `permitir_pago_en_revision`.
+2. **NO acepta `id_pago`**: la función toma el pago más reciente automáticamente (en estado `confirmado` para el estricto, o `en_revision` para el combinado).
+3. **NO implementa `idempotent_match`**: re-confirmar una pre-reserva ya `convertida` devuelve `error: "estado_invalido"` con `estado_actual` informativo. A diferencia de `crear_prereserva` que devuelve `ok=true, idempotent_match=true, mismo id_pre_reserva`.
+4. **Efectos colaterales atómicos**: la función toca 5 tablas en una sola transacción — INSERT en `reservas`, UPDATE de `pre_reservas.estado=convertida`, UPDATE de `pagos.id_reserva` y opcionalmente `pagos.estado=confirmado`, UPDATE de `huespedes.total_reservas/primera_reserva_fecha`, INSERT en `log_cambios`.
+
+### Verificación adicional: CHECK constraints en `reservas`
+
+Antes de armar Build Input se ejecutó query read-only sobre constraints:
+
+| Constraint | Definición resumida |
+|---|---|
+| `chk_reservas_canal_origen` | canal_origen IN ('whatsapp', 'instagram', 'web', 'manual', 'airbnb', 'booking') |
+| `chk_reservas_fechas` | fecha_checkout > fecha_checkin |
+| `chk_reservas_monto_total` | monto_total > 0 |
+| `chk_reservas_personas` | personas >= 1 |
+| `chk_reservas_saldo_logica` | monto_saldo >= 0 AND monto_saldo <= monto_total |
+
+Todos benignos para W4: los datos se copian desde la pre-reserva (que ya pasó por las validaciones de `crear_prereserva`), así que mientras la pre-reserva sea válida, el INSERT en `reservas` no debería violar constraints.
+
+### Verificación previa del estado de DEV antes de los tests
+
+Antes de armar/ejecutar W4 (workflow destructivo), se verificó el estado real de los recursos heredados de W3:
+
+```sql
+SELECT id_pre_reserva, estado, expira_en FROM pre_reservas WHERE id_pre_reserva = 25;
+SELECT id_pago, id_prereserva, estado, validado_por, validado_en FROM pagos WHERE id_prereserva = 25;
+```
+
+Resultado:
+- Pre-reserva 25: `estado=pago_en_revision`, `expira_en=2026-05-25T22:11:01Z`.
+- Pago 11: `estado=en_revision`, `validado_por=null`.
+
+**Observación operativa:** el `expira_en` de la pre-reserva 25 ya había pasado al momento del test (26-may, expiraba 25-may). Sin embargo, `confirmar_reserva()` **no chequea `expira_en`** — solo el `estado`. Y el cron `expirar_prereservas` **no opera sobre `pago_en_revision`** (solo sobre `pendiente_pago`). Esto es consistente con el diseño operativo: una pre-reserva con pago en revisión está esperando intervención humana, no debe expirarse automáticamente. **Documentado como conocimiento operativo** para futuras pruebas similares.
+
+Con la pre-reserva en estado correcto y pago en `en_revision`, se procedió con el diseño usando camino combinado.
+
+### Decisiones de diseño tomadas
+
+| Decisión | Justificación |
+|---|---|
+| Happy path por **camino combinado** (`permitir_pago_en_revision=true`) | El pago 11 está en `en_revision` (no en `confirmado`). El camino estricto rebotaría con `sin_pago_confirmado`. El camino combinado es el flujo real esperado cuando un operador (Rodrigo/Vicky) aprueba un pago en revisión y confirma la reserva en el mismo paso. |
+| `validado_por = "rodrigo_manual"` como placeholder DEV | En producción, este campo se llenará con el nombre del operador que aprueba el pago. Para DEV, identifica claramente que vino del workflow manual. |
+| `encargado_semana = "rodrigo"` y `created_by = "manual_dev"` como placeholders DEV | En producción, `encargado_semana` debería venir de lógica de asignación semanal, y `created_by` del sistema que dispara la confirmación. Para DEV son placeholders. |
+| W4 **no genera** `idempotency_key` | La función no la espera, y tampoco implementa `idempotent_match`. Re-ejecutar devuelve `estado_invalido`. |
+| Wrapper externo sin `idempotency_key` ni `warning` | Coherente con el contrato de la función. |
+| Normalización defensiva con `nv()` aplicada también a `id_pre_reserva` | Continúa el patrón W3 — la función no aplica `NULLIF` en su extract de obligatorios. Esto valida el Test 2 sin pegar contra el cast `(payload->>'id_pre_reserva')::BIGINT`. |
+| Diferir el test de `conflicto_al_confirmar` | Requiere reproducir una condición de carrera (alguien crea bloqueo/reserva entre la creación de la pre-reserva y la confirmación). Difícil en pruebas manuales. Queda como test cruzado/concurrencia. |
+
+### Estructura del workflow
+
+Mismo patrón de 5 nodos:
+Manual Trigger → Build Input (Code) → Build Payload (Code) → Call confirmar_reserva (Postgres) → Build Response (Code)
+
+### Query SQL invocada
+
+```sql
+SELECT confirmar_reserva($1::jsonb) AS resultado;
+```
+
+Mismo patrón JSONB + `JSON.stringify` validado en W2 y W3.
+
+### Tests ejecutados
+
+Orden deliberadamente diseñado para correr primero los tests no destructivos (1, 2, 3) y dejar el happy path destructivo (4) y la re-ejecución (5) al final.
+
+**Test 1 — Pre-reserva inexistente**
+
+Payload: `id_pre_reserva: 99999`.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "prereserva_no_existe" | "prereserva_no_existe" | ✅ |
+
+Validación temprana (paso 2 de la función), antes del lock por cabaña. Sin efectos en DB.
+
+**Test 2 — Falta obligatorio (`id_pre_reserva: null`)**
+
+Payload con `id_pre_reserva: null`.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "payload_invalido" | "payload_invalido" | ✅ |
+
+La normalización defensiva con `nv()` aseguró que `null` llegue como NULL real al JSONB, y la validación de la función rebotó limpio en el paso 1.
+
+**Test 3 — Sin pago confirmado, camino estricto (`permitir_pago_en_revision: false`)**
+
+Payload con `id_pre_reserva: 25, permitir_pago_en_revision: false`.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "sin_pago_confirmado" | "sin_pago_confirmado" | ✅ |
+| `result.motivo` | descriptivo | "No hay pago confirmado y no se permitió usar pago en revisión" | ✅ |
+| Pre-reserva 25 sigue intacta | sí (estado=`pago_en_revision`) | sí | ✅ |
+
+La función entró al lookup de pagos `confirmado`, no encontró ninguno, y como el flag combinado era `false`, no bajó al camino alternativo. Es importante: aun después de tomar locks, la función no modificó la pre-reserva. Confirma que **el camino estricto sin pago confirmado es genuinamente no destructivo**.
+
+**Test 4 — Happy path camino combinado (DESTRUCTIVO)**
+
+Payload: `id_pre_reserva: 25, permitir_pago_en_revision: true, validado_por: "rodrigo_manual"`, etc.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | true | true | ✅ |
+| `result.ok` | true | true | ✅ |
+| `result.id_reserva` | > 0 (nuevo) | 8 | ✅ |
+| `result.id_pre_reserva` | 25 | 25 | ✅ |
+| `result.id_huesped` | 34 | 34 | ✅ |
+
+**Verificaciones SQL directas post-Test 4** confirmaron los efectos colaterales atómicos:
+
+| Tabla | Verificación | Resultado |
+|---|---|---|
+| `huespedes` | `total_reservas=1`, `primera_reserva_fecha='2026-07-10'` | ✅ |
+| (implícito) | Pre-reserva 25 → `convertida` | ✅ (re-confirmable validado por Test 5) |
+| (implícito) | Pago 11 → `confirmado`, `validado_por='rodrigo_manual'`, `id_reserva=8` | ✅ (implícito por éxito del Test 5) |
+| (implícito) | Reserva 8 creada con `estado=confirmada`, `monto_saldo=100000` (150000 - 50000) | ✅ |
+
+**Observación importante:** la `primera_reserva_fecha` se setea con la `fecha_in` original (`2026-07-10`), NO con la fecha de la confirmación (`2026-05-26`). Esto es correcto operativamente: el huésped "abrió cuenta" con la fecha en que efectivamente va a hospedarse, no con la fecha administrativa de la confirmación. Importante para reporting futuro.
+
+**Test 5 — Re-confirmar pre-reserva ya convertida (no-idempotente)**
+
+Mismo payload que Test 4, ejecutado de nuevo.
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "estado_invalido" | "estado_invalido" | ✅ |
+| `result.estado_actual` | "convertida" | "convertida" | ✅ |
+
+**Lectura operativa:** la función no implementa idempotencia explícita. Re-confirmar devuelve error con `estado_actual` informativo. Si en producción el caller necesita "obtener la reserva ya creada" tras una re-ejecución idempotente, deberá consultar por separado (futuro workflow read-only `obtener_reserva_por_prereserva` o consulta directa).
+
+### Lo que W4 demuestra (validaciones reutilizables para W5+)
+
+1. **Patrón de 5 nodos** sigue funcionando para escritura con múltiples efectos colaterales atómicos (5 tablas tocadas).
+2. **Normalización defensiva** con `nv()` funciona también para BIGINT obligatorios (validado en Test 2 con `id_pre_reserva: null`).
+3. **Camino estricto vs combinado** ramifica correctamente según el flag.
+4. **No-idempotencia explícita**: la función no devuelve `idempotent_match`, pero el error `estado_invalido` con `estado_actual` da contexto operativo suficiente.
+5. **Efectos colaterales atómicos**: si W4 retorna `ok=true`, los 5 cambios en DB pasaron consistentemente (todo dentro de la misma transacción de la función SQL).
+6. **`expira_en` y `pago_en_revision`**: documentado el comportamiento conjunto — el cron de expiración solo opera sobre `pendiente_pago`, y `confirmar_reserva` no chequea `expira_en`. Esto significa que una pre-reserva con pago en revisión queda en limbo hasta intervención humana. **Comportamiento de diseño**, no bug.
+
+### Gotchas descubiertos durante W4
+
+No se descubrieron gotchas nuevos. La verificación previa del contrato real + el patrón ya establecido funcionaron limpios. El "casi-gotcha" del `expira_en` se entendió antes de los tests gracias al análisis del cuerpo de la función, no como sorpresa.
+
+### Observación menor sobre trazabilidad
+
+En Test 5 (re-confirmar), se ejecutó con exactamente el mismo `id_evento` que Test 4 (`test_w04_004_happy`), lo que hace que el `id_evento_dev` sea idéntico en ambos casos. Esto es intencional (era el objetivo del test), pero deja un detalle: si en el futuro alguien lee las trazas y ve dos invocaciones con el mismo `id_evento_dev`, no puede distinguirlas sin mirar el `executed_at`. **Para futuras pruebas de re-ejecución**, conviene incrementar el `id_evento` aun cuando el resto del payload sea idéntico. **No requiere fix retroactivo.**
+
+### Estado de DEV al cierre de W4
+
+| Recurso | ID | Estado |
+|---|---|---|
+| Pre-reserva | 25 | `convertida` (terminal) |
+| Pago | 11 | `confirmado`, asociado a reserva 8, `validado_por='rodrigo_manual'`, `validado_en=2026-05-26T10:22:13Z` |
+| Reserva | **8** | `confirmada`, `monto_saldo=100000`, `encargado_semana='rodrigo'`, `created_by='manual_dev'` |
+| Huésped | 34 | `total_reservas=1`, `primera_reserva_fecha='2026-07-10'` |
+
+**Implicaciones para W5 y W6:**
+
+- **W5 (`cancelar_prereserva`):** necesita una pre-reserva en estado activo (`pendiente_pago` o `pago_en_revision`). La 25 está terminal. **W5 va a requerir crear una pre-reserva nueva con W2 antes de testear.** Esto se documenta como pre-requisito en la planificación de W5.
+- **W6 (`crear_bloqueo`):** opera sobre rango + cabaña, no requiere recursos previos. Pero la cabaña 17 fechas 10-13 jul está reservada (reserva 8); para Test 1 de W6 conviene usar otro rango o cabaña.
+
+### Template exportado al repo
+
+Template sanitizado en `Workflows/n8n/supabase/vita_w04_confirmar_reserva_supabase.template.json`. Placeholders reemplazados al sanitizar siguen la convención del repo.
+
+Detalle: el `Build Input` del template tiene `id_evento: "test_w04_001"` (no el `"test_w04_004_happy"` del export real). Es deliberado: el template debe importarse y permitir ejecutar el happy path al primer intento sin confusión sobre qué test estaba activo al exportar.
+
+### Conclusión W4
+
+Workflow operativo, los 5 tests pasaron a la primera. Es el primero que valida una transición destructiva con múltiples efectos colaterales en cascada. El patrón base sigue robusto. Próximo paso: **W5 — Cancelar pre-reserva** (`cancelar_prereserva()`), que va a requerir crear una pre-reserva nueva con W2 antes de ejecutar (la 25 ya está terminal).

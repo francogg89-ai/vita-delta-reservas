@@ -1,0 +1,137 @@
+{
+  "name": "vita_w04_confirmar_reserva_supabase",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "9a73706f-f514-48d3-96c1-7891aa74d29e",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W4 — Build Input\n// Edita los valores de `input` para probar distintos payloads.\n//\n// CONVENCIONES DEV:\n//   - canal y id_evento solo se usan para id_evento_dev (trazabilidad de pruebas)\n//   - W4 NO genera idempotency_key. La función confirmar_reserva() no la espera.\n//     Tampoco implementa idempotent_match: re-confirmar una pre-reserva ya\n//     convertida devuelve error 'estado_invalido'.\n//   - source_event fijo: \"n8n_w04_confirmar_reserva_manual\"\n//\n// CAMINOS DE CONFIRMACIÓN:\n//   - Estricto (default, permitir_pago_en_revision=false):\n//     Requiere AL MENOS un pago en estado 'confirmado' para la pre-reserva.\n//   - Combinado (permitir_pago_en_revision=true Y validado_por != null):\n//     Si no hay pago 'confirmado', toma el más reciente 'en_revision' y lo\n//     confirma en el mismo flujo (con validado_por = quien aprueba).\n//\n// DEFAULTS PARA HAPPY PATH DEV (sobre pre-reserva 25 cuyo pago 11 está en_revision):\n//   - permitir_pago_en_revision: true\n//   - validado_por: \"rodrigo_manual\"\n\n// === EDITAR ESTOS VALORES PARA CADA PRUEBA ===\nconst input = {\n  // Identificación del evento (solo para trazabilidad de pruebas)\n  canal: \"manual_dev\",\n  id_evento: \"test_w04_001\",\n\n  // Obligatorio\n  id_pre_reserva: 25,\n\n  // Camino combinado (necesario en DEV: pago 11 está en en_revision)\n  permitir_pago_en_revision: true,\n  validado_por: \"rodrigo_manual\",\n\n  // Datos operativos (se copian a la nueva reserva)\n  encargado_semana: \"rodrigo\",\n  created_by: \"manual_dev\"\n};\n// =============================================\n\nreturn [{ json: input }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "cc205cbc-0c75-46b9-8164-7c3f933d38fa",
+      "name": "Build Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W4 — Build Payload\n// Toma el input editable de Build Input y construye:\n//   1. source_event (convención 6C v1.2 Sección 5.5):\n//        n8n_w04_confirmar_reserva_manual\n//   2. id_evento_dev: solo para trazabilidad de pruebas en el wrapper\n//      (NO se manda a la función SQL).\n//   3. payload JSONB según contrato de confirmar_reserva(jsonb).\n//\n// CONTRATO PAYLOAD:\n//   Obligatorios: id_pre_reserva, source_event\n//   Opcionales:   permitir_pago_en_revision (default false),\n//                 validado_por (requerido si permitir_pago_en_revision=true),\n//                 encargado_semana, created_by\n//\n// W4 NO genera idempotency_key. La función no la espera ni implementa\n// idempotent_match (a diferencia de crear_prereserva).\n//\n// NORMALIZACIÓN DEFENSIVA (continuación de patrón W3):\n// Aplicamos nv() a todos los campos opcionales y a id_pre_reserva.\n// La función confirmar_reserva() tampoco aplica NULLIF en sus extracts;\n// mientras el hardening SQL no se aplique (ver Pendiente_pre_produccion.md),\n// la defensa queda en n8n.\n\nconst input = $input.first().json;\n\nconst source_event = 'n8n_w04_confirmar_reserva_manual';\nconst id_evento_dev = `${input.canal}_${input.id_evento}`;\n\nconst nv = (v) => (v === '' || v === undefined ? null : v);\n\nconst payload = {\n  // Obligatorio (defensa: si viene vacío, mandamos null para que la validación SQL rebote limpio)\n  id_pre_reserva: nv(input.id_pre_reserva),\n\n  // Camino combinado\n  permitir_pago_en_revision: input.permitir_pago_en_revision,\n  validado_por: nv(input.validado_por),\n\n  // Datos operativos\n  encargado_semana: nv(input.encargado_semana),\n  created_by: nv(input.created_by),\n\n  // source_event (siempre presente, definido en este nodo)\n  source_event\n};\n\nreturn [{\n  json: {\n    payload,\n    source_event,\n    id_evento_dev,\n    input  // se preserva para trazabilidad en Build Response\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "3b58a33b-892b-43f6-bea3-5cac96813584",
+      "name": "Build Payload"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT confirmar_reserva($1::jsonb) AS resultado;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.payload) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        0
+      ],
+      "id": "8dbab635-efd7-4320-b5a7-85f98cbcd523",
+      "name": "Call confirmar_reserva",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// W4 — Build Response\n// Interpreta el JSONB que devuelve confirmar_reserva() y arma el wrapper externo.\n//\n// Contrato de salida de la función:\n//   - happy: { ok: true, id_reserva, id_pre_reserva, id_huesped }\n//   - error: { ok: false, error: '<codigo>', ...detalle según error }\n//\n// CONVENCIONES DEL WRAPPER:\n//   - ok = resultado.ok\n//   - error solo se llena cuando resultado.ok = false\n//   - id_evento_dev para trazabilidad de pruebas\n//   - result siempre lleva el JSONB completo de la función\n//\n// W4 NO incluye idempotency_key (no aplica) ni warning (la función no\n// emite warnings — re-confirmar devuelve error \"estado_invalido\").\n\nconst buildPayload = $('Build Payload').first().json;\nconst pgItem = items[0]?.json;\nconst resultado = pgItem?.resultado;\n\nif (!resultado || typeof resultado !== 'object') {\n  return [{\n    json: {\n      ok: false,\n      workflow: 'vita_w04_confirmar_reserva_supabase',\n      source_event: buildPayload.source_event,\n      id_evento_dev: buildPayload.id_evento_dev,\n      error: 'sin_respuesta_de_funcion',\n      result: null,\n      executed_at: new Date().toISOString()\n    }\n  }];\n}\n\nconst ok = resultado.ok === true;\n\nreturn [{\n  json: {\n    ok,\n    workflow: 'vita_w04_confirmar_reserva_supabase',\n    source_event: buildPayload.source_event,\n    id_evento_dev: buildPayload.id_evento_dev,\n    error: ok ? null : (resultado.error || 'error_desconocido'),\n    result: resultado,\n    executed_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "723a6a27-3497-49e8-ba24-d2bd8c524631",
+      "name": "Build Response"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Build Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Input": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "Call confirmar_reserva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call confirmar_reserva": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "__WORKFLOW_VERSION_ID__",
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "id": "__WORKFLOW_ID__",
+  "tags": []
+}
