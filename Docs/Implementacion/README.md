@@ -17,19 +17,25 @@ Docs/Implementacion/
 ├── 6B_SCHEMA_SQL.md                             ← Schema PostgreSQL canónico (v1.7.1) — fuente de verdad técnica
 ├── 6B_PLAN_FASES.md                             ← Plan de ejecución bloque por bloque (v1.1, post-ejecución)
 ├── 6B_SCHEMA_SQL_AJUSTES_PENDIENTES.md          ← Ajustes documentales pendientes detectados durante DEV
+│
+├── 6C_CIERRE.md                                 ← Cierre formal de Etapa 6C (workflows n8n vs Supabase DEV)
+│
 ├── Pendiente_pre_produccion.md                  ← Cambios y configuraciones a aplicar antes de PROD
 │
-└── AppsScript/
+└── AppsScript/                                  ← Scripts legacy de Etapa 5 (referencia histórica)
     ├── validaciones_vita_delta_v3.gs            ← Validaciones de datos sobre Sheets (Fase 4 de Etapa 5)
     ├── protecciones_vita_delta_v1.gs            ← Protecciones por entorno (Fase 5 de Etapa 5)
     └── auditoria_fase6_v2.gs                    ← Auditoría de estructura y datos (Fase 6 de Etapa 5)
 ```
+Los scripts de `AppsScript/` son artefactos legacy de Google Sheets. No deben usarse para nuevos flujos operativos contra Supabase.
 
 Documentos relacionados que viven fuera de esta carpeta:
 
 - Bitácora de ejecución de la migración: `Docs/Bitacora/6B_EJECUCION_DEV.md`.
+- Bitácora de ejecución de los workflows 6C: `Docs/Bitacora/6C_EJECUCION.md`.
 - Decisiones arquitectónicas: `Docs/Arquitectura/`.
-- Contratos técnicos de workflows actuales: `Docs/API_CONTRACTS/`.
+- Templates de workflows vigentes: `Workflows/n8n/supabase/`.
+- Lecciones aprendidas operativas: `Docs/Operacional/Lecciones_Aprendidas.md`.
 
 ---
 
@@ -37,29 +43,46 @@ Documentos relacionados que viven fuera de esta carpeta:
 
 | Etapa | Stack | Estado |
 |---|---|---|
-| Etapa 5 (Sheets DEV/TEST + workflows core) | Google Sheets + n8n | Cerrada — validada en DEV y TEST |
-| Etapa 6B (migración a PostgreSQL/Supabase) | Supabase + PostgreSQL | Fases 0-3 ejecutadas en DEV — alineación final v1.7.1 pendiente |
-| Reescritura de workflows n8n contra Supabase | Supabase + n8n | No iniciada — pendiente del cierre de 6B |
+| Etapa 5 (Sheets DEV/TEST + workflows core) | Google Sheets + n8n | Cerrada — congelada como referencia histórica |
+| Etapa 6B (migración a PostgreSQL/Supabase) | Supabase + PostgreSQL | Cerrada — DEV 100% alineado con v1.7.1 |
+| Etapa 6C (workflows n8n contra Supabase DEV) | Supabase + n8n | Cerrada — 8 workflows operativos, 40 tests aprobados |
 
-**Stack operativo productivo actual:** Google Sheets como fuente de verdad + workflows n8n apuntando a Sheets. Esto sigue siendo verdadero **mientras la migración a Supabase no esté completamente cerrada y los workflows no estén reescritos**.
+**Stack operativo actual:** Supabase como fuente de verdad + workflows n8n nuevos apuntando a Supabase. Los workflows legacy contra Google Sheets están congelados y no se mantienen.
 
 ---
 
-## Documento operativo vigente
+## Documentos operativos vigentes
 
-El documento técnico canónico para la etapa actual es:
+### Schema SQL
 
 ```txt
 6B_SCHEMA_SQL.md (v1.7.1)
 ```
 
-Es la fuente de verdad para:
+Fuente de verdad para:
 - Próximas recreaciones de DEV (si fuera necesario).
 - Ejecución futura en TEST.
 - Ejecución futura en PROD.
 - Cualquier consulta sobre estructura de tablas, funciones, triggers, vistas, constraints o seed mínimo.
 
 El plan operativo correspondiente (`6B_PLAN_FASES.md v1.1`) ya fue ejecutado y se conserva como referencia histórica/operativa para auditar la ejecución o recrear entornos.
+
+### Workflows n8n contra Supabase
+
+```txt
+6C_CIERRE.md
+```
+
+Documento canónico de cierre de Etapa 6C. Contiene:
+- Resumen ejecutivo de los 8 workflows implementados.
+- Convenciones consolidadas (naming, source events, wrapper externo, normalización defensiva, idempotencia).
+- Patrón de trabajo establecido y reutilizable.
+- Catálogo de 9 lecciones aprendidas (L-6C-01 a L-6C-09).
+- 3 hallazgos pendientes derivados a `Pendiente_pre_produccion.md`.
+- 8 decisiones cerradas durante la etapa (NO REABRIR).
+- 4 opciones de próxima etapa con análisis y recomendación.
+
+Los templates sanitizados de los workflows están en `Workflows/n8n/supabase/`.
 
 ---
 
@@ -80,19 +103,18 @@ No se conectan canales externos (WhatsApp, Instagram, MercadoPago) ni capa conve
 
 **Nunca ejecutar workflows o SQL de prueba contra datos productivos.**
 
-- Los IDs de Sheets se configuran por entorno y **nunca se hardcodean** dentro de los workflows n8n.
 - Las credenciales de Supabase (Project ID, Project URL, database password, anon key, service role key, connection strings) viven **fuera del repositorio**: en gestor de contraseñas, en `.env` no versionado, o en credentials de n8n cuando aplique.
-- Los placeholders `__SUPABASE_PROJECT_ID_DEV__`, `__SUPABASE_PROJECT_URL_DEV__`, etc. deben reemplazarse localmente al momento de ejecutar; nunca commitear con valores reales.
+- Los placeholders `__SUPABASE_PROJECT_ID_DEV__`, `__CREDENTIAL_ID__`, `__CREDENTIAL_NAME__`, `__WORKFLOW_ID__`, `__WORKFLOW_VERSION_ID__`, `__N8N_INSTANCE_ID__`, etc. deben reemplazarse localmente al momento de ejecutar; nunca commitear con valores reales.
 
 ### Entornos contemplados
 
-| Entorno | Sheets | Supabase |
-|---|---|---|
-| DEV | `VITA_DELTA_DEV` (creado, validado) | Proyecto DEV (Bloques 1-22 ejecutados) |
-| TEST | `VITA_DELTA_TEST` (creado, validado) | No iniciado |
-| PROD | `VITA_DELTA_PROD` (no activado) | No iniciado |
+| Entorno | Sheets (legacy) | Supabase | Workflows n8n |
+|---|---|---|---|
+| DEV | `VITA_DELTA_DEV` (congelado) | Proyecto DEV (Etapas 6B+6C cerradas) | 8 workflows vs Supabase operativos |
+| TEST | `VITA_DELTA_TEST` (congelado) | No iniciado | No iniciado |
+| PROD | `VITA_DELTA_PROD` (nunca activado) | No iniciado | No iniciado |
 
-PROD no se activa hasta que TEST esté completamente validado en cada stack.
+TEST y PROD no se activan hasta que las opciones de hardening pre-producción estén ejecutadas (ver `Pendiente_pre_produccion.md`).
 
 ---
 
@@ -111,7 +133,7 @@ Los más relevantes para los documentos vigentes son:
 - `ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md` — Decisión de migrar a base relacional.
 - `ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md` — Arquitectura consolidada de la migración.
 
-Si aparece una contradicción entre un documento de esta carpeta y un documento de arquitectura cerrado, **prevalecen los documentos de arquitectura**, salvo que se documente explícitamente una corrección posterior (con bump de versión, nota técnica o registro en bitácora).
+Si aparece una contradicción entre un documento de esta carpeta y un documento de arquitectura cerrado, **prevalecen los documentos de arquitectura de etapa 5 o 6**, salvo que se documente explícitamente una corrección posterior (con bump de versión, nota técnica o registro en bitácora).
 
 ---
 
@@ -121,22 +143,63 @@ Si aparece una contradicción entre un documento de esta carpeta y un documento 
 
 2. **Las versiones se bumpean explícitamente.** Cada cambio operativo real al schema canónico genera una versión nueva. Los cambios puramente documentales se hacen como patch-level (v1.7.1) o como actualización in-place sin bump (cuando lo amerita y queda registrado en trazabilidad).
 
-3. **Hallazgos de ejecución se registran en bitácora primero.** Si durante la ejecución aparece un bug, una inconsistencia documental o una observación operativa, se documenta en `Docs/Bitacora/6B_EJECUCION_DEV.md` antes de tocar los documentos canónicos. Algunos hallazgos terminan en una versión nueva del schema; otros quedan solo como aprendizaje.
+3. **Hallazgos de ejecución se registran en bitácora primero.** Si durante la ejecución aparece un bug, una inconsistencia documental o una observación operativa, se documenta en la bitácora correspondiente (`6B_EJECUCION_DEV.md` o `6C_EJECUCION.md`) antes de tocar los documentos canónicos. Algunos hallazgos terminan en una versión nueva del schema; otros quedan solo como aprendizaje en `Docs/Operacional/Lecciones_Aprendidas.md`.
 
-4. **Los ajustes documentales acumulados van a `6B_SCHEMA_SQL_AJUSTES_PENDIENTES.md`** y se integran al schema en un bump posterior, evitando una cadena de patches sucesivos durante la ejecución.
+4. **Los ajustes documentales acumulados van a `6B_SCHEMA_SQL_AJUSTES_PENDIENTES.md`**. Las deudas técnicas ejecutables antes de TEST/PROD van a `Pendiente_pre_produccion.md`.
+
 
 5. **Sanitización antes de commitear.** Cualquier documento que se suba a GitHub se revisa para que no contenga Project IDs, URLs, passwords, tokens, JWTs ni datos reales de huéspedes.
+
+6. **Patrón consolidado para workflows nuevos (Etapa 6C):**
+   - Verificación read-only de contrato real antes de diseñar.
+   - Diseño con aprobación explícita.
+   - Tests ordenados (no destructivos primero).
+   - Sanitización con placeholders.
+   - Bitácora detallada por workflow.
+   - Lecciones aprendidas si hay gotchas.
+
+   Detalle completo en `6C_CIERRE.md`, sección "Patrón de trabajo establecido".
 
 ---
 
 ## Próximo paso
 
-El trabajo inmediato es **cerrar formalmente la Etapa 6B en DEV** y arrancar la siguiente etapa:
+Con las Etapas 6B y 6C cerradas, el sistema tiene backend + workflows determinísticos operativos en DEV. **Las próximas etapas se eligen entre 4 opciones:**
 
-1. Alinear DEV con `6B_SCHEMA_SQL.md v1.7.1` ejecutando la actualización de `obtener_disponibilidad_rango()`.
-2. Commitear documentación post-DEV (schema, bitácora, arquitectura, plan, pendientes).
-3. Confirmar cierre documental de Fase 4 (tests de concurrencia) y Fase 5 (cierre formal de DEV) según bitácora.
-4. Generar `6B_REESCRITURA_WORKFLOWS.md` en esta carpeta para guiar la adaptación de los workflows n8n contra Supabase.
-5. Reescribir workflows n8n contra Supabase, validar en TEST, y finalmente migrar PROD.
+### Opción A — Hardening pre-producción
 
-Las etapas posteriores (capa conversacional con Claude API, integración con WhatsApp/Instagram, MercadoPago real, web pública, RLS, contabilidad) se planifican cuando llegue el momento de cada una. Ninguna se inicia antes de cerrar la base de datos en Supabase como fuente de verdad operativa.
+Ejecutar los items de `Pendiente_pre_produccion.md`:
+- `NULLIF(TRIM(...))` en funciones write para campos obligatorios de texto.
+- Fix de `vista_ocupacion` (25 vs 24 meses).
+- Fix cosmético de concatenaciones `nombre + apellido` en vistas.
+
+**Ventaja:** cierra deudas técnicas conocidas antes de TEST/PROD.
+
+### Opción B — Entorno TEST
+
+Replicar DEV en un proyecto Supabase separado para integrar consumidores reales sin riesgo a datos reales.
+
+### Opción C — Webhook MercadoPago
+
+Workflow operativo real que invoca W3 tras un webhook de MP, con deduplicación por `payment_id`.
+
+### Opción D — Bot conversacional (Etapa 4B implementación)
+
+Implementar el bot diseñado en Etapa 4B usando Claude API + Meta API.
+
+**Recomendación documentada en `6C_CIERRE.md`:** A primero, después B. Cerrar deudas técnicas conocidas antes de complicar el sistema con nuevos consumidores.
+
+---
+
+## Pendientes técnicos consolidados
+
+`Pendiente_pre_produccion.md` consolida los items a cerrar antes de TEST/PROD:
+
+1. Hardening de validación SQL en funciones write (agregado durante 6C — W3).
+2. Horizonte de `vista_disponibilidad` y `vista_calendario` a 120 días (pendiente histórico).
+3. `vista_ocupacion` devuelve 25 meses en vez de 24 (agregado durante 6C — W7).
+4. Espacio colgando en concatenación nombre+apellido (agregado durante 6C — W7).
+5. RLS configurado (pendiente histórico).
+6. Tarifas reales cargadas (pendiente histórico).
+7. Feriados productivos cargados (pendiente histórico).
+8. Tests de concurrencia formales — Fase 4 (pendiente histórico).

@@ -690,7 +690,7 @@
     <span class="badge badge-green"><span class="badge-dot"></span>Arquitectura cerrada</span>
     <span class="badge badge-green"><span class="badge-dot"></span>Backend Supabase DEV implementado</span>
     <span class="badge badge-green"><span class="badge-dot"></span>Etapa 6B cerrada</span>
-    <span class="badge badge-amber"><span class="badge-dot"></span>Etapa 6C en marcha · W0 y W1 validados</span>
+    <span class="badge badge-green"><span class="badge-dot"></span>Etapa 6C cerrada · 8 workflows validados</span>
   </div>
 </section>
 
@@ -706,13 +706,13 @@
     </div>
     <div class="summary-card reveal">
       <div class="summary-icon">🗄️</div>
-      <h3>Base técnica construida</h3>
-      <p>El backend en Supabase DEV está implementado: schema, funciones, triggers, vistas y expiración automática de pre-reservas. Ya no es Google Sheets — es PostgreSQL real.</p>
+      <h3>Backend y workflows completos</h3>
+      <p>El backend Supabase DEV está implementado y los 8 workflows n8n contra PostgreSQL están cerrados y testeados. 40 tests aprobados. 3 verificaciones cruzadas end-to-end aprobadas.</p>
     </div>
     <div class="summary-card reveal">
       <div class="summary-icon">📐</div>
       <h3>Diseñado para crecer</h3>
-      <p>Cada pieza es modular. El mismo backend que funciona hoy en DEV es el que irá a producción, con los mismos workflows y la misma lógica.</p>
+      <p>Cada pieza es modular. El mismo backend DEV irá a producción con los mismos workflows y la misma lógica. No hay que reescribir nada cuando llegue el momento.</p>
     </div>
     <div class="summary-card reveal">
       <div class="summary-icon">🔐</div>
@@ -738,7 +738,7 @@
     </div>
     <div class="problem-col">
       <h3 class="after">✓ Con el sistema</h3>
-      <div class="problem-item good"><span class="icon-good">✓</span>Cada consulta queda registrada automáticamente.</div>
+      <div class="problem-item good"><span class="icon-good">✓</span>Las operaciones críticas quedan registradas automáticamente con trazabilidad.</div>
       <div class="problem-item good"><span class="icon-good">✓</span>La disponibilidad se calcula y actualiza sola.</div>
       <div class="problem-item good"><span class="icon-good">✓</span>Las pre-reservas bloquean fechas con vencimiento automático.</div>
       <div class="problem-item good"><span class="icon-good">✓</span>Todo pasa por un motor de lógica única y trazable.</div>
@@ -807,13 +807,13 @@
 
 <!-- ─── WORKFLOWS VALIDADOS ─── -->
 <section class="workflows">
-  <div class="section-label">Etapa 6C — Workflows contra Supabase</div>
+  <div class="section-label">Etapa 6C — cerrada · 8 workflows validados</div>
   <h2 class="section-title">Workflows n8n contra el backend real</h2>
   <div class="wf-grid">
 
     <div class="wf-card reveal">
       <div class="wf-header">
-        <span class="wf-status">Validado ✓</span>
+        <span class="wf-status">Cerrado ✓</span>
         <div class="wf-name">vita_w00_smoke_test_supabase · W0</div>
         <div class="wf-title">Smoke Test Supabase</div>
       </div>
@@ -829,12 +829,12 @@
 
     <div class="wf-card reveal">
       <div class="wf-header">
-        <span class="wf-status">Validado ✓</span>
+        <span class="wf-status">Cerrado ✓</span>
         <div class="wf-name">vita_w01_consultar_disponibilidad · W1</div>
         <div class="wf-title">Consulta de Disponibilidad</div>
       </div>
       <div class="wf-body">
-        <p class="wf-desc">Consulta disponibilidad al vuelo usando la función <em>obtener_disponibilidad_rango()</em> en PostgreSQL. No hay cache que mantener: la fuente de verdad responde en tiempo real. Incluye regla D47: checkout domingo 16:00.</p>
+        <p class="wf-desc">Consulta disponibilidad al vuelo usando <em>obtener_disponibilidad_rango(date, date, bigint)</em> en PostgreSQL. Sin cache: la fuente de verdad responde en tiempo real. Incluye regla D47: checkout domingo 16:00.</p>
         <div class="wf-tags">
           <span class="wf-tag">Tiempo real</span>
           <span class="wf-tag">Sin cache</span>
@@ -846,65 +846,97 @@
 
     <div class="wf-card reveal">
       <div class="wf-header">
-        <span class="wf-status" style="background:rgba(200,134,42,0.2);border-color:rgba(200,134,42,0.4);color:var(--amber-light);">En diseño →</span>
+        <span class="wf-status">Cerrado ✓</span>
         <div class="wf-name">vita_w02_crear_prereserva · W2</div>
         <div class="wf-title">Crear Pre-reserva</div>
       </div>
       <div class="wf-body">
-        <p class="wf-desc">Llamará a <em>crear_prereserva()</em> en Supabase: valida disponibilidad, registra al huésped vía upsert y bloquea las fechas en una sola operación atómica. n8n genera el <em>idempotency_key</em>.</p>
+        <p class="wf-desc">Llama a <em>crear_prereserva()</em> en Supabase: valida disponibilidad, registra al huésped vía upsert y bloquea las fechas en una sola operación atómica. n8n genera el <em>idempotency_key</em>.</p>
         <div class="wf-tags">
           <span class="wf-tag">Atómico</span>
           <span class="wf-tag">Idempotente</span>
-          <span class="wf-tag">Pendiente</span>
+          <span class="wf-tag">Cerrado</span>
         </div>
       </div>
     </div>
 
     <div class="wf-card reveal">
       <div class="wf-header">
-        <span class="wf-status" style="background:rgba(200,134,42,0.2);border-color:rgba(200,134,42,0.4);color:var(--amber-light);">En diseño →</span>
+        <span class="wf-status">Cerrado ✓</span>
         <div class="wf-name">vita_w03_registrar_pago · W3</div>
         <div class="wf-title">Registrar Pago</div>
       </div>
       <div class="wf-body">
-        <p class="wf-desc">Registrará el pago reportado por el huésped. La pre-reserva pasará a estado <em>pago_en_revision</em> y el bloqueo de fechas se extiende mientras el equipo verifica la transferencia.</p>
+        <p class="wf-desc">Registra el pago reportado por el huésped. La pre-reserva pasa a <em>pago_en_revision</em> y el bloqueo de fechas se extiende mientras Franco o Rodrigo verifican la transferencia.</p>
         <div class="wf-tags">
           <span class="wf-tag">Revisión manual</span>
           <span class="wf-tag">Bloqueo extendido</span>
-          <span class="wf-tag">Pendiente</span>
+          <span class="wf-tag">Cerrado</span>
         </div>
       </div>
     </div>
 
     <div class="wf-card reveal">
       <div class="wf-header">
-        <span class="wf-status" style="background:rgba(200,134,42,0.2);border-color:rgba(200,134,42,0.4);color:var(--amber-light);">En diseño →</span>
+        <span class="wf-status">Cerrado ✓</span>
         <div class="wf-name">vita_w04_confirmar_reserva · W4</div>
         <div class="wf-title">Confirmar Reserva</div>
       </div>
       <div class="wf-body">
-        <p class="wf-desc">Llamará a <em>confirmar_reserva()</em> tras la aprobación manual del pago. Crea la reserva definitiva, convierte la pre-reserva y marca el pago como confirmado en una operación atómica.</p>
+        <p class="wf-desc">Llama a <em>confirmar_reserva()</em> tras la aprobación manual del pago. Crea la reserva definitiva, convierte la pre-reserva y marca el pago como confirmado en una operación atómica.</p>
         <div class="wf-tags">
           <span class="wf-tag">Reserva definitiva</span>
           <span class="wf-tag">Atómico</span>
-          <span class="wf-tag">Pendiente</span>
+          <span class="wf-tag">Cerrado</span>
         </div>
       </div>
     </div>
 
     <div class="wf-card reveal">
       <div class="wf-header">
-        <span class="wf-status" style="background:rgba(200,134,42,0.2);border-color:rgba(200,134,42,0.4);color:var(--amber-light);">En diseño →</span>
-        <div class="wf-name">vita_w05–w07 · W5 / W6 / W7</div>
-        <div class="wf-title">Cancelar · Bloqueo · Vistas</div>
+        <span class="wf-status">Cerrado ✓</span>
+        <div class="wf-name">vita_w05_cancelar_prereserva · W5</div>
+        <div class="wf-title">Cancelar Pre-reserva</div>
       </div>
       <div class="wf-body">
-        <p class="wf-desc">W5 cancela pre-reservas manualmente. W6 crea bloqueos operativos (mantenimiento, cierre temporal). W7 expone vistas operativas del estado real del complejo para el equipo interno.</p>
+        <p class="wf-desc">Cancela manualmente una pre-reserva activa, libera el bloqueo de fechas y actualiza el estado operativo en Supabase. Útil cuando el huésped desiste antes del pago.</p>
         <div class="wf-tags">
-          <span class="wf-tag">Cancelación</span>
-          <span class="wf-tag">Bloqueos</span>
-          <span class="wf-tag">Vistas internas</span>
-          <span class="wf-tag">Pendiente</span>
+          <span class="wf-tag">Cancelación manual</span>
+          <span class="wf-tag">Libera fechas</span>
+          <span class="wf-tag">Cerrado</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="wf-card reveal">
+      <div class="wf-header">
+        <span class="wf-status">Cerrado ✓</span>
+        <div class="wf-name">vita_w06_crear_bloqueo · W6</div>
+        <div class="wf-title">Crear Bloqueo Operativo</div>
+      </div>
+      <div class="wf-body">
+        <p class="wf-desc">Crea bloqueos administrativos sobre fechas y cabañas: mantenimiento, cierre temporal, uso interno. Impide que esas fechas aparezcan disponibles para reservas.</p>
+        <div class="wf-tags">
+          <span class="wf-tag">Mantenimiento</span>
+          <span class="wf-tag">Bloqueo admin</span>
+          <span class="wf-tag">Cerrado</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="wf-card reveal">
+      <div class="wf-header">
+        <span class="wf-status">Cerrado ✓</span>
+        <div class="wf-name">vita_w07_vistas_operativas · W7</div>
+        <div class="wf-title">Vistas Operativas</div>
+      </div>
+      <div class="wf-body">
+        <p class="wf-desc">Workflow read-only paramétrico que expone 6 vistas SQL operativas: disponibilidad, calendario, ocupación, calendario semanal, limpieza semanal y pre-reservas activas. Pensado para el equipo interno.</p>
+        <div class="wf-tags">
+          <span class="wf-tag">Solo lectura</span>
+          <span class="wf-tag">6 vistas SQL</span>
+          <span class="wf-tag">Equipo interno</span>
+          <span class="wf-tag">Cerrado</span>
         </div>
       </div>
     </div>
@@ -977,7 +1009,7 @@
       </tr>
       <tr>
         <td>Google Sheets (legacy)</td>
-        <td>Etapa prototipo cerrada — ya no es la fuente de verdad operativa</td>
+        <td>Etapa prototipo cerrada y congelada — ya no es fuente de verdad operativa</td>
         <td><span class="chip chip-done">✓ Superado</span></td>
       </tr>
       <tr>
@@ -986,13 +1018,13 @@
         <td><span class="chip chip-done">✓ Completo</span></td>
       </tr>
       <tr>
-        <td>Supabase DEV — Funciones</td>
-        <td>crear_prereserva(), confirmar_reserva(), obtener_disponibilidad_rango() y más</td>
+        <td>Supabase DEV — Funciones y triggers</td>
+        <td>crear_prereserva(), confirmar_reserva(), obtener_disponibilidad_rango(), auditoría, D47</td>
         <td><span class="chip chip-done">✓ Completo</span></td>
       </tr>
       <tr>
-        <td>Supabase DEV — Reglas y triggers</td>
-        <td>D47 (checkout domingo 16:00), auditoría, validaciones en base</td>
+        <td>Supabase DEV — Vistas operativas</td>
+        <td>6 vistas SQL del estado real del complejo</td>
         <td><span class="chip chip-done">✓ Completo</span></td>
       </tr>
       <tr>
@@ -1001,34 +1033,59 @@
         <td><span class="chip chip-done">✓ Completo</span></td>
       </tr>
       <tr>
-        <td>W0 — Smoke test Supabase</td>
+        <td>W0 — Smoke test</td>
         <td>Conectividad n8n ↔ Supabase DEV validada</td>
-        <td><span class="chip chip-done">✓ Completo</span></td>
+        <td><span class="chip chip-done">✓ Cerrado</span></td>
       </tr>
       <tr>
         <td>W1 — Disponibilidad</td>
-        <td>Consulta al vuelo con obtener_disponibilidad_rango() — validado</td>
-        <td><span class="chip chip-done">✓ Completo</span></td>
+        <td>Consulta en tiempo real con obtener_disponibilidad_rango(date, date, bigint)</td>
+        <td><span class="chip chip-done">✓ Cerrado</span></td>
       </tr>
       <tr>
         <td>W2 — Crear pre-reserva</td>
-        <td>vita_w02_crear_prereserva contra Supabase</td>
-        <td><span class="chip chip-pending">→ Pendiente</span></td>
+        <td>Operación atómica con idempotency_key</td>
+        <td><span class="chip chip-done">✓ Cerrado</span></td>
       </tr>
       <tr>
         <td>W3 — Registrar pago</td>
-        <td>vita_w03_registrar_pago</td>
-        <td><span class="chip chip-pending">→ Pendiente</span></td>
+        <td>Pago en revisión, bloqueo extendido</td>
+        <td><span class="chip chip-done">✓ Cerrado</span></td>
       </tr>
       <tr>
         <td>W4 — Confirmar reserva</td>
-        <td>vita_w04_confirmar_reserva</td>
-        <td><span class="chip chip-pending">→ Pendiente</span></td>
+        <td>Reserva definitiva tras validación manual</td>
+        <td><span class="chip chip-done">✓ Cerrado</span></td>
       </tr>
       <tr>
-        <td>W5–W7 — Cancelar / Bloqueo / Vistas</td>
-        <td>Operaciones complementarias</td>
-        <td><span class="chip chip-pending">→ Pendiente</span></td>
+        <td>W5 — Cancelar pre-reserva</td>
+        <td>Cancelación manual, libera fechas</td>
+        <td><span class="chip chip-done">✓ Cerrado</span></td>
+      </tr>
+      <tr>
+        <td>W6 — Crear bloqueo</td>
+        <td>Bloqueos administrativos de fechas</td>
+        <td><span class="chip chip-done">✓ Cerrado</span></td>
+      </tr>
+      <tr>
+        <td>W7 — Vistas operativas</td>
+        <td>Workflow read-only sobre 6 vistas SQL</td>
+        <td><span class="chip chip-done">✓ Cerrado</span></td>
+      </tr>
+      <tr>
+        <td>Tests funcionales 6C</td>
+        <td>40 tests aprobados · 3 verificaciones cruzadas end-to-end</td>
+        <td><span class="chip chip-done">✓ Aprobados</span></td>
+      </tr>
+      <tr>
+        <td>Hardening pre-producción</td>
+        <td>Fixes pendientes antes de abrir TEST o canales reales</td>
+        <td><span class="chip chip-pending">→ Próximo</span></td>
+      </tr>
+      <tr>
+        <td>Entorno TEST en Supabase</td>
+        <td>Réplica del entorno DEV para pruebas controladas</td>
+        <td><span class="chip chip-pending">→ Próximo</span></td>
       </tr>
       <tr>
         <td>Canales reales</td>
@@ -1041,13 +1098,13 @@
         <td><span class="chip chip-future">◦ Futuro</span></td>
       </tr>
       <tr>
-        <td>MercadoPago automático</td>
-        <td>Integración de pagos automatizados</td>
+        <td>MercadoPago webhook</td>
+        <td>Integración de pagos automáticos</td>
         <td><span class="chip chip-future">◦ Futuro</span></td>
       </tr>
       <tr>
         <td>Producción</td>
-        <td>RLS, Auth, entorno productivo</td>
+        <td>RLS, Auth, entorno productivo real</td>
         <td><span class="chip chip-future">◦ Futuro</span></td>
       </tr>
     </tbody>
@@ -1063,32 +1120,35 @@
     <div class="roadmap-col done">
       <h3>Completado</h3>
       <div class="roadmap-item">Arquitectura base diseñada</div>
-      <div class="roadmap-item">Motor de disponibilidad</div>
-      <div class="roadmap-item">Motor de precios</div>
-      <div class="roadmap-item">Sheets DEV y TEST con datos</div>
-      <div class="roadmap-item">Validaciones y protecciones</div>
-      <div class="roadmap-item">Registro de consultas</div>
-      <div class="roadmap-item">Pre-reservas con bloqueo</div>
-      <div class="roadmap-item">Registro de pago reportado</div>
-      <div class="roadmap-item">Confirmación definitiva de reserva</div>
+      <div class="roadmap-item">Motor de precios y disponibilidad</div>
+      <div class="roadmap-item">Google Sheets legacy (congelado)</div>
+      <div class="roadmap-item">Migración a Supabase / PostgreSQL</div>
+      <div class="roadmap-item">Schema PostgreSQL v1.7.1</div>
+      <div class="roadmap-item">Funciones, triggers y vistas SQL</div>
+      <div class="roadmap-item">Expiración automática con pg_cron</div>
+      <div class="roadmap-item">W0–W7 workflows n8n cerrados</div>
+      <div class="roadmap-item">40 tests funcionales aprobados</div>
+      <div class="roadmap-item">3 verificaciones end-to-end</div>
       <div class="roadmap-item">Contratos técnicos documentados</div>
     </div>
 
     <div class="roadmap-col soon">
       <h3>Próximos pasos</h3>
-      <div class="roadmap-item">Expiración automática de pre-reservas</div>
-      <div class="roadmap-item">Calendario operativo interno</div>
-      <div class="roadmap-item">Notificaciones operativas iniciales</div>
-      <div class="roadmap-item">Entorno productivo en Google Sheets</div>
+      <div class="roadmap-item">Hardening pre-producción</div>
+      <div class="roadmap-item">Fix NULLIF/TRIM en funciones write</div>
+      <div class="roadmap-item">Fix vista_ocupacion</div>
+      <div class="roadmap-item">Entorno TEST en Supabase</div>
+      <div class="roadmap-item">Preparación para consumidores reales</div>
     </div>
 
     <div class="roadmap-col later">
       <h3>Más adelante</h3>
-      <div class="roadmap-item">Bot conversacional con IA</div>
-      <div class="roadmap-item">Integración MercadoPago</div>
-      <div class="roadmap-item">Web pública de reservas</div>
-      <div class="roadmap-item">Notificaciones automáticas</div>
-      <div class="roadmap-item">Dashboard de métricas</div>
+      <div class="roadmap-item">Webhook MercadoPago</div>
+      <div class="roadmap-item">WhatsApp / Instagram Meta API</div>
+      <div class="roadmap-item">Bot conversacional con Claude API</div>
+      <div class="roadmap-item">Web pública de reservas conectada</div>
+      <div class="roadmap-item">Dashboard operativo</div>
+      <div class="roadmap-item">Producción con RLS / Auth</div>
     </div>
 
   </div>
@@ -1097,21 +1157,21 @@
 <!-- ─── PRINCIPIO CENTRAL ─── -->
 <section class="principle">
   <p class="principle-quote">
-    "<strong>La IA conversa.</strong> Los workflows operan. <strong>Sheets persiste.</strong> Los humanos auditan."
+    "<strong>La IA conversa.</strong> Los workflows operan. <strong>Supabase persiste.</strong> Los humanos auditan."
   </p>
   <p class="principle-sub">
-    Este principio garantiza que el sistema nunca dependa de la inteligencia artificial para decisiones críticas. Cada reserva pasa por lógica determinística y verificable antes de confirmarse.
+    Este principio garantiza que el sistema nunca dependa de la inteligencia artificial para decisiones críticas. Las reglas de negocio viven en PostgreSQL. Cada reserva pasa por lógica determinística y verificable antes de confirmarse.
   </p>
   <br><br>
   <p style="color: rgba(255,255,255,0.35); font-size: 0.85rem; font-style: italic;">
-    "La arquitectura operativa ya llega hasta la reserva confirmada. El próximo paso es automatizar la expiración de pre-reservas vencidas y preparar la operación interna."
+    "El corazón transaccional ya está validado en DEV. El próximo paso es endurecer el sistema antes de abrir TEST, canales reales o producción."
   </p>
 </section>
 
 <!-- ─── FOOTER ─── -->
 <footer>
   <div class="footer-brand">Vita Delta Reservas</div>
-  <div class="footer-note">Sistema operativo para 5 cabañas · Arquitectura modular · En construcción activa · 2026</div>
+  <div class="footer-note">Sistema operativo para 5 cabañas · Supabase DEV + n8n validados · Etapa 6C cerrada · 2026</div>
 </footer>
 
 <script>
