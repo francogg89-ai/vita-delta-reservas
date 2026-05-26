@@ -413,3 +413,77 @@ Hacerlo como cierre formal post-6C, análogo al cierre de 6B v1.7.1:
 ¿La función debería rechazar también strings con solo whitespace (`"   "`)? El patrón con `TRIM` lo haría. **Recomendación: sí**, porque un campo con solo espacios no tiene valor semántico. Pero si algún caso de negocio real lo necesita, ajustar.
 
 Generado como parte del cierre de W3 — 2026-05-25.
+
+## 9. Vistas operativas — ajustes menores detectados en W7
+
+Bloque 1 — vista_ocupacion devuelve 25 meses en vez de 24
+Descubierto durante: 6C — implementación de W7 (vistas operativas), Test 4.
+Fecha: 2026-05-26.
+Prioridad: baja (micro-imprecisión, no rompe lógica).
+Bitácora detallada: Docs/Bitacora/6C_EJECUCION.md — entrada W7, sección "Test 4 — vista_ocupacion".
+Problema
+vista_ocupacion está definida con:
+sqlgenerate_series(
+  date_trunc('month', CURRENT_DATE) - '1 year'::interval,
+  date_trunc('month', CURRENT_DATE) + '1 year'::interval,
+  '1 mon'
+)
+generate_series con paso temporal incluye ambos extremos, generando 25 puntos en vez de 24. Esto resulta en 25 meses × 5 cabañas = 125 filas en el output, en vez del valor teóricamente esperado de 120.
+Ejemplo concreto al 2026-05-26:
+
+date_trunc('month', hoy) = 2026-05-01.
+Inicio del rango: 2025-05-01. Fin del rango: 2027-05-01.
+Pasos: 2025-05, 2025-06, ..., 2026-04, 2026-05, 2026-06, ..., 2027-04, 2027-05.
+Total: 25 puntos.
+
+Impacto
+Funcional: ninguno. Los cálculos de noches_ocupadas para cada mes siguen siendo correctos. El mes "extra" tiene noches_ocupadas: 0 mientras no haya reservas tan lejanas en el futuro.
+Operativo: una fila más por cabaña por consulta. En reportes que consumen la vista, puede causar confusión si alguien espera "exactamente 24 meses" para gráficos.
+Fix propuesto
+Cambiar la cláusula del generate_series para que excluya el último mes:
+sql-- Opción A: usar interval - 1 mes en el límite superior
+generate_series(
+  date_trunc('month', CURRENT_DATE) - '1 year'::interval,
+  date_trunc('month', CURRENT_DATE) + '1 year'::interval - '1 mon'::interval,
+  '1 mon'
+)
+O:
+sql-- Opción B: usar < en un WHERE
+SELECT * FROM generate_series(
+  date_trunc('month', CURRENT_DATE) - '1 year'::interval,
+  date_trunc('month', CURRENT_DATE) + '1 year'::interval,
+  '1 mon'
+) AS d(fecha)
+WHERE d.fecha < date_trunc('month', CURRENT_DATE) + '1 year'::interval
+Recomendación: Opción A, más simple y mantiene el espíritu del código original.
+Estrategia recomendada
+Aplicar como mini-fix junto con el hardening SQL ya documentado (NULLIF en funciones write). En la misma sesión post-6C de hardening pre-producción, revisar las vistas operativas y aplicar este fix.
+
+Bloque 2 — Espacio colgando en concatenación de nombre + apellido
+Descubierto durante: 6C — implementación de W7 (vistas operativas), Test 3.
+Fecha: 2026-05-26.
+Prioridad: muy baja (cosmético).
+Bitácora detallada: Docs/Bitacora/6C_EJECUCION.md — entrada W7, sección "Test 3 — vista_calendario".
+Problema
+Las vistas vista_calendario y vista_limpieza_semana concatenan el nombre del huésped así:
+sqlnombre || ' ' || COALESCE(apellido, '')
+Cuando apellido es string vacío "" (no NULL), COALESCE(apellido, '') devuelve "" sin reemplazar. La concatenación queda como "Juan Pérez Test " || ' ' || "" = "Juan Pérez Test " con espacio al final.
+Ejemplo real visto en Test 3 de W7: huesped_nombre: "Juan Pérez Test ".
+Impacto
+Funcional: ninguno.
+UX/Cosmético: strings con espacios colgando se ven mal en UI / mensajes a clientes. Si una futura plantilla hace "Hola {huesped_nombre}," queda "Hola Juan Pérez Test ," con espacio antes de la coma.
+Fix propuesto
+Reemplazar la concatenación por una forma que normalice el resultado:
+sql-- Opción A: trim al final
+TRIM(nombre || ' ' || COALESCE(apellido, ''))
+
+-- Opción B: solo agregar el espacio si hay apellido real
+CASE
+  WHEN NULLIF(TRIM(apellido), '') IS NULL THEN nombre
+  ELSE nombre || ' ' || apellido
+END
+Recomendación: Opción A es más simple y funciona en ambos casos (apellido NULL o vacío).
+Estrategia recomendada
+Aplicar junto con el fix de vista_ocupacion (Bloque 1) en la sesión post-6C de hardening de vistas. Revisar también si hay otras concatenaciones similares en el schema.
+Nota sobre la fuente del problema
+El espacio colgando aparece porque las huéspedes en DEV se crearon con apellido: "" (string vacío) en lugar de apellido: NULL. La función crear_prereserva u upsert_huesped podría también normalizar este input con NULLIF(TRIM(apellido), '') antes de insertar. Esto se solapa con el item de hardening de validación SQL ya documentado.

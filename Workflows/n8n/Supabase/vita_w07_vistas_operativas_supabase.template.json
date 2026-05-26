@@ -1,0 +1,187 @@
+{
+  "name": "vita_w07_vistas_operativas_supabase",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        160,
+        -64
+      ],
+      "id": "b2aaf54a-8b0a-47cf-b991-077405ad123a",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W7 — Build Input\n// Workflow paramétrico read-only sobre vistas operativas.\n//\n// CONVENCIONES DEV:\n//   - canal y id_evento solo se usan para id_evento_dev (trazabilidad de pruebas)\n//   - source_event fijo: \"n8n_w07_vistas_operativas_manual\"\n//   - W7 NO genera idempotency_key (es read-only).\n//\n// VISTAS DISPONIBLES (whitelist hardcodeada en Build Query):\n//   - \"disponibilidad\"        → vista_disponibilidad (hoy..hoy+60 días, 5 cabañas, ~300 filas)\n//   - \"calendario\"            → vista_calendario (reservas activas hoy..hoy+60d)\n//   - \"ocupacion\"             → vista_ocupacion (noches por mes, ventana ~24 meses, ~120-125 filas)\n//   - \"calendario_semanal\"    → vista_calendario_semanal (estado por día, 7 días × 5 cabañas)\n//   - \"limpieza_semana\"       → vista_limpieza_semana (checkins+checkouts próximos 7 días)\n//   - \"prereservas_activas\"   → vista_prereservas_activas (estado activo + no vencidas)\n//\n// IMPORTANTE: el operador pasa \"calendario\" (sin prefijo \"vista_\"), el workflow\n// le antepone \"vista_\" en Build Query para construir el nombre completo de tabla.\n//\n// FILTROS: ninguna vista acepta parámetros de filtrado externo. Cada vista tiene\n// sus propios filtros internos (mayormente relativos a CURRENT_DATE). El workflow\n// solo permite controlar el LIMIT del result set por seguridad.\n//\n// SEGURIDAD: \"vista\" se interpola directamente en el string de la query (no es\n// parameter binding). Por eso Build Query valida contra whitelist explícita\n// antes de cualquier interpolación. Si la vista no está en la whitelist, el\n// flujo se ramifica por IF Validation Error y NO toca Postgres.\n\n// === EDITAR ESTOS VALORES PARA CADA PRUEBA ===\nconst input = {\n  // Identificación del evento (solo para trazabilidad de pruebas)\n  canal: \"manual_dev\",\n  id_evento: \"test_w07_001\",\n\n  // Vista a consultar (obligatorio)\n  vista: \"calendario\",\n\n  // Límite de filas (opcional, default 500, máx 5000)\n  limit: 500\n};\n// =============================================\n\nreturn [{ json: input }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        -64
+      ],
+      "id": "78dc5123-58e6-4a27-ad56-535bcb6c4604",
+      "name": "Build Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W7 — Build Query\n// Toma el input editable de Build Input y construye:\n//   1. source_event: \"n8n_w07_vistas_operativas_manual\"\n//   2. id_evento_dev: solo para trazabilidad de pruebas en el wrapper.\n//   3. query SQL completa según la vista pedida (si vista es válida).\n//   4. Marcador __validation_error=true si vista no está en whitelist.\n//\n// FLUJO POSTERIOR:\n// El siguiente nodo es \"IF Validation Error\" que ramifica:\n//   - __validation_error=true  → directo a Build Response (no toca Postgres)\n//   - __validation_error=false → Execute Query → Build Response\n//\n// SEGURIDAD CRÍTICA:\n// Las dos interpolaciones de Build Query (tableName, orderBy) NO usan parameter\n// binding — se interpolan directamente al string. Por eso:\n//   - VISTAS_VALIDAS es whitelist hardcodeada. Si input.vista no está en la lista,\n//     el flujo rebota antes de tocar la query.\n//   - ORDER_BY es diccionario hardcodeado. Si la vista pasa la whitelist, su\n//     ORDER BY está predefinido por nosotros (no viene del usuario).\n//   - LIMIT viene de parseInt + clamp, garantizando que sea un entero acotado.\n// Cualquier intento de SQL injection vía input.vista o input.limit es bloqueado\n// por las 3 capas (whitelist, diccionario, clamp).\n\nconst input = $input.first().json;\n\nconst source_event = 'n8n_w07_vistas_operativas_manual';\nconst id_evento_dev = `${input.canal}_${input.id_evento}`;\n\n// Whitelist de vistas (capa 1 de seguridad)\nconst VISTAS_VALIDAS = [\n  'disponibilidad',\n  'calendario',\n  'ocupacion',\n  'calendario_semanal',\n  'limpieza_semana',\n  'prereservas_activas'\n];\n\n// Diccionario de ORDER BY determinístico por vista (capa 2 de seguridad)\n// Columnas validadas contra information_schema.columns de cada vista.\nconst ORDER_BY = {\n  disponibilidad:        'fecha, id_cabana',\n  calendario:            'fecha_checkin, id_cabana, id_reserva',\n  ocupacion:             'inicio_mes, id_cabana',\n  calendario_semanal:    'fecha, id_cabana',\n  limpieza_semana:       'fecha_movimiento, tipo_movimiento, id_cabana',\n  prereservas_activas:   'expira_en, id_cabana, id_pre_reserva'\n};\n\n// Validación de vista contra whitelist\nif (!input.vista || !VISTAS_VALIDAS.includes(input.vista)) {\n  return [{\n    json: {\n      __validation_error: true,\n      __error_code: 'vista_invalida',\n      __vistas_validas: VISTAS_VALIDAS,\n      source_event,\n      id_evento_dev,\n      vista_solicitada: input.vista || null,\n      input\n    }\n  }];\n}\n\n// Clamp del LIMIT (capa 3 de seguridad)\nconst limitRaw = parseInt(input.limit, 10);\nconst limit = Number.isFinite(limitRaw)\n  ? Math.min(Math.max(limitRaw, 1), 5000)\n  : 500;\n\nconst tableName = `vista_${input.vista}`;\nconst orderBy = ORDER_BY[input.vista];\nconst query = `SELECT * FROM ${tableName} ORDER BY ${orderBy} LIMIT ${limit};`;\n\nreturn [{\n  json: {\n    __validation_error: false,\n    query,\n    source_event,\n    id_evento_dev,\n    vista: input.vista,\n    table_name: tableName,\n    order_by: orderBy,\n    limit,\n    input\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        -64
+      ],
+      "id": "283866c8-3261-4362-a884-8ff2ed64cc59",
+      "name": "Build Query"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a7000000-cond-0001",
+              "leftValue": "={{ $json.__validation_error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        832,
+        -64
+      ],
+      "id": "96768da6-8ec5-43b8-a4d5-b0c561e2525b",
+      "name": "IF Validation Error"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.query }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1040,
+        48
+      ],
+      "id": "c745c477-a844-419e-bc57-821269d4a8fb",
+      "name": "Execute Query",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// W7 — Build Response\n// Arma el wrapper externo a partir de:\n//   - Rama IF=true:  el item viene de Build Query con __validation_error=true.\n//                    NO se ejecutó Postgres.\n//   - Rama IF=false: el item proviene de Execute Query (las filas devueltas).\n//                    Para acceder al state de Build Query (vista, table_name,\n//                    order_by, limit, source_event) usamos $('Build Query').\n//\n// DETECCIÓN DE RAMA:\n// Build Response detecta la rama leyendo la propiedad __validation_error del\n// primer item recibido:\n//   - Si llega directo de IF=true, el item tiene __validation_error=true.\n//   - Si llega después de Execute Query, los items son las filas (sin esa\n//     propiedad), y Build Query.first().json sigue accesible vía $('Build Query').\n//\n// CONVENCIONES DEL WRAPPER:\n//   - ok: true si la consulta se ejecutó correctamente, false si vista_invalida.\n//   - vista: la vista efectivamente consultada (null si validation_error).\n//   - result.rows_count: cantidad de filas devueltas.\n//   - result.limit_aplicado: el LIMIT que se aplicó.\n//   - result.filas: array de filas tal como las devuelve la vista.\n//\n// W7 NO incluye idempotency_key ni warning (no aplican para read-only).\n\nconst firstItem = items[0]?.json || {};\n\n// Caso 1: vino de la rama IF=true (vista inválida)\nif (firstItem.__validation_error === true) {\n  return [{\n    json: {\n      ok: false,\n      workflow: 'vita_w07_vistas_operativas_supabase',\n      source_event: firstItem.source_event,\n      id_evento_dev: firstItem.id_evento_dev,\n      vista: null,\n      error: firstItem.__error_code || 'vista_invalida',\n      result: {\n        vistas_validas: firstItem.__vistas_validas,\n        vista_solicitada: firstItem.vista_solicitada\n      },\n      executed_at: new Date().toISOString()\n    }\n  }];\n}\n\n// Caso 2: vino de Execute Query (rama IF=false)\n// Recuperar el state de Build Query para tener vista, table_name, order_by, limit\nconst buildQuery = $('Build Query').first().json;\n\nconst filas = (items || [])\n  .map(it => it && it.json)\n  .filter(j => j && Object.keys(j).length > 0);\n\nreturn [{\n  json: {\n    ok: true,\n    workflow: 'vita_w07_vistas_operativas_supabase',\n    source_event: buildQuery.source_event,\n    id_evento_dev: buildQuery.id_evento_dev,\n    vista: buildQuery.vista,\n    error: null,\n    result: {\n      table_name: buildQuery.table_name,\n      order_by: buildQuery.order_by,\n      limit_aplicado: buildQuery.limit,\n      rows_count: filas.length,\n      filas\n    },\n    executed_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        -64
+      ],
+      "id": "5f38de7a-8557-4d3c-a177-2be04da9934c",
+      "name": "Build Response"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Build Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Input": {
+      "main": [
+        [
+          {
+            "node": "Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Query": {
+      "main": [
+        [
+          {
+            "node": "IF Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Validation Error": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Query": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "__WORKFLOW_VERSION_ID__",
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "id": "__WORKFLOW_ID__",
+  "tags": []
+}

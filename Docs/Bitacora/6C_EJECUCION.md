@@ -43,8 +43,8 @@ Cada entrada se cierra cuando el workflow está implementado, testeado y los cri
 | W3 — Registrar pago | `registrar_pago(jsonb)` | ✅ OK | 2026-05-25 |
 | W4 — Confirmar reserva | `confirmar_reserva(jsonb)` | ✅ OK | 2026-05-26 |
 | W5 — Cancelar pre-reserva | `cancelar_prereserva(jsonb)` | ✅ OK | 2026-05-26 |
-| W6 — Crear bloqueo | `crear_bloqueo()` | — | — |
-| W7 — Vistas operativas | Vistas SQL | — | — |
+| W6 — Crear bloqueo | `crear_bloqueo(jsonb)` | ✅ OK | 2026-05-26 |
+| W7 — Vistas operativas | `vista_*` (6 vistas) | ✅ OK | 2026-05-26 |
 
 ---
 
@@ -1360,3 +1360,214 @@ Detalle: el `Build Input` del template tiene los defaults del Test 6 happy path 
 Workflow operativo, los 8 tests + 2 verificaciones cruzadas pasaron a la primera. Es el workflow más complejo del set de writes (2 modos, 4 chequeos de conflicto, detalle granular en errores). El patrón base sigue siendo aplicable sin modificaciones estructurales. Próximo paso: **W7 — Vistas operativas** (consultas read-only sobre `vista_calendario`, `vista_ocupacion`, `vista_calendario_semanal`, `vista_limpieza_semana`, `vista_prereservas_activas`).
 
 Generado como cierre formal de W6 — 2026-05-26.
+
+## W7 — Vistas operativas
+
+**Estado:** ✅ OK
+**Fecha de cierre:** 2026-05-26
+**Propósito:** workflow paramétrico read-only que consulta las 6 vistas operativas del schema (`vista_disponibilidad`, `vista_calendario`, `vista_ocupacion`, `vista_calendario_semanal`, `vista_limpieza_semana`, `vista_prereservas_activas`). Primer workflow del set que **no llama a una función SQL** sino que arma una query dinámica con whitelist de seguridad, y primer workflow que usa **nodo IF para ramificar el flujo**.
+
+### Verificación previa: relevamiento de vistas
+
+Antes del diseño, se ejecutaron queries read-only para entender qué vistas existen y cómo están construidas:
+
+**Vistas listadas en `information_schema.views`:**
+- `vista_disponibilidad`
+- `vista_calendario`
+- `vista_ocupacion`
+- `vista_calendario_semanal`
+- `vista_limpieza_semana`
+- `vista_prereservas_activas`
+
+**Hallazgo crítico de las definiciones (`pg_views`):** ninguna vista acepta parámetros externos. Todas tienen filtros internos relativos a `CURRENT_DATE`:
+
+| Vista | Ventana interna |
+|---|---|
+| `vista_disponibilidad` | `obtener_disponibilidad_rango(CURRENT_DATE, CURRENT_DATE+60, NULL)` — 60 días × 5 cabañas = ~300 filas |
+| `vista_calendario` | reservas en `[CURRENT_DATE, CURRENT_DATE+60]`, estados activos |
+| `vista_calendario_semanal` | `generate_series(CURRENT_DATE, CURRENT_DATE+6, '1 day')` — 7 días × 5 cabañas = 35 filas |
+| `vista_limpieza_semana` | checkins+checkouts en `[CURRENT_DATE, CURRENT_DATE+7]` |
+| `vista_ocupacion` | `generate_series(CURRENT_DATE - 1 year, CURRENT_DATE + 1 year, '1 month')` — ventana 24 meses × 5 cabañas (ver hallazgo abajo) |
+| `vista_prereservas_activas` | `estado IN ('pendiente_pago','pago_en_revision') AND expira_en > now()` |
+
+Esto **simplificó el diseño**: el Build Input solo necesita un parámetro `vista`, no requiere rango de fechas ni filtros opcionales.
+
+### Decisión arquitectural: un workflow paramétrico vs cinco workflows
+
+Se evaluaron dos opciones:
+
+**Opción A:** crear 5 workflows separados (uno por vista), cada uno con su contrato específico.
+
+**Opción B:** crear un único workflow paramétrico con `vista` como input.
+
+**Decisión:** **Opción B**, con la justificación explícita de que para 6C es validación operativa read-only, no API productiva final. Si en el futuro aparecen consumidores reales con necesidades específicas (dashboard, limpieza para Jennifer, frontend, etc.), se podrá dividir en workflows específicos con casos de uso concretos. Mientras tanto, evita 5× la duplicación de mantenimiento + bitácora + templates.
+
+### Decisiones de diseño tomadas
+
+| Decisión | Justificación |
+|---|---|
+| Workflow único `vita_w07_vistas_operativas_supabase` con parámetro `vista` | Simplicidad para 6C. Divisible en el futuro. |
+| Whitelist hardcodeada de 6 vistas en Build Query | Seguridad. `vista` se interpola directamente al string SQL — sin whitelist sería vulnerable a SQL injection. |
+| Diccionario `ORDER_BY` hardcodeado por vista | Garantiza orden determinístico en outputs. Columnas validadas contra `information_schema.columns`. |
+| **Sobreescribir** el ORDER BY interno de las vistas con el nuestro | Independencia del schema: si cambian el orden interno, nuestros tests siguen siendo predecibles. |
+| **Nodo IF entre Build Query y Execute Query** | Si la vista no está en whitelist, **NO se debe tocar Postgres**. El IF ramifica: rama true → Build Response (con error estructurado); rama false → Execute Query → Build Response. **Ajuste solicitado en revisión**, evita que el workflow quede en rojo por un error que ya detectamos. |
+| LIMIT default 500, máximo 5000, con `parseInt + clamp` | Seguridad: garantiza que el LIMIT sea un entero acotado. La vista más grande es disponibilidad (~300 filas), 500 cubre con margen; 5000 es techo de protección. |
+| `input.vista` sin prefijo `vista_` | El operador pasa `"calendario"`, el workflow construye `vista_calendario`. Más limpio de escribir y previene errores tipo `vista_vista_calendario`. |
+| Sin filtros opcionales (fecha_desde, fecha_hasta, id_cabana) | Ninguna vista acepta parámetros. Mantener simple para 6C. Si en el futuro alguna acepta parámetros, se agrega. |
+
+### Estructura del workflow
+
+**Primer workflow del set con 6 nodos** (no 5) por el IF:
+Manual Trigger → Build Input → Build Query → IF Validation Error
+├─ true  → Build Response
+└─ false → Execute Query → Build Response
+
+### Query SQL invocada
+
+Construida dinámicamente en Build Query:
+
+```sql
+SELECT * FROM vista_<vista> ORDER BY <order_by> LIMIT <limit>;
+```
+
+Por ejemplo, para `vista: "calendario"`:
+
+```sql
+SELECT * FROM vista_calendario ORDER BY fecha_checkin, id_cabana, id_reserva LIMIT 500;
+```
+
+A diferencia de W1-W6 que usan `executeQuery` con parameter binding (`$1::tipo` + queryReplacement), W7 manda la query completa al nodo Postgres. **No hay parameter binding** porque no hay valores externos que escapar (todo viene de whitelist/diccionario).
+
+### Tests ejecutados
+
+**Test 1 — Vista inválida (`vista: "fantasma"`)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "vista_invalida" | "vista_invalida" | ✅ |
+| `result.vistas_validas` | array de 6 vistas | exacto | ✅ |
+| `result.vista_solicitada` | "fantasma" | "fantasma" | ✅ |
+| **Postgres NO se ejecuta** | sí (rama IF=true directo a Build Response) | sí | ✅ |
+
+**Valida el IF node.** El flujo se ramificó correctamente y la query nunca se mandó a Postgres.
+
+**Test 2 — `vista_disponibilidad`**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `rows_count` | 300 (60 días × 5 cabañas) | 300 | ✅ |
+| Primera fila | hoy (2026-05-26), cabaña 17 | exacto | ✅ |
+| Última fila | hoy+59 (2026-07-24), cabaña 21 | exacto | ✅ |
+| ORDER BY | fecha asc, id_cabana asc | aplicado | ✅ |
+
+**Test 3 — `vista_calendario`**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `rows_count` | 1 (reserva 8) | 1 | ✅ |
+| `id_reserva` | 8 | 8 | ✅ |
+| `cabana` | "Bamboo" | "Bamboo" | ✅ |
+| `huesped_nombre` | nombre completo | "Juan Pérez Test " (con espacio) | ✅ (ver observación) |
+| `fecha_checkin` / `fecha_checkout` | 2026-07-10 / 2026-07-13 | exacto | ✅ |
+| `monto_total` / `monto_saldo` | 150000 / 100000 | exacto | ✅ |
+
+**Sub-observación menor (cosmética):** la concatenación `nombre || ' ' || COALESCE(apellido, '')` deja un espacio colgando cuando `apellido` es string vacío. No afecta lógica, pero conviene pulir antes de exponer a UI. **Documentado en `Pendiente_pre_produccion.md` como item cosmético.**
+
+**Test 4 — `vista_ocupacion`** ⚠️ **HALLAZGO**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `rows_count` | 120 (24 meses × 5 cabañas) | **125** | ⚠️ |
+| Fila cabaña 17 / inicio_mes 2026-07-01 | `noches_ocupadas: 3` | `noches_ocupadas: 3` | ✅ |
+| Cálculo LEAST/GREATEST | correcto para reserva 8 (10-12 jul) | correcto | ✅ |
+
+**Hallazgo: la vista devuelve 25 meses por cabaña, no 24.**
+
+Análisis técnico: la definición usa
+```sql
+generate_series(
+  date_trunc('month', CURRENT_DATE) - '1 year'::interval,
+  date_trunc('month', CURRENT_DATE) + '1 year'::interval,
+  '1 mon'
+)
+```
+
+`generate_series` con paso temporal **incluye ambos extremos**:
+- Hoy: 2026-05-26.
+- `date_trunc('month', hoy) = 2026-05-01`.
+- Inicio del rango: 2025-05-01. Fin del rango: 2027-05-01.
+- Pasos de 1 mes: 2025-05, 2025-06, ..., 2027-05 → **25 puntos**.
+
+25 meses × 5 cabañas = **125 filas**. Es una micro-imprecisión del schema, no un bug funcional. Los cálculos de `noches_ocupadas` siguen siendo correctos. **Documentado en `Pendiente_pre_produccion.md` como hardening pre-producción opcional.**
+
+**Test 5 — `vista_calendario_semanal`**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `rows_count` | 35 (5 cabañas × 7 días) | 35 | ✅ |
+| Estado de todas las filas | "libre" (sin reservas/bloqueos próximos a hoy) | todas "libre" | ✅ |
+| Rango de fechas | hoy a hoy+6 | 26-may a 01-jun | ✅ |
+
+**Test 6 — `vista_limpieza_semana`**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `rows_count` | 0 (no hay movimientos próximos) | 0 | ✅ |
+| `result.filas` | `[]` | `[]` | ✅ |
+
+**Test 7 — `vista_prereservas_activas`**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `rows_count` | 0 (25 convertida, 26 cancelada) | 0 | ✅ |
+| `result.filas` | `[]` | `[]` | ✅ |
+
+### Lo que W7 demuestra (validaciones reutilizables)
+
+1. **Patrón paramétrico read-only**: una vez establecida la whitelist + diccionario de ORDER BY, agregar una nueva vista futura es trivial (2 entradas más en código).
+2. **IF node para ramificación de validación**: primer workflow del set que usa IF. Resuelve elegantemente el problema "no quiero ejecutar Postgres si la validación temprana falló". Patrón reutilizable para futuros workflows con validaciones complejas.
+3. **Construcción dinámica de query con seguridad en capas**: whitelist + diccionario hardcodeado + clamp numérico. Tres capas que bloquean cualquier intento de SQL injection vía `input.vista` o `input.limit`.
+4. **`SELECT * FROM vista` con ORDER BY externo es suficiente**: para vistas read-only sin parámetros, no es necesario reescribir la query interna. El ORDER BY externo se concatena, PostgreSQL lo aplica al result set, y el plan sigue siendo eficiente.
+5. **Vistas con filtros internos relativos a `CURRENT_DATE`**: las 6 vistas operativas actuales tienen ventanas dinámicas. Esto significa que la salida de los workflows cambia con el tiempo (mañana la `vista_disponibilidad` mostrará un día menos del pasado y uno más del futuro). **No es un bug, es diseño**, pero conviene tenerlo presente para tests futuros.
+
+### Gotchas / hallazgos descubiertos durante W7
+
+**Gotcha 1 (real, documentar):** `vista_ocupacion` devuelve 25 meses × 5 cabañas (no 24×5) por edge case del `generate_series` con bordes inclusive. **Documentado en `Pendiente_pre_produccion.md`.**
+
+**Sub-observación cosmética:** `vista_calendario` y `vista_limpieza_semana` concatenan `nombre || ' ' || apellido` y dejan espacio colgando si `apellido` es vacío. **Documentado en `Pendiente_pre_produccion.md`.**
+
+**No es un gotcha:** el comportamiento de Build Response recibiendo inputs de dos ramas distintas (IF=true directo, y Execute Query post-IF=false) funciona naturalmente en n8n. El detector de rama vía `__validation_error` flag en `items[0].json` es robusto.
+
+### Estado de DEV al cierre de W7
+
+El estado no cambió respecto al cierre de W6 (W7 es read-only):
+
+| Recurso | ID | Estado |
+|---|---|---|
+| Pre-reserva | 25 | `convertida` |
+| Pre-reserva | 26 | `cancelada_por_cliente` |
+| Pago | 11 | `confirmado` |
+| Reserva | 8 | `confirmada` (cabaña 17, 10-13 jul) |
+| Huésped | 34 | `total_reservas=1` |
+| Huésped | 35 | `total_reservas=0` |
+| Bloqueo | 6 | activo, cabaña 19, 15-18 sep 2026 |
+| Bloqueo | 7 | activo, total, 20-22 nov 2026 |
+
+### Template exportado al repo
+
+Template sanitizado en `Workflows/n8n/supabase/vita_w07_vistas_operativas_supabase.template.json`. Placeholders reemplazados al sanitizar siguen la convención del repo.
+
+Detalle: el `Build Input` del template tiene `id_evento: "test_w07_001"` y `vista: "calendario"` como default (el caso más simple). El export tenía los valores del Test 7. Coherente con la práctica de templates del repo.
+
+### Detalle técnico menor del export
+
+En el export de n8n del nodo `Execute Query`, el campo `query` quedó como `"{{ $json.query }}"` (sin el signo `=` inicial que indica expresión n8n) en vez de `"={{ $json.query }}"`. **En n8n, ambas formas se interpretan como expresión** porque la propiedad `query` del nodo Postgres tiene type binding implícito. Funcionó correctamente en los 6 tests con queries (Tests 2-7). **No requiere fix.** Si en el futuro algún sanitizador estricto rechaza la forma sin `=`, conviene homogeneizar todos los workflows con `=` explícito.
+
+### Conclusión W7
+
+Workflow operativo, los 7 tests pasaron a la primera. Es el workflow más diferente del set (paramétrico, sin función SQL, con IF node). Validó que las 6 vistas operativas devuelven datos coherentes con el estado actual de DEV. Identificó un hallazgo menor en `vista_ocupacion` y una sub-observación cosmética en `vista_calendario` / `vista_limpieza_semana`, ambos documentados como pendientes pre-producción.
+
+**Con W7 cerrado, queda completa la etapa 6C — Reescritura de workflows n8n contra Supabase DEV.** El próximo paso es la consolidación final de 6C y la transición a la siguiente fase.
+
+Generado como cierre formal de W7 — 2026-05-26.
