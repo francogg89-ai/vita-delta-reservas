@@ -182,10 +182,7 @@ Conexión n8n cloud → Supabase DEV operativa y validada empíricamente. El pat
 *Bitácora abierta el 2026-05-25 con el cierre de W0.*
 
 
-| W1 — Consultar disponibilidad | `obtener_disponibilidad_rango()` | ✅ OK | 2026-05-25 |
-
-Bloque a pegar después de la entrada de W0
-markdown## W1 — Consultar disponibilidad
+## W1 — Consultar disponibilidad
 
 **Estado:** ✅ OK
 **Fecha de cierre:** 2026-05-25
@@ -336,8 +333,7 @@ Workflow operativo, los 4 tests del documento de diseño pasaron. Patrón base v
 Generado como cierre formal de W1 — 2026-05-25.
 
 
-
-markdown## W2 — Crear pre-reserva
+## W2 — Crear pre-reserva
 
 **Estado:** ✅ OK
 **Fecha de cierre:** 2026-05-25
@@ -507,8 +503,7 @@ Workflow operativo, los 5 tests pasaron a la primera. Patrón base de escritura 
 
 Generado como cierre formal de W2 — 2026-05-25.
 
-
-markdown## W3 — Registrar pago
+## W3 — Registrar pago
 
 **Estado:** ✅ OK
 **Fecha de cierre:** 2026-05-25
@@ -872,7 +867,7 @@ Detalle: el `Build Input` del template tiene `id_evento: "test_w04_001"` (no el 
 Workflow operativo, los 5 tests pasaron a la primera. Es el primero que valida una transición destructiva con múltiples efectos colaterales en cascada. El patrón base sigue robusto. Próximo paso: **W5 — Cancelar pre-reserva** (`cancelar_prereserva()`), que va a requerir crear una pre-reserva nueva con W2 antes de ejecutar (la 25 ya está terminal).
 
 
-markdown## W5 — Cancelar pre-reserva
+## W5 — Cancelar pre-reserva
 
 **Estado:** ✅ OK
 **Fecha de cierre:** 2026-05-26
@@ -1104,3 +1099,264 @@ Detalle: el `Build Input` del template tiene `id_pre_reserva: 0` como placeholde
 Workflow operativo, los 6 tests + verificación cruzada con W1 pasaron a la primera. Cierra el ciclo de vida alternativo de pre-reservas (cancelación vs confirmación). Próximo paso: **W6 — Crear bloqueo** (`crear_bloqueo()`), que va a operar sobre disponibilidad de forma "ofensiva" — bloqueando rangos sin pre-reserva ni reserva detrás (mantenimiento, decisiones operativas, eventos privados, etc.).
 
 Generado como cierre formal de W5 — 2026-05-26.
+
+## W6 — Crear bloqueo
+
+**Estado:** ✅ OK
+**Fecha de cierre:** 2026-05-26
+**Propósito:** invocar `crear_bloqueo()` para registrar bloqueos administrativos sobre la disponibilidad (mantenimiento, uso propio, tormentas, overbooking, otros). Es el primer workflow con dos modos de operación (bloqueo específico por cabaña vs bloqueo total del complejo) y la primera función write con detalle granular en respuestas de error (arrays de IDs en conflicto).
+
+### Verificación previa de contrato real
+
+Aplicando el patrón establecido desde W2:
+
+```sql
+SELECT
+  p.oid::regprocedure AS firma,
+  pg_get_function_result(p.oid) AS retorna
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND p.proname = 'crear_bloqueo';
+```
+
+Resultado: `crear_bloqueo(jsonb) → jsonb`. Mismo patrón que W2-W5.
+
+Inspección del cuerpo (`pg_get_functiondef`) reveló características distintivas respecto a las funciones write anteriores:
+
+1. **Dos modos de operación** ramificados por `id_cabana`:
+   - `id_cabana = número` → bloqueo específico (afecta solo esa cabaña).
+   - `id_cabana = NULL` → bloqueo total (afecta las 5 cabañas).
+2. **Cuatro chequeos de conflicto secuenciales** antes de poder crear el bloqueo (existencia de cabaña, reservas activas, pre-reservas vigentes, otros bloqueos activos).
+3. **Detalle granular en respuestas de error**: cuando rebota por conflicto, incluye arrays de IDs específicos en conflicto (`reservas_en_conflicto`, `prereservas_en_conflicto`, `bloqueos_en_conflicto`). Esto es operativamente valioso — el caller puede mostrar al usuario exactamente qué bloquea el bloqueo.
+4. **Locks diferenciados**: lock global siempre (`pg_advisory_xact_lock(10, 0)`); lock por cabaña (`(1, id_cabana::INTEGER)`) **solo en modo específico**.
+5. **NO implementa idempotencia**. Re-ejecutar con el mismo payload rebota con `bloqueo_solapado` y devuelve el `id_bloqueo` previo en `bloqueos_en_conflicto`. Mismo patrón que W3 (sin idempotency_key).
+
+### Verificación adicional: estructura de tabla `bloqueos` + constraints
+
+Antes de armar Build Input se ejecutaron queries read-only sobre `information_schema.columns` y `pg_constraint`:
+
+**Columnas relevantes:**
+
+| Columna | Tipo | Nullable | Default |
+|---|---|---|---|
+| `id_bloqueo` | bigint | NO | auto-increment |
+| `id_cabana` | bigint | **YES** | null |
+| `fecha_desde` | date | NO | — |
+| `fecha_hasta` | date | NO | — |
+| `motivo` | text | NO | — |
+| `descripcion` | text | YES | — |
+| `creado_por` | text | NO | — |
+| `activo` | boolean | NO | true |
+| `source_event` | text | NO | — |
+
+**`id_cabana` es nullable**: confirma a nivel schema que el bloqueo total (con NULL) es soportado estructuralmente, no es solo lógica de la función.
+
+**CHECK + EXCLUDE constraints:**
+
+| Constraint | Tipo | Detalle |
+|---|---|---|
+| `chk_bloqueos_fechas` | CHECK | `fecha_hasta > fecha_desde` |
+| `chk_bloqueos_motivo` | CHECK | `motivo IN ('mantenimiento', 'uso_propio', 'tormenta', 'overbooking', 'otro')` |
+| `exc_bloqueos_no_overlap` | EXCLUDE | `(id_cabana WITH =, daterange WITH &&)` con `WHERE (activo = true AND id_cabana IS NOT NULL)` |
+
+**Punto técnico importante del EXCLUDE:** el constraint solo aplica cuando `id_cabana IS NOT NULL`. Esto significa que para bloqueos totales, el EXCLUDE no actúa como red de seguridad — el chequeo de solapamiento se hace solo por lógica de la función + el lock global. Buen diseño documentado.
+
+### Decisiones de diseño tomadas
+
+| Decisión | Justificación |
+|---|---|
+| Cabaña 19 (Arrebol) + fechas 15-18 sep 2026 para happy específico | Cabaña no tocada en sesiones anteriores. Fechas lejanas de la reserva 8 (jul) y de las pre-reservas anteriores (jul/ago). Garantiza ausencia de conflictos. |
+| Fechas 20-22 nov 2026 para happy total | Lejanas de todas las pruebas previas. Motivo `tormenta` apropiado para bloqueo total. |
+| Cabaña 17 + fechas 10-12 jul para test de conflicto | Reserva 8 ocupa 10-13 jul en cabaña 17. El rango 10-12 jul es subconjunto y debe disparar `conflicto_con_reserva` con `reservas_en_conflicto: [8]`. |
+| `motivo: "mantenimiento"` para específico, `motivo: "tormenta"` para total | Casos de uso operativos típicos. Mantenimiento es típico para una cabaña puntual; tormenta es típico para cerrar todo el complejo. |
+| `creado_por: "rodrigo_manual"` placeholder DEV | Consistente con `validado_por` de W4. En producción será el operador real. |
+| Wrapper externo sin `idempotency_key` ni `warning` | Coherente con el contrato de la función. |
+| Normalización defensiva con `nv()` aplicada a todos los campos | Continúa el patrón W3/W4/W5. Particularmente importante para `id_cabana`: convierte string vacío a null (modo total). |
+| **NO** usar el patrón `id_cabana=0 = todas` de W1 | La función `crear_bloqueo` no trata 0 como caso especial. Mandar `id_cabana=0` resultaría en `cabana_no_existe`. Para modo total se DEBE usar `null` explícito. Documentado en código del Build Payload. |
+| Test de pre-reserva en conflicto diferido | Requiere crear pre-reserva con W2 + bloqueo. Estructuralmente equivalente al test de reserva en conflicto. Diferido como prueba cruzada futura. |
+| Test de bloqueo total con conflicto diferido | Lógica de chequeo es estructuralmente la misma que en modo específico. Diferido como prueba cruzada futura. |
+
+### Estructura del workflow
+
+Mismo patrón de 5 nodos:
+Manual Trigger → Build Input (Code) → Build Payload (Code) → Call crear_bloqueo (Postgres) → Build Response (Code)
+
+### Query SQL invocada
+
+```sql
+SELECT crear_bloqueo($1::jsonb) AS resultado;
+```
+
+Mismo patrón JSONB + `JSON.stringify` ya validado en W2-W5.
+
+### Verificación SQL previa al armado de Tests
+
+Antes de armar el Test 5, se confirmó con query directa que la reserva 8 sigue en estado activo:
+
+```sql
+SELECT id_reserva, id_cabana, fecha_checkin, fecha_checkout, estado
+FROM reservas
+WHERE id_cabana = 17
+ORDER BY id_reserva;
+-- Resultado: id_reserva=8, id_cabana=17, fecha_checkin='2026-07-10',
+-- fecha_checkout='2026-07-13', estado='confirmada' ✅
+```
+
+Coherente con el cierre de W4. El rango 10-12 jul es subconjunto de 10-13 jul, así que el Test 5 debería disparar el conflicto.
+
+### Tests ejecutados
+
+Orden diseñado para correr primero los tests no destructivos (1-5), después los destructivos (6, 8) intercalados con el de solapamiento (7), y finalmente las verificaciones cruzadas.
+
+**Test 1 — Falta obligatorio (`creado_por: ""`)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | false | false | ✅ |
+| `wrapper.error` | "payload_invalido" | "payload_invalido" | ✅ |
+
+La normalización defensiva con `nv()` convierte `""` a `null`, y la función rebota en la validación inicial.
+
+**Test 2 — Fechas invertidas (`fecha_desde > fecha_hasta`)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.error` | "fechas_invalidas" | "fechas_invalidas" | ✅ |
+
+La función chequea `fecha_hasta <= fecha_desde` después del payload_invalido, así que esta es la validación de orden cronológico.
+
+**Test 3 — Motivo no en enum (`motivo: "limpieza_profunda"`)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.error` | "motivo_invalido" | "motivo_invalido" | ✅ |
+
+La función valida con un `NOT IN` explícito antes de tomar locks. Validación temprana, sin efectos colaterales.
+
+**Test 4 — Cabaña inexistente (`id_cabana: 999`)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.error` | "cabana_no_existe" | "cabana_no_existe" | ✅ |
+
+Esta validación ocurre **después** del lock por cabaña pero antes de chequear conflictos. La función toma el advisory lock con `id_cabana=999::INTEGER` (que es un valor válido para el lock, aunque la cabaña no exista) y después chequea existencia en `cabanas`.
+
+**Test 5 — Conflicto con reserva (cabaña 17 + rango solapado a reserva 8)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.error` | "conflicto_con_reserva" | "conflicto_con_reserva" | ✅ |
+| `result.reservas_en_conflicto` | `[8]` | `[8]` | ✅ |
+
+**Detalle operativamente valioso:** el array `reservas_en_conflicto: [8]` permite que el caller muestre al usuario exactamente qué reservas están bloqueando el bloqueo. Esto habilita workflows operativos del tipo "necesito bloquear, ¿qué reservas tengo que cancelar/mover primero?".
+
+**Test 6 — Happy path bloqueo específico (DESTRUCTIVO)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | true | true | ✅ |
+| `result.id_bloqueo` | > 0 (nuevo) | **6** | ✅ |
+| `result.id_cabana` | 19 | 19 | ✅ |
+| `result.tipo_bloqueo` | "cabana_especifica" | "cabana_especifica" | ✅ |
+
+**Observación sobre el `id_bloqueo=6`:** indica que ya había **5 bloqueos previos** (1-5) en la tabla, probablemente residuales de seeds del schema o pruebas tempranas. **No interfirieron** con nuestros tests porque no solapan los rangos elegidos. Si en el futuro se hace reset de DEV, esos residuos desaparecerán. **Documentado como observación, no requiere acción.**
+
+**Test 7 — Bloqueo solapado (mismo payload que Test 6)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.error` | "bloqueo_solapado" | "bloqueo_solapado" | ✅ |
+| `result.bloqueos_en_conflicto` | `[6]` | `[6]` | ✅ |
+| `result.motivo` | descriptivo | "Ya hay un bloqueo activo (específico o total) en el rango" | ✅ |
+
+**Confirmación de no-idempotencia con detalle granular:** la función rebota y devuelve el `id_bloqueo` previo (`[6]`). Esto es útil porque el caller puede detectar "ya existe el bloqueo que estaba intentando crear" y actuar en consecuencia (mostrarle al usuario el bloqueo existente, en lugar de un error genérico).
+
+**Test 8 — Happy path bloqueo total (DESTRUCTIVO)**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `wrapper.ok` | true | true | ✅ |
+| `result.id_bloqueo` | > 0 (nuevo) | **7** | ✅ |
+| `result.id_cabana` | null | null | ✅ |
+| `result.tipo_bloqueo` | "total" | "total" | ✅ |
+
+**Lo que esto valida estructuralmente:** una fila en `bloqueos` con `id_cabana=NULL` se acepta correctamente por el schema (la columna es nullable) y la función la marca como "total" en el output. La validación de conflicto en modo total no encontró nada (no había reservas, pre-reservas activas ni bloqueos en el rango 20-22 nov 2026).
+
+### Verificaciones cruzadas end-to-end con W1
+
+**Post-Test 6 — Cabaña 19, 15-18 sep 2026:**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `total_dias` | 3 | 3 | ✅ |
+| Las 3 filas con `estado: "bloqueada"` | sí | sí (15, 16, 17 sep) | ✅ |
+| `tipo_dia` 15-17 sep | "semana" (mar, mié, jue) | "semana" × 3 | ✅ |
+| `id_reserva_activa` y `id_prereserva_activa` | null | null × 3 | ✅ |
+
+**Post-Test 8 — Todas las cabañas, 20-22 nov 2026:**
+
+| Verificación | Esperado | Real | OK |
+|---|---|---|---|
+| `total_dias` | 10 (2 días × 5 cabañas) | 10 | ✅ |
+| `id_cabana` en wrapper | null (consulta total) | null | ✅ |
+| **Las 10 filas con `estado: "bloqueada"`** | sí | sí | ✅ |
+| `tipo_dia` 20-21 nov | "finde" (vie, sáb) | "finde" × 10 | ✅ |
+
+**Lo que esto demuestra arquitecturalmente:** un **único registro** en la tabla `bloqueos` con `id_cabana=NULL` (el bloqueo 7) se expande automáticamente en **10 filas bloqueadas** en la vista de disponibilidad (2 días × 5 cabañas). La vista `vista_disponibilidad` (o función subyacente `obtener_disponibilidad_rango`) resuelve correctamente la lógica "id_cabana IS NULL significa todas". El modelo de datos es eficiente — no se duplican registros de bloqueo para representar un cierre del complejo.
+
+### Lo que W6 demuestra (validaciones reutilizables)
+
+1. **Patrón de 5 nodos** sigue funcionando para una función con 2 modos de operación, 4 chequeos de conflicto, captura de EXCLUDE constraint y arrays en respuestas de error.
+2. **Convención de `null` para modo total**: contraste explícito con W1 que usa `0 = todas`. Importante documentar — la convención no es universal entre workflows. **Cada función define su propia semántica para "todas las cabañas".**
+3. **Detalle granular en errores**: los arrays `reservas_en_conflicto`, `prereservas_en_conflicto`, `bloqueos_en_conflicto` permiten workflows operativos que reaccionen a conflictos específicos en lugar de fallar genéricamente.
+4. **EXCLUDE como red de seguridad parcial**: solo aplica a bloqueos específicos. Para totales, el lock global hace de seguridad. Buen diseño defensivo en capas.
+5. **Modelo de datos eficiente**: un bloqueo total se representa con una sola fila (`id_cabana=NULL`) que la vista expande virtualmente. Sin redundancia.
+6. **No-idempotencia con detalle**: re-ejecutar devuelve el `id_bloqueo` previo en el array de conflicto, lo cual es operativamente más útil que un error genérico.
+
+### Gotchas descubiertos durante W6
+
+No se descubrieron gotchas nuevos. Una sub-observación importante quedó documentada en el código del Build Payload:
+
+**Convención de `id_cabana` para "todas":**
+- W1 usa `id_cabana=0` (porque la función subyacente acepta el patrón con `NULLIF($N::TYPE, 0)`).
+- W6 usa `id_cabana=null` (porque la función subyacente acepta NULL y trata 0 como cabaña inexistente).
+
+Esto NO es un gotcha sino una **diferencia de contrato entre funciones**. Cada función write/read define su propia convención. **Lecciones operativas:** siempre verificar el contrato real antes de asumir, y documentar la convención en el código del Build Payload con un comentario explícito.
+
+### Estado de DEV al cierre de W6
+
+| Recurso | ID | Estado |
+|---|---|---|
+| Pre-reserva | 25 | `convertida` (terminal, de W4) |
+| Pre-reserva | 26 | `cancelada_por_cliente` (terminal, de W5) |
+| Pago | 11 | `confirmado`, asociado a reserva 8 |
+| Reserva | 8 | `confirmada`, cabaña 17, 10-13 jul |
+| Huésped | 34 | `total_reservas=1`, `primera_reserva_fecha=2026-07-10` |
+| Huésped | 35 | `total_reservas=0` |
+| **Bloqueo** | **6** | activo, cabaña 19 (Arrebol), 15-18 sep 2026, motivo `mantenimiento` |
+| **Bloqueo** | **7** | activo, **total** (id_cabana=NULL), 20-22 nov 2026, motivo `tormenta` |
+
+**Bloqueos previos en DEV** (no creados en esta sesión): IDs 1-5. Origen probable: seeds del schema o pruebas tempranas. **No interfieren** con nuestros tests. Para entenderlos, ejecutar opcionalmente:
+
+```sql
+SELECT id_bloqueo, id_cabana, fecha_desde, fecha_hasta, motivo, activo, source_event
+FROM bloqueos
+ORDER BY id_bloqueo;
+```
+
+**Implicaciones para W7 (`vistas operativas`):**
+- W7 son consultas read-only sobre vistas existentes (`vista_calendario`, `vista_ocupacion`, etc.).
+- El estado actual de DEV incluye: 1 reserva, 1 pago confirmado, 1 huésped activo, 2 bloqueos nuevos + bloqueos pre-existentes. Suficiente variedad para que las vistas tengan datos significativos al ejecutar.
+
+### Template exportado al repo
+
+Template sanitizado en `Workflows/n8n/supabase/vita_w06_crear_bloqueo_supabase.template.json`. Placeholders reemplazados al sanitizar siguen la convención del repo.
+
+Detalle: el `Build Input` del template tiene los defaults del Test 6 happy path (cabaña 19, mantenimiento, sep 2026), no los del Test 8. Quien importe el template puede ejecutarlo al primer intento para crear un bloqueo específico. Para probar el bloqueo total, debe ajustar `id_cabana: null` y los demás campos.
+
+### Conclusión W6
+
+Workflow operativo, los 8 tests + 2 verificaciones cruzadas pasaron a la primera. Es el workflow más complejo del set de writes (2 modos, 4 chequeos de conflicto, detalle granular en errores). El patrón base sigue siendo aplicable sin modificaciones estructurales. Próximo paso: **W7 — Vistas operativas** (consultas read-only sobre `vista_calendario`, `vista_ocupacion`, `vista_calendario_semanal`, `vista_limpieza_semana`, `vista_prereservas_activas`).
+
+Generado como cierre formal de W6 — 2026-05-26.

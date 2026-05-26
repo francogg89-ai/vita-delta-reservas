@@ -1,0 +1,137 @@
+{
+  "name": "vita_w06_crear_bloqueo_supabase",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "cc0d6e79-ef56-4015-a8f5-1b5e57103e83",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W6 — Build Input\n// Edita los valores de `input` para probar distintos payloads.\n//\n// CONVENCIONES DEV:\n//   - canal y id_evento solo se usan para id_evento_dev (trazabilidad de pruebas)\n//   - W6 NO genera idempotency_key. La función crear_bloqueo() no la espera.\n//     Tampoco implementa idempotent_match: re-ejecutar el mismo payload sobre\n//     un bloqueo ya creado rebota con error 'bloqueo_solapado'.\n//   - source_event fijo: \"n8n_w06_crear_bloqueo_manual\"\n//\n// MODOS DE BLOQUEO:\n//   - Específico: id_cabana = número (1-5) → bloquea solo esa cabaña\n//   - Total:      id_cabana = null         → bloquea las 5 cabañas (complejo cerrado)\n//\n// MOTIVOS VÁLIDOS (enum implícito + CHECK constraint en bloqueos):\n//   - \"mantenimiento\"\n//   - \"uso_propio\"\n//   - \"tormenta\"\n//   - \"overbooking\"\n//   - \"otro\"\n//   Cualquier otro valor rebota con error 'motivo_invalido'.\n//\n// CAMPOS OBLIGATORIOS (la función rebota con 'payload_invalido' si faltan):\n//   fecha_desde, fecha_hasta, motivo, creado_por, source_event\n//\n// CAMPOS OPCIONALES:\n//   id_cabana (null para bloqueo total), descripcion\n//\n// FECHAS: formato YYYY-MM-DD. fecha_hasta es exclusive (igual que reservas).\n// fecha_hasta debe ser > fecha_desde (CHECK constraint y validación interna).\n\n// === EDITAR ESTOS VALORES PARA CADA PRUEBA ===\nconst input = {\n  // Identificación del evento (solo para trazabilidad de pruebas)\n  canal: \"manual_dev\",\n  id_evento: \"test_w06_001\",\n\n  // Modo del bloqueo: número (específico) o null (total)\n  id_cabana: 19,  // ← Arrebol (libre, sin reservas) para happy path específico\n\n  // Fechas (YYYY-MM-DD)\n  fecha_desde: \"2026-09-15\",\n  fecha_hasta: \"2026-09-18\",  // exclusive\n\n  // Motivo (obligatorio, enum)\n  motivo: \"mantenimiento\",\n\n  // Operador que crea el bloqueo (obligatorio)\n  creado_por: \"rodrigo_manual\",\n\n  // Descripción libre (opcional, queda en log_cambios)\n  descripcion: \"Pintura y reparaciones generales - test W6 happy path específico\"\n};\n// =============================================\n\nreturn [{ json: input }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "3f0ac0f0-39ab-41ef-bc2b-c7f558dce386",
+      "name": "Build Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "// W6 — Build Payload\n// Toma el input editable de Build Input y construye:\n//   1. source_event (convención 6C v1.2 Sección 5.5):\n//        n8n_w06_crear_bloqueo_manual\n//   2. id_evento_dev: solo para trazabilidad de pruebas en el wrapper\n//      (NO se manda a la función SQL).\n//   3. payload JSONB según contrato de crear_bloqueo(jsonb).\n//\n// CONTRATO PAYLOAD:\n//   Obligatorios: fecha_desde, fecha_hasta, motivo, creado_por, source_event\n//   Opcionales:   id_cabana (null = bloqueo total, número = específico),\n//                 descripcion\n//\n// W6 NO genera idempotency_key. La función no la espera ni implementa\n// idempotent_match.\n//\n// NORMALIZACIÓN DEFENSIVA (continuación de patrón W3/W4/W5):\n// Aplicamos nv() a todos los campos. Particularmente importante para id_cabana:\n//   - Si input.id_cabana viene como \"\" o undefined, nv() lo convierte a null\n//     → modo bloqueo total\n//   - Si viene como número, queda tal cual → modo específico\n//\n// IMPORTANTE sobre id_cabana = 0:\n// La función no trata 0 como caso especial. Si por error mandamos id_cabana=0,\n// la función intenta buscar la cabaña 0 (que no existe) y rebota con\n// 'cabana_no_existe'. Por eso para bloqueo total se debe usar null explícito,\n// NO el patrón 0=todas que usamos en W1.\n\nconst input = $input.first().json;\n\nconst source_event = 'n8n_w06_crear_bloqueo_manual';\nconst id_evento_dev = `${input.canal}_${input.id_evento}`;\n\nconst nv = (v) => (v === '' || v === undefined ? null : v);\n\nconst payload = {\n  // Modo (null = total, número = específico)\n  id_cabana: nv(input.id_cabana),\n\n  // Obligatorios (con normalización defensiva)\n  fecha_desde: nv(input.fecha_desde),\n  fecha_hasta: nv(input.fecha_hasta),\n  motivo: nv(input.motivo),\n  creado_por: nv(input.creado_por),\n  source_event,\n\n  // Opcionales\n  descripcion: nv(input.descripcion)\n};\n\nreturn [{\n  json: {\n    payload,\n    source_event,\n    id_evento_dev,\n    input  // se preserva para trazabilidad en Build Response\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "babd7ef1-763c-4a0b-99df-1f35126c7395",
+      "name": "Build Payload"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT crear_bloqueo($1::jsonb) AS resultado;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.payload) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        0
+      ],
+      "id": "09830ab3-ca20-4c45-9f2c-2c98666330e1",
+      "name": "Call crear_bloqueo",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "__CREDENTIAL_ID__",
+          "name": "__CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// W6 — Build Response\n// Interpreta el JSONB que devuelve crear_bloqueo() y arma el wrapper externo.\n//\n// Contrato de salida de la función:\n//   - happy: { ok: true, id_bloqueo, id_cabana, tipo_bloqueo }\n//                tipo_bloqueo: 'cabana_especifica' | 'total'\n//   - error: { ok: false, error: '<codigo>', ...detalle según error }\n//\n// CONVENCIONES DEL WRAPPER:\n//   - ok = resultado.ok\n//   - error solo se llena cuando resultado.ok = false\n//   - id_evento_dev para trazabilidad de pruebas\n//   - result siempre lleva el JSONB completo de la función (incluye arrays\n//     de IDs en conflicto cuando aplica: reservas_en_conflicto,\n//     prereservas_en_conflicto, bloqueos_en_conflicto)\n//\n// W6 NO incluye idempotency_key (no aplica) ni warning (la función no emite).\n\nconst buildPayload = $('Build Payload').first().json;\nconst pgItem = items[0]?.json;\nconst resultado = pgItem?.resultado;\n\nif (!resultado || typeof resultado !== 'object') {\n  return [{\n    json: {\n      ok: false,\n      workflow: 'vita_w06_crear_bloqueo_supabase',\n      source_event: buildPayload.source_event,\n      id_evento_dev: buildPayload.id_evento_dev,\n      error: 'sin_respuesta_de_funcion',\n      result: null,\n      executed_at: new Date().toISOString()\n    }\n  }];\n}\n\nconst ok = resultado.ok === true;\n\nreturn [{\n  json: {\n    ok,\n    workflow: 'vita_w06_crear_bloqueo_supabase',\n    source_event: buildPayload.source_event,\n    id_evento_dev: buildPayload.id_evento_dev,\n    error: ok ? null : (resultado.error || 'error_desconocido'),\n    result: resultado,\n    executed_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "5693993b-2d92-4f2d-9f34-42f04100de8f",
+      "name": "Build Response"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Build Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Input": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "Call crear_bloqueo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call crear_bloqueo": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "__WORKFLOW_VERSION_ID__",
+  "meta": {
+    "instanceId": "__N8N_INSTANCE_ID__"
+  },
+  "id": "__WORKFLOW_ID__",
+  "tags": []
+}
