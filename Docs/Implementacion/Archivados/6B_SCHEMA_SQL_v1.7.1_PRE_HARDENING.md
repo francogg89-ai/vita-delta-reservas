@@ -1,84 +1,31 @@
+# ⚠ ARCHIVO HISTÓRICO — NO ES FUENTE CANÓNICA VIGENTE ⚠
+
+> **Este archivo es una copia preservada de `6B_SCHEMA_SQL.md` en su estado v1.7.1, pre-hardening Etapa 6D.**
+>
+> **No usar como referencia operativa.** La fuente canónica vigente es `6B_SCHEMA_SQL.md v1.7.2` (o superior) en su ubicación habitual.
+>
+> Este archivo se conserva para auditoría, rollback documental y trazabilidad histórica del bump v1.7.1 → v1.7.2 realizado durante H8 (bloque documental de Etapa 6D).
+>
+> **Fecha de archivado:** 2026-05-27.
+> **Motivo del archivado:** preservar el estado del schema canónico antes del bump documental v1.7.2 que refleja el estado real de DEV post-hardening estructural H2-H6-bis y post-tests de concurrencia H7.
+> **Bump aplicado por:** Frente A de H8.
+> **Cuerpo original íntegro:** preservado abajo sin modificaciones.
+
+---
+
 # 6B_SCHEMA_SQL.md
 # Schema PostgreSQL — Vita Delta Reservas
 
-**Versión:** 1.7.2
+**Versión:** 1.7.1
 **Fecha:** Mayo 2026
-**Estado:** `6B_SCHEMA_SQL.md v1.7.2` refleja documentalmente el estado real de DEV post-hardening H2-H6-bis. H7 validó concurrencia sin cambios SQL. Etapa 6D no cerrada todavía — H8 Frente B pendiente.
+**Estado:** Fase 3 cerrada en DEV. Bloques 1-22 ejecutados. v1.7 aplicado en DEV. Pendiente alinear DEV con v1.7.1 actualizando `obtener_disponibilidad_rango()`.
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1
 **Sucesora directa de:** ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md v1.1
 
-> **IMPORTANTE:** El SQL de la Parte B se ejecuta bloque por bloque siguiendo `Docs/Implementacion/6B_PLAN_FASES.md`. Al momento de v1.7.2, los Bloques 1-22 ya fueron ejecutados y verificados en Supabase DEV (Fase 3 cerrada). Sobre ese estado, durante Etapa 6D se aplicó el hardening estructural H2-H6-bis (extracts defensivos en 5 funciones write críticas + fix de rango en `vista_ocupacion` + TRIM cosmético en 3 vistas con concatenación nombre+apellido). H7 ejecutó tests de concurrencia sin modificar SQL. v1.7.2 actualiza los cuerpos de funciones y vistas afectadas reflejándolos en la forma persistida por DEV vía `pg_get_functiondef()` / `pg_get_viewdef()`. Etapa 6D queda pendiente de cierre formal hasta que se complete el Frente B de H8.
+> **IMPORTANTE:** El SQL de la Parte B se ejecuta bloque por bloque siguiendo `Docs/Implementacion/6B_PLAN_FASES.md`. Al momento de v1.7.1, los Bloques 1-22 ya fueron ejecutados y verificados en Supabase DEV (Fase 3 cerrada). El hotfix `hora_checkout_domingo` (v1.7) fue aplicado en DEV y queda incorporado al schema canónico. v1.7.1 corrige la consistencia de `obtener_disponibilidad_rango()` con la regla dominical (D47); DEV debe alinearse con esta versión actualizando una función (ver Sección "Alineación de DEV con v1.7.1" en el resumen de cambios).
 > **NOTA DE SANITIZACIÓN:** Este documento fue revisado para subir a GitHub. No contiene Project ID, Project URL, passwords, connection strings, anon keys, service role keys, JWTs ni datos reales de huéspedes. Los teléfonos en tests funcionales son sintéticos. Las credenciales reales del proyecto Supabase deben vivir fuera del repositorio.
-
----
-
-## RESUMEN DE CAMBIOS v1.7.1 → v1.7.2
-
-Bump documental que refleja el estado real de DEV tras la aplicación de Etapa 6D — Hardening pre-producción. Etapa 6D incluye los bloques estructurales H2-H6-bis (que sí modificaron SQL en DEV) y H7 (tests de concurrencia, sin cambios SQL). El cierre formal de Etapa 6D queda diferido al cierre del Frente B de H8.
-
-### a) Cambios derivados del hardening H2-H6-bis
-
-**Funciones write críticas (Bloques 13-17):** los cuerpos persistidos en DEV fueron capturados vía `pg_get_functiondef()` y reflejados en este canónico. Patrón defensivo `NULLIF(TRIM(...), '')` aplicado en los extracts de payload de las 5 funciones write críticas: `registrar_pago`, `confirmar_reserva`, `crear_prereserva`, `cancelar_prereserva` y `crear_bloqueo`. El patrón:
-
-- normaliza `""` y whitespace puro (`"   "`) a NULL real antes del cast;
-- evita errores crudos de cast en numéricos, booleanos, DATE, TIME y BIGINT cuando llegan strings vacíos o whitespace;
-- mantiene el contrato: las validaciones siguen rebotando con `payload_invalido` cuando un campo obligatorio queda NULL.
-
-Excepción documentada inline en `crear_prereserva`: `v_huesped_payload` usa `payload->'huesped'` (operador JSONB anidado, no derivado de `payload->>'...'`); su normalización vive en `upsert_huesped()` y no aplica el patrón canónico.
-
-**Caso especial `crear_bloqueo` con `id_cabana`:** el patrón mantiene la semántica de "NULL = bloqueo total" — `id_cabana: null`, `""` y `"   "` se interpretan como bloqueo total. `id_cabana: 17` (o cualquier ID válido) implica bloqueo específico.
-
-**`crear_prereserva` — `canal_pago_esperado`:** el extract aplica el patrón canónico `NULLIF(TRIM(...), '')`, pero el campo continúa requerido a nivel schema porque `pre_reservas.canal_pago_esperado` es `TEXT NOT NULL`. Si llega ausente, vacío o whitespace, la variable queda NULL y el INSERT puede fallar por constraint `NOT NULL`; evaluar en Frente B si corresponde restaurar validación manual controlada o hacer nullable la columna.
-
-**`vista_ocupacion` (Bloque 20, V4) — fix de rango:** ajustada para devolver exactamente 24 meses. El límite superior del `generate_series` ahora resta `'1 mon'::interval` para evitar el edge case que generaba 25 puntos = 25 meses × cabaña.
-
-**`vista_calendario`, `vista_limpieza_semana` y `vista_prereservas_activas` (Bloque 20) — fix cosmético:** TRIM aplicado a la concatenación nombre + apellido para evitar espacios colgando cuando `apellido` es NULL o vacío. En `vista_limpieza_semana` el TRIM se aplica en 2 ocurrencias (una por cada parte del UNION ALL).
-
-**Validación empírica (H7, sin cambios SQL):** 6 tests de concurrencia ejecutados sobre las funciones write críticas validaron empíricamente la invariante de locks v1.5 (lock global SIEMPRE primero) bajo paralelismo real. Resultado: 6/6 aprobados, cero deadlocks `40P01`, cero races, cero doble booking. Detalle en `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` sección H7.
-
-### b) Correcciones documentales de alineación con DEV real
-
-Durante la captura de snapshots para el bump v1.7.2 se identificaron divergencias entre el cuerpo persistido en DEV y la descripción narrativa previa del canónico. Estas correcciones no son cambios de hardening — son alineación de la documentación con la realidad observada:
-
-- **`registrar_pago` (Bloque 17) — log explícito:** el `modificado_por` del log se calcula como `COALESCE(v_validado_por, 'registrar_pago')`. El cast del campo `nivel` es explícito: `'warning'::nivel_log_enum` o `'info'::nivel_log_enum` según corresponda. Estos detalles ahora quedan documentados en el cuerpo.
-- **`confirmar_reserva` (Bloque 14) — error sobre pre-reserva en estado terminal:** la función retorna `error='estado_invalido'` con un campo adicional `estado_actual` que indica el estado real de la pre-reserva. v1.7.2 documenta este contrato tal como existe en DEV.
-- **`crear_prereserva` (Bloque 13) — variable `v_ninos`:** DEV real declara y usa `v_ninos` como `BOOLEAN`. El canónico v1.7.1 lo documentaba como `TEXT`. v1.7.2 refleja el tipo real de la variable. Hallazgo lateral: las columnas `pre_reservas.ninos` y `reservas.ninos` son `TEXT`. La desalineación de tipo entre función y columnas queda documentada como pendiente liviano a evaluar antes de TEST/PROD (ver Frente B de H8); no es freno del bump documental.
-
-### c) Nota técnica — forma persistida de las vistas
-
-Las vistas actualizadas en este bump se reflejan en la forma persistida por PostgreSQL vía `pg_get_viewdef()` para facilitar futuras comparaciones. PostgreSQL normaliza ciertas expresiones al persistir (por ejemplo `TRIM(x)` → `TRIM(BOTH FROM x)`, `'1 month'::interval` → `'1 mon'::interval`, `'12 months'::interval` → `'1 year'::interval`, `date_trunc('month', x)` con casts explícitos de tipo). Las diferencias textuales contra la forma humana son equivalentes funcionales; el canónico adopta la forma persistida para garantizar match byte-exacto contra DEV.
-
-### Lo que NO cambió
-
-- Tablas de catálogo y transaccionales (Bloques 3-6) — la documentación de columnas ya estaba alineada con DEV en v1.7.1 (verificado durante el bump: `cabanas.capacidad_max`, `bloqueos.activo BOOLEAN NOT NULL DEFAULT true`).
-- Funciones no afectadas por el hardening: `normalizar_telefono`, `upsert_huesped`, `validar_disponibilidad`, `obtener_disponibilidad_rango`, `expirar_prereservas_vencidas`.
-- Vistas no afectadas: `vista_disponibilidad`, `vista_calendario_semanal`.
-- Constraints EXCLUDE (Bloque 8).
-- Triggers automáticos (Bloque 19).
-- Seed mínimo (Bloque 21).
-- Schedules de pg_cron (Bloque 22).
-- Diseño de locks (D46, invariante v1.5, cast v1.6 con `::INTEGER`).
-- Motor de precios, RLS, workflows n8n, tests funcionales documentados.
-- Decisiones D1-D47 ni decisiones de hardening D-HARD-01 a D-HARD-11.
-
-### Estado en Supabase DEV
-
-- Bloques 1-22 ejecutados.
-- v1.7.1 aplicado completamente (incluye `obtener_disponibilidad_rango()` alineado con D47).
-- Hardening H2-H6-bis aplicado en DEV (Etapa 6D, sesión 2026-05-26).
-- Tests de concurrencia H7 aprobados en DEV (sesión 2026-05-27, 6/6 aprobados).
-- **Pendiente:** cierre formal de Etapa 6D vía `6D_CIERRE.md` (Frente B de H8).
-
-### Hallazgos no resueltos en este bump
-
-- **Alineación de tipo `ninos`:** función `crear_prereserva` declara `v_ninos BOOLEAN`, columnas `pre_reservas.ninos` y `reservas.ninos` son `TEXT`. Cast implícito BOOLEAN→TEXT en PostgreSQL al INSERT produce el valor textual `"false"` (observado empíricamente en los 3 registros existentes en DEV). Funcionalmente inocuo hoy. Queda como item liviano para evaluación pre-TEST/PROD durante Frente B de H8, agregado a `Pendiente_pre_produccion.md`. No es freno del bump documental.
-- **Contrato de `canal_pago_esperado`:** el campo ya no está en la validación manual post-extract de `crear_prereserva`, pero la columna `pre_reservas.canal_pago_esperado` sigue siendo `TEXT NOT NULL`. Evaluar antes de TEST/PROD si se restaura validación manual con `payload_invalido` o si se decide nullable a nivel schema.
-
-### Backup de v1.7.1
-
-Se conserva copia archivada del estado pre-bump en `Docs/Implementacion/Archivados/6B_SCHEMA_SQL_v1.7.1_PRE_HARDENING.md` con banner explícito de archivo histórico. Esa copia preserva el cuerpo íntegro de v1.7.1 para auditoría y rollback documental.
 
 ---
 
@@ -1121,23 +1068,19 @@ Reemplaza conceptualmente a `DISPONIBILIDAD_CACHE`. Devuelve disponibilidad calc
   "monto_total":           number,   // del backend, no del frontend
   "monto_sena":            number,
   "canal_origen":          "whatsapp" | "instagram" | "web" | "manual",
-  "canal_pago_esperado":   "transferencia_bancaria" | ...,   // requerido por schema (TEXT NOT NULL)
+  "canal_pago_esperado":   "transferencia_bancaria" | ...,
   "hora_checkin_solicitada":  "HH:MM" | null,   // opcional
   "hora_checkout_solicitada": "HH:MM" | null,   // opcional
   "expiracion_minutos":    number | null,       // default desde configuracion_general
   "mascotas":              boolean | null,
   "detalle_mascotas":      string | null,
-  "ninos":                 boolean | string parseable a boolean | null,
+  "ninos":                 string | null,
   "notas_reserva":         string | null,
   "notas":                 string | null,
   "source_event":          string,
   "idempotency_key":       string | null
 }
 ```
-
-> **Nota sobre `canal_pago_esperado`:** el extract aplica `NULLIF(TRIM(...), '')` defensivo, pero la columna `pre_reservas.canal_pago_esperado` es `TEXT NOT NULL`, por lo que el campo continúa requerido a nivel schema. Si llega ausente, vacío o whitespace, el INSERT puede fallar por constraint `NOT NULL`. Evaluación en Frente B (ver "Hallazgos no resueltos" del changelog v1.7.1 → v1.7.2).
->
-> **Nota sobre `ninos`:** el payload se interpreta como booleano en `crear_prereserva` (variable local `v_ninos BOOLEAN`), pero las columnas persistidas `pre_reservas.ninos` y `reservas.ninos` siguen siendo `TEXT`. El cast implícito BOOLEAN→TEXT al INSERT genera valores como `"false"`. Alineación pendiente para Frente B.
 
 **Flujo:**
 
@@ -3381,9 +3324,8 @@ RETURNS JSONB
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_huesped_payload      JSONB;
-  v_id_consulta          BIGINT;
   v_id_cabana            BIGINT;
+  v_id_consulta          BIGINT;
   v_fecha_in             DATE;
   v_fecha_out            DATE;
   v_personas             INTEGER;
@@ -3391,13 +3333,6 @@ DECLARE
   v_monto_sena           NUMERIC(12,2);
   v_canal_origen         TEXT;
   v_canal_pago_esperado  TEXT;
-  v_source_event         TEXT;
-  v_idempotency_key      TEXT;
-  v_notas                TEXT;
-  v_mascotas             BOOLEAN;
-  v_detalle_mascotas     TEXT;
-  v_ninos                BOOLEAN;
-  v_notas_reserva        TEXT;
   v_hora_checkin_sol     TIME;
   v_hora_checkout_sol    TIME;
   v_hora_checkin_final   TIME;
@@ -3408,44 +3343,50 @@ DECLARE
   v_hora_checkout_max    TIME;
   v_expiracion_minutos   INTEGER;
   v_expira_en            TIMESTAMPTZ;
-  v_estado_inicial       estado_prereserva_enum;
+  v_mascotas             BOOLEAN;
+  v_detalle_mascotas     TEXT;
+  v_ninos                TEXT;
+  v_notas_reserva        TEXT;
+  v_notas                TEXT;
+  v_source_event         TEXT;
+  v_idempotency_key      TEXT;
+  v_huesped_result       JSONB;
   v_id_huesped           BIGINT;
-  v_id_pre_reserva       BIGINT;
-  v_config               JSONB;
-  v_claves_faltantes     TEXT[];
   v_cabana               cabanas%ROWTYPE;
   v_disponibilidad       JSONB;
   v_existente            pre_reservas%ROWTYPE;
-  v_upsert_result        JSONB;
+  v_id_pre_reserva       BIGINT;
+  v_estado_inicial       estado_prereserva_enum;
+  -- v1.2: lectura agrupada de configuracion_general (D37)
+  v_config               JSONB;
+  v_claves_faltantes     TEXT[];
 BEGIN
-  -- ─── 1. Extraer payload y validar ──────────────────────
-  -- (v1.7.2) Extract defensivo unificado: todos los campos derivados de
-  -- payload->>'...' pasan por NULLIF(TRIM(...),'') antes del cast. Excepción:
-  -- v_huesped_payload usa payload->'huesped' (operador JSONB, no texto), no
-  -- aplica patrón. La normalización interna del huésped vive en upsert_huesped().
-  v_huesped_payload     := payload->'huesped';
-  v_id_consulta         := NULLIF(TRIM(payload->>'id_consulta'), '')::BIGINT;
-  v_id_cabana           := NULLIF(TRIM(payload->>'id_cabana'), '')::BIGINT;
-  v_fecha_in            := NULLIF(TRIM(payload->>'fecha_in'), '')::DATE;
-  v_fecha_out           := NULLIF(TRIM(payload->>'fecha_out'), '')::DATE;
-  v_personas            := NULLIF(TRIM(payload->>'personas'), '')::INTEGER;
-  v_monto_total         := NULLIF(TRIM(payload->>'monto_total'), '')::NUMERIC(12,2);
-  v_monto_sena          := NULLIF(TRIM(payload->>'monto_sena'), '')::NUMERIC(12,2);
-  v_canal_origen        := NULLIF(TRIM(payload->>'canal_origen'), '');
-  v_canal_pago_esperado := NULLIF(TRIM(payload->>'canal_pago_esperado'), '');
-  v_source_event        := NULLIF(TRIM(payload->>'source_event'), '');
-  v_idempotency_key     := NULLIF(TRIM(payload->>'idempotency_key'), '');
-  v_notas               := NULLIF(TRIM(payload->>'notas'), '');
-  v_mascotas            := COALESCE(NULLIF(TRIM(payload->>'mascotas'), '')::BOOLEAN, FALSE);
-  v_detalle_mascotas    := NULLIF(TRIM(payload->>'detalle_mascotas'), '');
-  v_ninos               := COALESCE(NULLIF(TRIM(payload->>'ninos'), '')::BOOLEAN, FALSE);
-  v_notas_reserva       := NULLIF(TRIM(payload->>'notas_reserva'), '');
-  v_hora_checkin_sol    := NULLIF(TRIM(payload->>'hora_checkin_solicitada'), '')::TIME;
-  v_hora_checkout_sol   := NULLIF(TRIM(payload->>'hora_checkout_solicitada'), '')::TIME;
+  -- ─── 1. Extraer y validar payload ───────────────────────
+  v_id_cabana           := (payload->>'id_cabana')::BIGINT;
+  v_id_consulta         := NULLIF(payload->>'id_consulta', '')::BIGINT;
+  v_fecha_in            := (payload->>'fecha_in')::DATE;
+  v_fecha_out           := (payload->>'fecha_out')::DATE;
+  v_personas            := (payload->>'personas')::INTEGER;
+  v_monto_total         := NULLIF(payload->>'monto_total', '')::NUMERIC(12,2);
+  v_monto_sena          := NULLIF(payload->>'monto_sena', '')::NUMERIC(12,2);
+  v_canal_origen        := payload->>'canal_origen';
+  v_canal_pago_esperado := payload->>'canal_pago_esperado';
+  v_hora_checkin_sol    := NULLIF(payload->>'hora_checkin_solicitada', '')::TIME;
+  v_hora_checkout_sol   := NULLIF(payload->>'hora_checkout_solicitada', '')::TIME;
+  v_mascotas            := COALESCE((payload->>'mascotas')::BOOLEAN, FALSE);
+  v_detalle_mascotas    := NULLIF(payload->>'detalle_mascotas', '');
+  v_ninos               := NULLIF(payload->>'ninos', '');
+  v_notas_reserva       := NULLIF(payload->>'notas_reserva', '');
+  v_notas               := NULLIF(payload->>'notas', '');
+  v_source_event        := payload->>'source_event';
+  v_idempotency_key     := NULLIF(payload->>'idempotency_key', '');
 
+  -- Validaciones mínimas
   IF v_id_cabana IS NULL OR v_fecha_in IS NULL OR v_fecha_out IS NULL
-     OR v_personas IS NULL OR v_canal_origen IS NULL OR v_source_event IS NULL THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'payload_invalido');
+     OR v_personas IS NULL OR v_canal_origen IS NULL
+     OR v_canal_pago_esperado IS NULL OR v_source_event IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'payload_invalido',
+                              'motivo', 'Faltan campos obligatorios');
   END IF;
 
   IF v_monto_total IS NULL OR v_monto_sena IS NULL THEN
@@ -3453,48 +3394,62 @@ BEGIN
                               'motivo', 'monto_total y monto_sena son obligatorios');
   END IF;
 
+  IF v_monto_total <= 0 OR v_monto_sena < 0 OR v_monto_sena > v_monto_total THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'montos_invalidos');
+  END IF;
+
   IF v_fecha_out <= v_fecha_in THEN
     RETURN jsonb_build_object('ok', false, 'error', 'fechas_invalidas');
   END IF;
 
-  IF v_huesped_payload IS NULL OR NULLIF(TRIM(v_huesped_payload->>'nombre'), '') IS NULL THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'huesped_nombre_requerido',
-                              'motivo', 'El payload del huésped debe traer un nombre no vacío.');
-  END IF;
-
-  IF NULLIF(v_huesped_payload->>'telefono', '') IS NULL
-     AND NULLIF(v_huesped_payload->>'email', '') IS NULL THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'huesped_contacto_requerido',
-                              'motivo', 'El payload del huésped debe traer al menos telefono o email.');
-  END IF;
-
-  -- ─── 1.bis Setear contexto para triggers de log ──
-  PERFORM set_config('app.modificado_por', 'crear_prereserva', true);
-  PERFORM set_config('app.source_event',   v_source_event,    true);
-
-  -- ─── 2. Leer configuración relevante ───────────────────
-  SELECT jsonb_object_agg(clave, valor)
-  INTO v_config
+  -- ─── 2. Cargar configuración agrupada (D37, Q2 Opción B) ──
+  -- 1 SELECT con jsonb_object_agg para todas las claves de horarios y expiración.
+  SELECT jsonb_object_agg(clave, valor) INTO v_config
   FROM configuracion_general
   WHERE clave IN (
-    'hora_checkin_default', 'hora_checkin_domingo',
-    'hora_checkin_max_cliente', 'hora_checkout_min_cliente',
-    'hora_checkout_default', 'hora_checkout_domingo',
+    'hora_checkin_default',
+    'hora_checkin_domingo',
+    'hora_checkin_max_cliente',
+    'hora_checkout_min_cliente',
+    'hora_checkout_default',
+    'hora_checkout_domingo',                      -- v1.7 (D47)
     'prereserva_expiracion_minutos'
   );
 
-  v_expiracion_minutos := COALESCE((v_config->>'prereserva_expiracion_minutos')::INTEGER, 60);
+  -- Si la tabla no tiene ninguna clave, v_config queda NULL. Normalizar a '{}'.
+  v_config := COALESCE(v_config, '{}'::JSONB);
 
+  -- Detectar claves faltantes (un solo log compacto al final si hay alguna)
   v_claves_faltantes := ARRAY[]::TEXT[];
-  IF v_config->>'hora_checkin_default'         IS NULL THEN v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkin_default'); END IF;
-  IF v_config->>'hora_checkin_domingo'         IS NULL THEN v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkin_domingo'); END IF;
-  IF v_config->>'hora_checkin_max_cliente'     IS NULL THEN v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkin_max_cliente'); END IF;
-  IF v_config->>'hora_checkout_min_cliente'    IS NULL THEN v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkout_min_cliente'); END IF;
-  IF v_config->>'hora_checkout_default'        IS NULL THEN v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkout_default'); END IF;
-  IF v_config->>'hora_checkout_domingo'        IS NULL THEN v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkout_domingo'); END IF;
-  IF v_config->>'prereserva_expiracion_minutos' IS NULL THEN v_claves_faltantes := array_append(v_claves_faltantes, 'prereserva_expiracion_minutos'); END IF;
+  IF NOT (v_config ? 'hora_checkin_default') THEN
+    v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkin_default');
+  END IF;
+  IF NOT (v_config ? 'hora_checkin_domingo') THEN
+    v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkin_domingo');
+  END IF;
+  IF NOT (v_config ? 'hora_checkin_max_cliente') THEN
+    v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkin_max_cliente');
+  END IF;
+  IF NOT (v_config ? 'hora_checkout_min_cliente') THEN
+    v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkout_min_cliente');
+  END IF;
+  IF NOT (v_config ? 'hora_checkout_default') THEN
+    v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkout_default');
+  END IF;
+  IF NOT (v_config ? 'hora_checkout_domingo') THEN  -- v1.7 (D47)
+    v_claves_faltantes := array_append(v_claves_faltantes, 'hora_checkout_domingo');
+  END IF;
+  IF NOT (v_config ? 'prereserva_expiracion_minutos') THEN
+    v_claves_faltantes := array_append(v_claves_faltantes, 'prereserva_expiracion_minutos');
+  END IF;
 
-  -- ─── 3. Pre-check idempotencia ──
+  v_expiracion_minutos := COALESCE(
+    NULLIF(payload->>'expiracion_minutos', '')::INTEGER,
+    (v_config->>'prereserva_expiracion_minutos')::INTEGER,
+    60  -- fallback hardcodeado
+  );
+
+  -- ─── 3. Idempotencia: pre-check sin lock (camino 'pre_lock') ───
   IF v_idempotency_key IS NOT NULL THEN
     SELECT * INTO v_existente
     FROM pre_reservas
@@ -3515,18 +3470,59 @@ BEGIN
     END IF;
   END IF;
 
-  -- ─── 4. Resolver huésped ──────
-  v_upsert_result := upsert_huesped(v_huesped_payload);
-  IF NOT (v_upsert_result->>'ok')::BOOLEAN THEN
-    RETURN v_upsert_result;
+  -- ─── 4. Resolver huésped (Modo 2) ───────────────────────
+  IF NOT (payload ? 'huesped') THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'huesped_requerido');
   END IF;
-  v_id_huesped := (v_upsert_result->>'id_huesped')::BIGINT;
 
-  -- ─── 5. Locks ──
-  PERFORM pg_advisory_xact_lock(10, 0);
-  PERFORM pg_advisory_xact_lock(1, v_id_cabana::INTEGER);
+  -- 4.bis (v1.3, Ajuste crítico 2, Opción A): validación explícita en crear_prereserva.
+  -- Una pre-reserva real NO debe nacer con nombre vacío ni sin contacto.
+  -- upsert_huesped queda flexible para otros usos (bot, consultas preliminares).
+  IF COALESCE(TRIM(payload->'huesped'->>'nombre'), '') = '' THEN
+    RETURN jsonb_build_object(
+      'ok',    false,
+      'error', 'huesped_nombre_requerido',
+      'motivo', 'El payload del huésped debe traer un nombre no vacío.'
+    );
+  END IF;
 
-  -- ─── 5.bis Double-check idempotencia ──
+  IF COALESCE(TRIM(payload->'huesped'->>'telefono'), '') = ''
+     AND COALESCE(TRIM(payload->'huesped'->>'email'), '') = '' THEN
+    RETURN jsonb_build_object(
+      'ok',    false,
+      'error', 'huesped_contacto_requerido',
+      'motivo', 'El payload del huésped debe traer al menos telefono o email.'
+    );
+  END IF;
+
+  v_huesped_result := upsert_huesped(payload->'huesped');
+
+  IF NOT (v_huesped_result->>'ok')::BOOLEAN THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'huesped_invalido',
+                              'detalle', v_huesped_result);
+  END IF;
+
+  v_id_huesped := (v_huesped_result->>'id_huesped')::BIGINT;
+
+  -- ─── 5. Locks de disponibilidad ─────────────────────────
+  -- INVARIANTE DE LOCKS (v1.5):
+  -- Tomar SIEMPRE primero el lock global (10, 0) antes de CUALQUIER otro lock:
+  --   - antes de SELECT ... FOR UPDATE (row locks)
+  --   - antes de pg_advisory_xact_lock(1, id_cabana) (lock por cabaña)
+  --   - antes de cualquier table-level lock si volviera a existir
+  -- Romper este orden puede causar deadlocks (error 40P01) o inconsistencias.
+  --
+  -- NOTA TÉCNICA (v1.6): el segundo argumento del lock por cabaña debe castearse
+  -- explícitamente a INTEGER. PostgreSQL no provee pg_advisory_xact_lock(integer, bigint).
+  -- Ver Sección 15 para detalle. Bug detectado en ejecución DEV del Bloque 13.
+  PERFORM pg_advisory_xact_lock(10, 0);                            -- (1) lock global
+  PERFORM pg_advisory_xact_lock(1, v_id_cabana::INTEGER);          -- (2) lock por cabaña
+
+  -- ─── 5.bis (v1.3, Ajuste crítico 1) Double-check de idempotencia POST-LOCK ──
+  -- Cierra el agujero donde dos requests con la misma idempotency_key llegan
+  -- al mismo tiempo, ambos pasan el pre-check (no había nada), uno toma el lock
+  -- e inserta, y el otro espera. Sin este chequeo, el segundo vería la pre-reserva
+  -- recién creada como CONFLICTO y devolvería 'no_disponible' falsamente.
   IF v_idempotency_key IS NOT NULL THEN
     SELECT * INTO v_existente
     FROM pre_reservas
@@ -3547,8 +3543,9 @@ BEGIN
     END IF;
   END IF;
 
-  -- ─── 6. Validar cabaña ──
+  -- ─── 6. Verificar cabaña existe y activa ────────────────
   SELECT * INTO v_cabana FROM cabanas WHERE id_cabana = v_id_cabana;
+
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false, 'error', 'cabana_no_existe');
   END IF;
@@ -3562,7 +3559,7 @@ BEGIN
                               'capacidad_max', v_cabana.capacidad_max);
   END IF;
 
-  -- ─── 7. Validar disponibilidad ──
+  -- ─── 7. Validar disponibilidad ──────────────────────────
   v_disponibilidad := validar_disponibilidad(v_id_cabana, v_fecha_in, v_fecha_out, NULL);
 
   IF NOT (v_disponibilidad->>'ok')::BOOLEAN THEN
@@ -3574,7 +3571,10 @@ BEGIN
                               'conflictos', v_disponibilidad->'conflictos');
   END IF;
 
-  -- ─── 8. Calcular horarios finales (v1.7) ──
+  -- ─── 8. Calcular horarios finales (D37: leídos de config con fallback) ──
+  -- Hora base check-in: domingo usa 'hora_checkin_domingo', resto 'hora_checkin_default'
+  -- (No se aplica escalonamiento acá — eso lo hace n8n si corresponde
+  --  y pasa la hora resultante como hora_checkin_solicitada)
   v_hora_checkin_min := CASE
     WHEN EXTRACT(DOW FROM v_fecha_in) = 0
       THEN COALESCE((v_config->>'hora_checkin_domingo')::TIME, TIME '18:00')
@@ -3585,6 +3585,10 @@ BEGIN
 
   v_hora_checkout_min := COALESCE((v_config->>'hora_checkout_min_cliente')::TIME, TIME '07:00');
 
+  -- Hora base check-out (D47, v1.7): domingo usa 'hora_checkout_domingo' (16:00),
+  -- resto de los días usa 'hora_checkout_default' (10:00).
+  -- DOW = 0 → domingo en PostgreSQL. La regla aplica sobre fecha_out (último día
+  -- de la estadía), no sobre fecha_in.
   v_hora_checkout_max := CASE
     WHEN EXTRACT(DOW FROM v_fecha_out) = 0
       THEN COALESCE((v_config->>'hora_checkout_domingo')::TIME, TIME '16:00')
@@ -3592,6 +3596,7 @@ BEGIN
       COALESCE((v_config->>'hora_checkout_default')::TIME, TIME '10:00')
   END;
 
+  -- Validar/asignar hora_checkin
   IF v_hora_checkin_sol IS NULL THEN
     v_hora_checkin_final := v_hora_checkin_min;
   ELSE
@@ -3605,6 +3610,7 @@ BEGIN
     v_hora_checkin_final := v_hora_checkin_sol;
   END IF;
 
+  -- Validar/asignar hora_checkout
   IF v_hora_checkout_sol IS NULL THEN
     v_hora_checkout_final := v_hora_checkout_max;
   ELSE
@@ -3621,7 +3627,7 @@ BEGIN
   v_expira_en := NOW() + (v_expiracion_minutos || ' minutes')::INTERVAL;
   v_estado_inicial := 'pendiente_pago';
 
-  -- ─── 9. INSERT con manejo defensivo ──
+  -- ─── 9. INSERT con manejo defensivo de exclusion_violation y unique_violation ──
   BEGIN
     INSERT INTO pre_reservas (
       id_consulta, id_cabana, id_huesped,
@@ -3644,6 +3650,8 @@ BEGIN
 
   EXCEPTION
     WHEN unique_violation THEN
+      -- D35 (v1.2) + Observación D (v1.3): si la carrera es por idempotency_key,
+      -- devolver la existente con recovery_path='unique_violation'.
       IF v_idempotency_key IS NOT NULL THEN
         SELECT * INTO v_existente
         FROM pre_reservas
@@ -3664,10 +3672,11 @@ BEGIN
         END IF;
       END IF;
 
+      -- Si no es por idempotency o no se encontró match: error técnico controlado.
       RETURN jsonb_build_object('ok', false, 'error', 'unique_violation_inesperado');
   END;
 
-  -- ─── 10. Log de creación ──
+  -- ─── 10. Log de creación ───────────────────────────────
   INSERT INTO log_cambios (
     tabla_afectada, id_registro, modificado_por, source_event, nivel, detalle
   ) VALUES (
@@ -3677,46 +3686,48 @@ BEGIN
     v_source_event,
     'info',
     jsonb_build_object(
-      'evento',       'prereserva_creada',
-      'id_cabana',    v_id_cabana,
-      'id_huesped',   v_id_huesped,
-      'fecha_in',     v_fecha_in,
-      'fecha_out',    v_fecha_out,
-      'monto_total',  v_monto_total,
-      'monto_sena',   v_monto_sena,
-      'canal_origen', v_canal_origen
+      'evento',         'prereserva_creada',
+      'id_pre_reserva', v_id_pre_reserva,
+      'id_huesped',     v_id_huesped,
+      'id_cabana',      v_id_cabana,
+      'fecha_in',       v_fecha_in,
+      'fecha_out',      v_fecha_out,
+      'monto_total',    v_monto_total,
+      'canal_origen',   v_canal_origen
     )
   );
 
-  -- ─── 11. Warning de config faltante ──
+  -- ─── 11. Log warning compacto si hay claves de config faltantes (D37) ──
+  -- Un solo log con la lista, no uno por clave.
   IF cardinality(v_claves_faltantes) > 0 THEN
     INSERT INTO log_cambios (
       tabla_afectada, id_registro, modificado_por, source_event, nivel, detalle
     ) VALUES (
       'configuracion_general',
-      'sistema',
+      NULL,
       'crear_prereserva',
       v_source_event,
       'warning',
       jsonb_build_object(
-        'evento',           'claves_config_faltantes',
-        'claves_faltantes', v_claves_faltantes,
-        'motivo',           'crear_prereserva usó valores default para estas claves'
+        'evento',           'config_claves_faltantes',
+        'claves_faltantes', to_jsonb(v_claves_faltantes),
+        'id_pre_reserva',   v_id_pre_reserva,
+        'motivo',           'Faltan claves en configuracion_general; se usó fallback hardcodeado'
       )
     );
   END IF;
 
-  -- ─── 12. Retorno exitoso ──
+  -- ─── 12. Devolver resultado (creación nueva, sin recovery) ──
   RETURN jsonb_build_object(
     'ok',               true,
     'idempotent_match', false,
+    'recovery_path',    NULL,
     'id_pre_reserva',   v_id_pre_reserva,
     'id_huesped',       v_id_huesped,
     'estado',           v_estado_inicial::TEXT,
     'expira_en',        v_expira_en,
     'hora_checkin',     v_hora_checkin_final,
-    'hora_checkout',    v_hora_checkout_final,
-    'recovery_path',    NULL
+    'hora_checkout',    v_hora_checkout_final
   );
 END;
 $$;
@@ -3789,30 +3800,35 @@ DECLARE
   v_id_reserva                  BIGINT;
   v_huesped                     huespedes%ROWTYPE;
 BEGIN
-  -- ─── 1. Extraer payload (v1.7.2 — extract defensivo unificado) ──
-  -- Todos los campos derivados de payload->>'...' pasan por
-  -- NULLIF(TRIM(...),'') antes del cast. Esto:
-  --   - normaliza "" y whitespace puro ("   ") a NULL real
-  --   - evita errores crudos de cast en BIGINT y BOOLEAN
-  --   - mantiene el contrato: las validaciones siguen rebotando con
-  --     payload_invalido cuando un obligatorio queda NULL.
-  v_id_pre_reserva            := NULLIF(TRIM(payload->>'id_pre_reserva'), '')::BIGINT;
-  v_permitir_pago_en_revision := COALESCE(NULLIF(TRIM(payload->>'permitir_pago_en_revision'), '')::BOOLEAN, FALSE);
-  v_validado_por              := NULLIF(TRIM(payload->>'validado_por'), '');
-  v_encargado_semana          := NULLIF(TRIM(payload->>'encargado_semana'), '');
-  v_created_by                := NULLIF(TRIM(payload->>'created_by'), '');
-  v_source_event              := NULLIF(TRIM(payload->>'source_event'), '');
+  -- ─── 1. Extraer payload ────────────────────────────────
+  v_id_pre_reserva            := (payload->>'id_pre_reserva')::BIGINT;
+  v_permitir_pago_en_revision := COALESCE((payload->>'permitir_pago_en_revision')::BOOLEAN, FALSE);
+  v_validado_por              := NULLIF(payload->>'validado_por', '');
+  v_encargado_semana          := NULLIF(payload->>'encargado_semana', '');
+  v_created_by                := NULLIF(payload->>'created_by', '');
+  v_source_event              := payload->>'source_event';
 
   IF v_id_pre_reserva IS NULL OR v_source_event IS NULL THEN
     RETURN jsonb_build_object('ok', false, 'error', 'payload_invalido');
   END IF;
 
   -- ─── 1.bis Setear contexto para triggers de log (D38, v1.2) ──
+  -- Estos valores son leídos por trg_log_*_estado para enriquecer log_cambios
+  -- con quién hizo el cambio y desde qué source_event, en lugar de 'trigger_auto'.
   PERFORM set_config('app.modificado_por', 'confirmar_reserva', true);
   PERFORM set_config('app.source_event',   v_source_event,      true);
 
-  -- ─── 1.ter Lock GLOBAL de disponibilidad (v1.5) ──
-  -- INVARIANTE DE LOCKS: tomar SIEMPRE primero el lock global antes de cualquier otro.
+  -- ─── 1.ter Lock GLOBAL de disponibilidad (v1.5 — debe ir ANTES del FOR UPDATE) ──
+  -- INVARIANTE DE LOCKS (v1.5):
+  -- Tomar SIEMPRE primero el lock global (10, 0) antes de CUALQUIER otro lock:
+  --   - antes de SELECT ... FOR UPDATE (row locks)
+  --   - antes de pg_advisory_xact_lock(1, id_cabana) (lock por cabaña)
+  --   - antes de cualquier table-level lock si volviera a existir
+  -- Romper este orden puede causar deadlocks (error 40P01) o inconsistencias.
+  --
+  -- Corrección crítica v1.5: en v1.4 este lock se tomaba DESPUÉS del FOR UPDATE
+  -- sobre pre_reservas, lo cual permitía deadlocks contra cancelar_prereserva
+  -- (que ya tomaba el global primero). Ahora va antes.
   PERFORM pg_advisory_xact_lock(10, 0);
 
   -- ─── 2. Bloquear y leer pre-reserva (row lock, después del global) ──
@@ -3829,9 +3845,12 @@ BEGIN
                               'estado_actual', v_pre.estado::TEXT);
   END IF;
 
-  -- ─── 3. Lock por cabaña (con cast a INTEGER — corrección v1.6) ──
+  -- ─── 3. Lock por cabaña (ahora que conocemos v_pre.id_cabana) ──
+  -- Este lock va después del SELECT porque depende de v_pre.id_cabana.
+  -- Es seguro porque el lock global ya está tomado en el paso 1.ter.
+  --
   -- NOTA TÉCNICA (v1.6): cast explícito a INTEGER. PostgreSQL no provee
-  -- pg_advisory_xact_lock(integer, bigint). Ver Sección 15 del documento.
+  -- pg_advisory_xact_lock(integer, bigint). Ver Sección 15.
   PERFORM pg_advisory_xact_lock(1, v_pre.id_cabana::INTEGER);
 
   -- ─── 4. Verificar pago asociado ────────────────────────
@@ -4003,17 +4022,11 @@ DECLARE
   v_pagos_count        INTEGER;
   v_pagos_ids          BIGINT[];
 BEGIN
-  -- 1. Extraer payload (v1.7.2 — extract defensivo unificado)
-  -- Todos los campos derivados de payload->>'...' pasan por
-  -- NULLIF(TRIM(...),'') antes del cast. Esto:
-  --   - normaliza "" y whitespace puro ("   ") a NULL real
-  --   - evita errores crudos de cast en BIGINT
-  --   - mantiene el contrato: las validaciones siguen rebotando con
-  --     payload_invalido cuando un obligatorio queda NULL.
-  v_id_pre_reserva := NULLIF(TRIM(payload->>'id_pre_reserva'), '')::BIGINT;
-  v_motivo         := NULLIF(TRIM(payload->>'motivo'), '');
-  v_descripcion    := NULLIF(TRIM(payload->>'descripcion'), '');
-  v_source_event   := NULLIF(TRIM(payload->>'source_event'), '');
+  -- 1. Extraer payload
+  v_id_pre_reserva := (payload->>'id_pre_reserva')::BIGINT;
+  v_motivo         := payload->>'motivo';
+  v_descripcion    := NULLIF(payload->>'descripcion', '');
+  v_source_event   := payload->>'source_event';
 
   IF v_id_pre_reserva IS NULL OR v_motivo IS NULL OR v_source_event IS NULL THEN
     RETURN jsonb_build_object('ok', false, 'error', 'payload_invalido');
@@ -4024,7 +4037,16 @@ BEGIN
   PERFORM set_config('app.source_event',   v_source_event,        true);
 
   -- 1.ter Lock global de disponibilidad (D46, v1.4, Q1)
-  -- Esta función NO toma lock por cabaña porque solo libera disponibilidad.
+  -- INVARIANTE DE LOCKS (v1.5):
+  -- Tomar SIEMPRE primero el lock global (10, 0) antes de CUALQUIER otro lock:
+  --   - antes de SELECT ... FOR UPDATE (row locks)
+  --   - antes de pg_advisory_xact_lock(1, id_cabana) (lock por cabaña)
+  --   - antes de cualquier table-level lock si volviera a existir
+  -- Romper este orden puede causar deadlocks (error 40P01) o inconsistencias.
+  --
+  -- Esta función NO toma lock por cabaña porque el UPDATE solo libera
+  -- disponibilidad. Pero sí toma el lock global para serializarse contra
+  -- crear_bloqueo paralelo y evitar falsos conflictos operativos.
   PERFORM pg_advisory_xact_lock(10, 0);
 
   -- 2. Mapear motivo a estado
@@ -4137,23 +4159,14 @@ DECLARE
   v_prereservas_ids      BIGINT[];
   v_bloqueos_ids         BIGINT[];
 BEGIN
-  -- 1. Extraer payload (v1.7.2 — extract defensivo unificado)
-  -- Todos los campos derivados de payload->>'...' pasan por
-  -- NULLIF(TRIM(...),'') antes del cast. Esto:
-  --   - normaliza "" y whitespace puro ("   ") a NULL real
-  --   - evita errores crudos de cast en BIGINT y DATE
-  --   - mantiene el contrato: las validaciones siguen rebotando con
-  --     payload_invalido cuando un obligatorio queda NULL.
-  --
-  -- Caso especial v_id_cabana: null significa "bloqueo total" (válido).
-  -- Tanto null como "" como "   " se interpretan como bloqueo total.
-  v_id_cabana    := NULLIF(TRIM(payload->>'id_cabana'), '')::BIGINT;
-  v_fecha_desde  := NULLIF(TRIM(payload->>'fecha_desde'), '')::DATE;
-  v_fecha_hasta  := NULLIF(TRIM(payload->>'fecha_hasta'), '')::DATE;
-  v_motivo       := NULLIF(TRIM(payload->>'motivo'), '');
-  v_descripcion  := NULLIF(TRIM(payload->>'descripcion'), '');
-  v_creado_por   := NULLIF(TRIM(payload->>'creado_por'), '');
-  v_source_event := NULLIF(TRIM(payload->>'source_event'), '');
+  -- 1. Extraer payload
+  v_id_cabana    := NULLIF(payload->>'id_cabana', '')::BIGINT;
+  v_fecha_desde  := (payload->>'fecha_desde')::DATE;
+  v_fecha_hasta  := (payload->>'fecha_hasta')::DATE;
+  v_motivo       := payload->>'motivo';
+  v_descripcion  := NULLIF(payload->>'descripcion', '');
+  v_creado_por   := payload->>'creado_por';
+  v_source_event := payload->>'source_event';
 
   IF v_fecha_desde IS NULL OR v_fecha_hasta IS NULL
      OR v_motivo IS NULL OR v_creado_por IS NULL OR v_source_event IS NULL THEN
@@ -4168,12 +4181,20 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'motivo_invalido');
   END IF;
 
-  -- 2. Locks (INVARIANTE DE LOCKS v1.5: SIEMPRE primero el global)
-  PERFORM pg_advisory_xact_lock(10, 0);
+  -- 2. Locks de disponibilidad (D46, v1.4)
+  -- INVARIANTE DE LOCKS (v1.5):
+  -- Tomar SIEMPRE primero el lock global (10, 0) antes de CUALQUIER otro lock:
+  --   - antes de SELECT ... FOR UPDATE (row locks)
+  --   - antes de pg_advisory_xact_lock(1, id_cabana) (lock por cabaña)
+  --   - antes de cualquier table-level lock si volviera a existir
+  -- Romper este orden puede causar deadlocks (error 40P01) o inconsistencias.
+  PERFORM pg_advisory_xact_lock(10, 0);                  -- (1) lock global SIEMPRE
 
   IF v_id_cabana IS NOT NULL THEN
-    -- Bloqueo específico: tomar también lock por cabaña con cast a INTEGER (v1.6)
-    PERFORM pg_advisory_xact_lock(1, v_id_cabana::INTEGER);
+    -- Bloqueo específico: tomar también lock por cabaña
+    -- NOTA TÉCNICA (v1.6): cast explícito a INTEGER. PostgreSQL no provee
+    -- pg_advisory_xact_lock(integer, bigint). Ver Sección 15.
+    PERFORM pg_advisory_xact_lock(1, v_id_cabana::INTEGER);       -- (2) lock por cabaña, solo si aplica
 
     -- Verificar cabaña existe
     IF NOT EXISTS (SELECT 1 FROM cabanas WHERE id_cabana = v_id_cabana) THEN
@@ -4197,7 +4218,7 @@ BEGIN
       );
     END IF;
 
-    -- 3.A.2 Verificar conflicto con pre-reservas vigentes en esta cabaña
+    -- 3.A.2 (D33, v1.2) Verificar conflicto con PRE-RESERVAS VIGENTES en esta cabaña
     SELECT COALESCE(array_agg(id_pre_reserva), ARRAY[]::BIGINT[])
     INTO v_prereservas_ids
     FROM pre_reservas
@@ -4218,7 +4239,9 @@ BEGIN
       );
     END IF;
 
-    -- 3.A.3 Verificar bloqueos solapados (específico vs específico o específico vs total)
+    -- 3.A.3 (D34, v1.2) Verificar bloqueos solapados manualmente.
+    -- Casos: específico vs específico (lo cubre EXCLUDE pero validamos antes para mensaje claro);
+    --        específico vs total existente (NO cubierto por EXCLUDE).
     SELECT COALESCE(array_agg(id_bloqueo), ARRAY[]::BIGINT[])
     INTO v_bloqueos_ids
     FROM bloqueos
@@ -4237,7 +4260,12 @@ BEGIN
     END IF;
 
   ELSE
-    -- Bloqueo total (id_cabana IS NULL)
+    -- Bloqueo total (id_cabana IS NULL):
+    -- Solo se toma el lock global. No hay lock por cabaña porque afecta a todas.
+    -- LOCK TABLE eliminado en v1.4 (Q5): la serialización contra otras operaciones
+    -- críticas ahora pasa exclusivamente por el lock global de disponibilidad.
+    -- Las validaciones manuales se mantienen.
+
     -- 3.B.1 Verificar conflicto con reservas en cualquier cabaña
     SELECT COALESCE(array_agg(id_reserva), ARRAY[]::BIGINT[])
     INTO v_reservas_ids
@@ -4255,7 +4283,7 @@ BEGIN
       );
     END IF;
 
-    -- 3.B.2 Verificar conflicto con pre-reservas vigentes en cualquier cabaña
+    -- 3.B.2 (D33, v1.2) Verificar conflicto con PRE-RESERVAS VIGENTES en cualquier cabaña
     SELECT COALESCE(array_agg(id_pre_reserva), ARRAY[]::BIGINT[])
     INTO v_prereservas_ids
     FROM pre_reservas
@@ -4275,7 +4303,9 @@ BEGIN
       );
     END IF;
 
-    -- 3.B.3 Verificar bloqueos solapados (total vs total o total vs específico existente)
+    -- 3.B.3 (D34, v1.2) Verificar bloqueos solapados manualmente.
+    -- Casos: total vs total existente (NO cubierto por EXCLUDE);
+    --        total vs específico existente (NO cubierto por EXCLUDE).
     SELECT COALESCE(array_agg(id_bloqueo), ARRAY[]::BIGINT[])
     INTO v_bloqueos_ids
     FROM bloqueos
@@ -4294,6 +4324,7 @@ BEGIN
   END IF;
 
   -- 4. INSERT con captura defensiva de exclusion_violation
+  -- (defensa estructural residual de EXCLUDE para específico vs específico)
   BEGIN
     INSERT INTO bloqueos (
       id_cabana, fecha_desde, fecha_hasta, motivo, descripcion,
@@ -4306,6 +4337,7 @@ BEGIN
 
   EXCEPTION
     WHEN exclusion_violation THEN
+      -- No debería ocurrir si las validaciones manuales pasaron, pero por las dudas
       RETURN jsonb_build_object('ok', false, 'error', 'bloqueo_solapado',
                                 'motivo', 'EXCLUDE detectó conflicto residual');
   END;
@@ -4391,36 +4423,33 @@ DECLARE
   v_estado_final       estado_pago_enum;
   v_id_pago            BIGINT;
   v_validado_en        TIMESTAMPTZ;
+  -- v1.3: para detectar pre-reserva en estado terminal
   v_prereserva_estado  estado_prereserva_enum;
   v_prereserva_no_activa BOOLEAN := FALSE;
   v_warning            TEXT;
 BEGIN
-  -- 1. Extraer payload (v1.7.2 — extract defensivo unificado)
-  -- Todos los campos derivados de payload->>'...' pasan por
-  -- NULLIF(TRIM(...),'') antes del cast. Esto:
-  --   - normaliza "" y whitespace puro ("   ") a NULL real
-  --   - evita errores crudos de cast en numéricos y booleanos
-  --   - mantiene el contrato: las validaciones siguen rebotando con
-  --     payload_invalido cuando un obligatorio queda NULL.
-  v_id_pre_reserva     := NULLIF(TRIM(payload->>'id_pre_reserva'), '')::BIGINT;
-  v_id_reserva         := NULLIF(TRIM(payload->>'id_reserva'), '')::BIGINT;
-  v_tipo               := NULLIF(TRIM(payload->>'tipo'), '');
-  v_medio_pago         := NULLIF(TRIM(payload->>'medio_pago'), '');
-  v_monto_esperado     := NULLIF(TRIM(payload->>'monto_esperado'), '')::NUMERIC(12,2);
-  v_monto_recibido     := NULLIF(TRIM(payload->>'monto_recibido'), '')::NUMERIC(12,2);
-  v_moneda             := COALESCE(NULLIF(TRIM(payload->>'moneda'), ''), 'ARS');
-  v_es_automatico      := COALESCE(NULLIF(TRIM(payload->>'es_automatico'), '')::BOOLEAN, FALSE);
-  v_estado_inicial     := NULLIF(TRIM(payload->>'estado_inicial'), '');
-  v_comprobante_url    := NULLIF(TRIM(payload->>'comprobante_url'), '');
-  v_referencia_externa := NULLIF(TRIM(payload->>'referencia_externa'), '');
-  v_tx_hash            := NULLIF(TRIM(payload->>'tx_hash'), '');
-  v_validado_por       := NULLIF(TRIM(payload->>'validado_por'), '');
-  v_notas              := NULLIF(TRIM(payload->>'notas'), '');
-  v_proveedor          := NULLIF(TRIM(payload->>'proveedor'), '');
-  v_cuenta_destino     := NULLIF(TRIM(payload->>'cuenta_destino'), '');
-  v_source_event       := NULLIF(TRIM(payload->>'source_event'), '');
+  -- 1. Extraer payload
+  v_id_pre_reserva     := NULLIF(payload->>'id_pre_reserva', '')::BIGINT;
+  v_id_reserva         := NULLIF(payload->>'id_reserva', '')::BIGINT;
+  v_tipo               := payload->>'tipo';
+  v_medio_pago         := payload->>'medio_pago';
+  v_monto_esperado     := (payload->>'monto_esperado')::NUMERIC(12,2);
+  v_monto_recibido     := (payload->>'monto_recibido')::NUMERIC(12,2);
+  v_moneda             := COALESCE(NULLIF(payload->>'moneda', ''), 'ARS');
+  v_es_automatico      := COALESCE((payload->>'es_automatico')::BOOLEAN, FALSE);
+  v_estado_inicial     := NULLIF(payload->>'estado_inicial', '');
+  v_comprobante_url    := NULLIF(payload->>'comprobante_url', '');
+  v_referencia_externa := NULLIF(payload->>'referencia_externa', '');
+  v_tx_hash            := NULLIF(payload->>'tx_hash', '');
+  v_validado_por       := NULLIF(payload->>'validado_por', '');
+  v_notas              := NULLIF(payload->>'notas', '');
+  v_proveedor          := NULLIF(payload->>'proveedor', '');
+  v_cuenta_destino     := NULLIF(payload->>'cuenta_destino', '');
+  v_source_event       := payload->>'source_event';
 
   -- 1.bis Setear contexto para triggers de log (D38, v1.2)
+  -- Importante: cuando este registro promueve una pre-reserva de pendiente_pago
+  -- a pago_en_revision, el trigger trg_log_pre_reservas_estado lee estas variables.
   IF v_source_event IS NOT NULL THEN
     PERFORM set_config('app.modificado_por', 'registrar_pago', true);
     PERFORM set_config('app.source_event',   v_source_event,   true);
@@ -4447,7 +4476,8 @@ BEGIN
       RETURN jsonb_build_object('ok', false, 'error', 'prereserva_no_existe');
     END IF;
 
-    -- v1.3 (P2): detectar pre-reserva en estado terminal
+    -- v1.3 (P2): detectar pre-reserva en estado terminal.
+    -- Si está terminal, NO se reactiva. Se fuerza estado del pago a en_revision.
     IF v_prereserva_estado IN (
       'vencida',
       'cancelada_por_cliente',
@@ -4467,9 +4497,11 @@ BEGIN
 
   -- 4. Determinar estado del pago
   IF v_prereserva_no_activa THEN
+    -- v1.3 (P2): pre-reserva terminal → forzar en_revision, ignorar estado_inicial del payload.
     v_estado_final := 'en_revision';
     v_validado_en  := NULL;
   ELSIF v_estado_inicial = 'confirmado' AND v_monto_recibido = v_monto_esperado THEN
+    -- Camino normal: pago confirmado automáticamente si el payload lo indica y los montos cuadran
     v_estado_final := 'confirmado';
     v_validado_en  := NOW();
     IF v_validado_por IS NULL THEN
@@ -4494,7 +4526,9 @@ BEGIN
   )
   RETURNING id_pago INTO v_id_pago;
 
-  -- 6. Promover pre-reserva de pendiente_pago → pago_en_revision SOLO si está activa
+  -- 6. Promover pre-reserva de pendiente_pago → pago_en_revision SOLO si está activa.
+  -- v1.3 (P2): si la pre-reserva está terminal, este UPDATE NO la afecta
+  -- porque el WHERE exige estado = 'pendiente_pago'. Se mantiene tal cual.
   IF v_id_pre_reserva IS NOT NULL AND NOT v_prereserva_no_activa THEN
     UPDATE pre_reservas
     SET estado = 'pago_en_revision', updated_at = NOW()
@@ -4529,6 +4563,7 @@ BEGIN
 
   -- 8. Retorno
   IF v_prereserva_no_activa THEN
+    -- v1.3 (P2): retorno con warning explícito para que n8n derive a revisión humana.
     RETURN jsonb_build_object(
       'ok',                 true,
       'id_pago',            v_id_pago,
@@ -4768,81 +4803,92 @@ FROM obtener_disponibilidad_rango(
 );
 
 -- ─── V2. vista_calendario ──────────────────────────────
--- Calendario operativo de próximos 60 días con reservas y bloqueos.
--- v1.7.2 (H6): TRIM aplicado a la concatenación nombre + apellido para
--- evitar espacio colgando cuando apellido es NULL o vacío.
+-- Calendario operativo de próximos 60 días con reservas y bloqueos
 CREATE OR REPLACE VIEW vista_calendario AS
-SELECT c.id_cabana,
-    c.nombre AS cabana,
-    r.id_reserva,
-    r.fecha_checkin,
-    r.fecha_checkout,
-    r.hora_checkin,
-    r.hora_checkout,
-    r.personas,
-    r.estado AS estado_reserva,
-    TRIM(BOTH FROM (h.nombre || ' '::text) || COALESCE(h.apellido, ''::text)) AS huesped_nombre,
-    h.telefono AS huesped_telefono,
-    r.monto_total,
-    r.monto_saldo,
-    r.encargado_semana
-   FROM reservas r
-     JOIN cabanas c ON c.id_cabana = r.id_cabana
-     JOIN huespedes h ON h.id_huesped = r.id_huesped
-  WHERE (r.estado = ANY (ARRAY['confirmada'::estado_reserva_enum, 'activa'::estado_reserva_enum])) AND r.fecha_checkout >= CURRENT_DATE AND r.fecha_checkin <= (CURRENT_DATE + 60)
-  ORDER BY r.fecha_checkin, c.id_cabana;
+SELECT
+  c.id_cabana,
+  c.nombre AS cabana,
+  r.id_reserva,
+  r.fecha_checkin,
+  r.fecha_checkout,
+  r.hora_checkin,
+  r.hora_checkout,
+  r.personas,
+  r.estado AS estado_reserva,
+  h.nombre || ' ' || COALESCE(h.apellido, '') AS huesped_nombre,
+  h.telefono AS huesped_telefono,
+  r.monto_total,
+  r.monto_saldo,
+  r.encargado_semana
+FROM reservas r
+JOIN cabanas c ON c.id_cabana = r.id_cabana
+JOIN huespedes h ON h.id_huesped = r.id_huesped
+WHERE r.estado IN ('confirmada', 'activa')
+  AND r.fecha_checkout >= CURRENT_DATE
+  AND r.fecha_checkin <= (CURRENT_DATE + 60)::DATE
+ORDER BY r.fecha_checkin, c.id_cabana;
 
 -- ─── V3. vista_prereservas_activas ─────────────────────
--- v1.7.2 (H6-bis): TRIM aplicado a la concatenación nombre + apellido.
 CREATE OR REPLACE VIEW vista_prereservas_activas AS
-SELECT pr.id_pre_reserva,
-    c.nombre AS cabana,
-    pr.id_cabana,
-    pr.fecha_in,
-    pr.fecha_out,
-    pr.personas,
-    pr.estado,
-    pr.expira_en,
-    EXTRACT(epoch FROM pr.expira_en - now()) / 60::numeric AS minutos_para_vencer,
-    pr.monto_total,
-    pr.monto_sena,
-    pr.canal_origen,
-    pr.canal_pago_esperado,
-    TRIM(BOTH FROM (h.nombre || ' '::text) || COALESCE(h.apellido, ''::text)) AS huesped_nombre,
-    h.telefono AS huesped_telefono
-   FROM pre_reservas pr
-     JOIN cabanas c ON c.id_cabana = pr.id_cabana
-     JOIN huespedes h ON h.id_huesped = pr.id_huesped
-  WHERE (pr.estado = ANY (ARRAY['pendiente_pago'::estado_prereserva_enum, 'pago_en_revision'::estado_prereserva_enum])) AND pr.expira_en > now()
-  ORDER BY pr.expira_en;
+SELECT
+  pr.id_pre_reserva,
+  c.nombre AS cabana,
+  pr.id_cabana,
+  pr.fecha_in,
+  pr.fecha_out,
+  pr.personas,
+  pr.estado,
+  pr.expira_en,
+  EXTRACT(EPOCH FROM (pr.expira_en - NOW()))/60 AS minutos_para_vencer,
+  pr.monto_total,
+  pr.monto_sena,
+  pr.canal_origen,
+  pr.canal_pago_esperado,
+  h.nombre || ' ' || COALESCE(h.apellido, '') AS huesped_nombre,
+  h.telefono AS huesped_telefono
+FROM pre_reservas pr
+JOIN cabanas c ON c.id_cabana = pr.id_cabana
+JOIN huespedes h ON h.id_huesped = pr.id_huesped
+WHERE pr.estado IN ('pendiente_pago', 'pago_en_revision')
+  AND pr.expira_en > NOW()
+ORDER BY pr.expira_en ASC;
 
 -- ─── V4. vista_ocupacion ───────────────────────────────
--- Ocupación por cabaña y mes (últimos 12 meses y próximos 12).
--- v1.7.2 (H5): rango ajustado a 24 meses exactos restando '1 mon'::interval
--- al límite superior del generate_series para evitar el edge case que generaba
--- 25 puntos (= 25 meses × cabaña).
+-- Ocupación por cabaña y mes (últimos 12 meses y próximos 12)
 CREATE OR REPLACE VIEW vista_ocupacion AS
- WITH meses AS (
-         SELECT generate_series(date_trunc('month'::text, CURRENT_DATE::timestamp with time zone) - '1 year'::interval, date_trunc('month'::text, CURRENT_DATE::timestamp with time zone) + '1 year'::interval - '1 mon'::interval, '1 mon'::interval)::date AS inicio_mes
-        ), matriz AS (
-         SELECT c.id_cabana,
-            c.nombre AS cabana,
-            m.inicio_mes,
-            (m.inicio_mes + '1 mon'::interval - '1 day'::interval)::date AS fin_mes
-           FROM cabanas c
-             CROSS JOIN meses m
-          WHERE c.activa = true
-        )
- SELECT id_cabana,
-    cabana,
-    inicio_mes,
-    fin_mes,
-    COALESCE(( SELECT sum(LEAST(r.fecha_checkout, (mx.fin_mes + '1 day'::interval)::date) - GREATEST(r.fecha_checkin, mx.inicio_mes)) AS sum
-           FROM reservas r
-          WHERE r.id_cabana = mx.id_cabana AND (r.estado = ANY (ARRAY['confirmada'::estado_reserva_enum, 'activa'::estado_reserva_enum, 'completada'::estado_reserva_enum])) AND r.fecha_checkin < (mx.fin_mes + '1 day'::interval)::date AND r.fecha_checkout > mx.inicio_mes), 0::bigint) AS noches_ocupadas,
-    EXTRACT(day FROM fin_mes + '1 day'::interval - inicio_mes::timestamp without time zone)::integer AS dias_del_mes
-   FROM matriz mx
-  ORDER BY id_cabana, inicio_mes;
+WITH meses AS (
+  SELECT generate_series(
+    DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '12 months',
+    DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '12 months',
+    INTERVAL '1 month'
+  )::DATE AS inicio_mes
+),
+matriz AS (
+  SELECT c.id_cabana, c.nombre AS cabana, m.inicio_mes,
+         (m.inicio_mes + INTERVAL '1 month' - INTERVAL '1 day')::DATE AS fin_mes
+  FROM cabanas c
+  CROSS JOIN meses m
+  WHERE c.activa = TRUE
+)
+SELECT
+  mx.id_cabana,
+  mx.cabana,
+  mx.inicio_mes,
+  mx.fin_mes,
+  COALESCE((
+    SELECT SUM(
+      LEAST(r.fecha_checkout, (mx.fin_mes + INTERVAL '1 day')::DATE)
+      - GREATEST(r.fecha_checkin, mx.inicio_mes)
+    )
+    FROM reservas r
+    WHERE r.id_cabana = mx.id_cabana
+      AND r.estado IN ('confirmada', 'activa', 'completada')
+      AND r.fecha_checkin < (mx.fin_mes + INTERVAL '1 day')::DATE
+      AND r.fecha_checkout > mx.inicio_mes
+  ), 0) AS noches_ocupadas,
+  EXTRACT(DAY FROM (mx.fin_mes + INTERVAL '1 day') - mx.inicio_mes)::INTEGER AS dias_del_mes
+FROM matriz mx
+ORDER BY mx.id_cabana, mx.inicio_mes;
 
 -- ─── V5. vista_calendario_semanal (Sistema 3) ──────────
 -- Próximos 7 días con todos los movimientos operativos
@@ -4891,44 +4937,49 @@ WHERE c.activa = TRUE
 ORDER BY d.fecha, c.id_cabana;
 
 -- ─── V6. vista_limpieza_semana (Sistema 4 — Jennifer) ──
--- Check-ins y check-outs de los próximos 7 días con horas declaradas.
--- v1.7.2 (H6): TRIM aplicado a la concatenación nombre + apellido en
--- ambas partes del UNION ALL (checkout y checkin).
+-- Check-ins y check-outs de los próximos 7 días con horas declaradas
 CREATE OR REPLACE VIEW vista_limpieza_semana AS
- SELECT r.fecha_checkout AS fecha_movimiento,
-    'checkout'::text AS tipo_movimiento,
-    c.nombre AS cabana,
-    c.id_cabana,
-    r.id_reserva,
-    r.hora_checkout AS hora,
-    r.personas,
-    TRIM(BOTH FROM (h.nombre || ' '::text) || COALESCE(h.apellido, ''::text)) AS huesped,
-    h.telefono AS huesped_telefono,
-    r.mascotas,
-    r.detalle_mascotas,
-    r.notas_reserva
-   FROM reservas r
-     JOIN cabanas c ON c.id_cabana = r.id_cabana
-     JOIN huespedes h ON h.id_huesped = r.id_huesped
-  WHERE (r.estado = ANY (ARRAY['confirmada'::estado_reserva_enum, 'activa'::estado_reserva_enum, 'completada'::estado_reserva_enum])) AND r.fecha_checkout >= CURRENT_DATE AND r.fecha_checkout <= (CURRENT_DATE + 7)
+SELECT
+  r.fecha_checkout AS fecha_movimiento,
+  'checkout' AS tipo_movimiento,
+  c.nombre AS cabana,
+  c.id_cabana,
+  r.id_reserva,
+  r.hora_checkout AS hora,
+  r.personas,
+  h.nombre || ' ' || COALESCE(h.apellido, '') AS huesped,
+  h.telefono AS huesped_telefono,
+  r.mascotas,
+  r.detalle_mascotas,
+  r.notas_reserva
+FROM reservas r
+JOIN cabanas c ON c.id_cabana = r.id_cabana
+JOIN huespedes h ON h.id_huesped = r.id_huesped
+WHERE r.estado IN ('confirmada', 'activa', 'completada')
+  AND r.fecha_checkout BETWEEN CURRENT_DATE AND (CURRENT_DATE + 7)::DATE
+
 UNION ALL
- SELECT r.fecha_checkin AS fecha_movimiento,
-    'checkin'::text AS tipo_movimiento,
-    c.nombre AS cabana,
-    c.id_cabana,
-    r.id_reserva,
-    r.hora_checkin AS hora,
-    r.personas,
-    TRIM(BOTH FROM (h.nombre || ' '::text) || COALESCE(h.apellido, ''::text)) AS huesped,
-    h.telefono AS huesped_telefono,
-    r.mascotas,
-    r.detalle_mascotas,
-    r.notas_reserva
-   FROM reservas r
-     JOIN cabanas c ON c.id_cabana = r.id_cabana
-     JOIN huespedes h ON h.id_huesped = r.id_huesped
-  WHERE (r.estado = ANY (ARRAY['confirmada'::estado_reserva_enum, 'activa'::estado_reserva_enum])) AND r.fecha_checkin >= CURRENT_DATE AND r.fecha_checkin <= (CURRENT_DATE + 7)
-  ORDER BY 1, 6;
+
+SELECT
+  r.fecha_checkin AS fecha_movimiento,
+  'checkin' AS tipo_movimiento,
+  c.nombre AS cabana,
+  c.id_cabana,
+  r.id_reserva,
+  r.hora_checkin AS hora,
+  r.personas,
+  h.nombre || ' ' || COALESCE(h.apellido, '') AS huesped,
+  h.telefono AS huesped_telefono,
+  r.mascotas,
+  r.detalle_mascotas,
+  r.notas_reserva
+FROM reservas r
+JOIN cabanas c ON c.id_cabana = r.id_cabana
+JOIN huespedes h ON h.id_huesped = r.id_huesped
+WHERE r.estado IN ('confirmada', 'activa')
+  AND r.fecha_checkin BETWEEN CURRENT_DATE AND (CURRENT_DATE + 7)::DATE
+
+ORDER BY fecha_movimiento, hora;
 ```
 
 **Verificación post-ejecución:**
