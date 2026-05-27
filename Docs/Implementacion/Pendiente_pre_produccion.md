@@ -20,7 +20,7 @@ histórico de cada uno en el Apéndice al final del documento.
 
 **Items pendientes activos:** ver secciones 1 a 8 abajo.
 
-**Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H7 documentados; solo H8 pendiente).
+**Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H7 cerrados; H8 en curso).
 
 ---
 
@@ -90,6 +90,36 @@ WHERE clave = 'horizonte_disponibilidad_dias';
 ```
 
 **Origen:** decisión del Bloque 20, Fase 3.
+
+### 1.2 Alineación de tipo `ninos` entre función y tablas
+
+**Estado actual (DEV):** ⏳ Pendiente liviano, no bloqueante.
+
+**Contexto:** `crear_prereserva` declara la variable local `v_ninos` como `BOOLEAN` y aplica `(NULLIF(TRIM(payload->>'ninos'), ''))::BOOLEAN` en el extract. Sin embargo, las columnas `pre_reservas.ninos` y `reservas.ninos` son `TEXT nullable`. PostgreSQL aplica cast implícito BOOLEAN→TEXT al INSERT, persistiendo el valor textual `"false"` (observado empíricamente en los 3 registros existentes en DEV).
+
+**Por qué es pendiente liviano:** funcionalmente inocuo hoy. No genera errores, no afecta operación, no se cruza con otras funciones. Pero la desalineación de tipo entre función y tablas es ruido documental que conviene resolver antes de TEST/PROD para evitar confusión futura.
+
+**Opciones a evaluar:**
+1. Alinear columnas a `BOOLEAN nullable` (cambio estructural en `pre_reservas` y `reservas`).
+2. Alinear variable a `TEXT` (cambio en `crear_prereserva`).
+3. Mantener desalineado y documentar como decisión definitiva.
+
+**Origen:** hallazgo gestionado durante H8 Frente A (snapshot C.4). Documentado en changelog del bump v1.7.2 y en `H8_SNAPSHOTS_SCHEMA_v1.7.2_WORKING_NOTES.md`.
+
+### 1.3 Contrato de `canal_pago_esperado` — validación manual vs schema
+
+**Estado actual (DEV):** ⏳ Pendiente liviano, no bloqueante.
+
+**Contexto:** el extract de `crear_prereserva` aplica el patrón canónico `NULLIF(TRIM(payload->>'canal_pago_esperado'), '')`, pero `canal_pago_esperado` no aparece en la validación manual post-extract de campos obligatorios. La columna `pre_reservas.canal_pago_esperado` sigue siendo `TEXT NOT NULL`. Si llega ausente, vacío o whitespace, la variable queda NULL y el INSERT falla por constraint `NOT NULL` con error crudo de PostgreSQL, no con `payload_invalido` controlado.
+
+**Por qué es pendiente liviano:** los workflows reales de n8n hoy aplican `nv()` defensivo en Build Payload, así que el escenario no es operativo en DEV. Pero para TEST/PROD con consumidores reales (webhook MP, bot, frontend), conviene decidir un contrato explícito.
+
+**Opciones a evaluar:**
+1. Restaurar validación manual de `canal_pago_esperado` en `crear_prereserva` con rebote controlado `payload_invalido`.
+2. Hacer la columna nullable a nivel schema y aceptar pre-reservas sin canal preferido.
+3. Mantener comportamiento actual y documentar como decisión definitiva.
+
+**Origen:** hallazgo gestionado post-revisión del bump v1.7.2 durante H8 Frente A. Documentado en changelog del bump v1.7.2 y en `H8_SNAPSHOTS_SCHEMA_v1.7.2_WORKING_NOTES.md`.
 
 ---
 
@@ -457,8 +487,7 @@ funciones write críticas:
 v_campo := NULLIF(TRIM(payload->>'campo'), '')::TIPO;
 ```
 
-Cubre vacíos y whitespace antes del cast. Aplicado a 56 asignaciones
-totales en las funciones:
+Cubre vacíos y whitespace antes del cast. Aplicado a las asignaciones de extract en las funciones:
 - `registrar_pago` (H2)
 - `confirmar_reserva` (H3)
 - `crear_prereserva` (H4)
