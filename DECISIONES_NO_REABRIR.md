@@ -206,7 +206,7 @@ Bitácora detallada: `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md`.
 
 ### D-HARD-01 — Patrón canónico de extract defensivo
 
-Aplicado al extract de payload de las 5 funciones write críticas (`registrar_pago`, `confirmar_reserva`, `crear_prereserva`, `cancelar_prereserva`, `crear_bloqueo`). 56 asignaciones unificadas al patrón:
+Aplicado al extract de payload de las 5 funciones write críticas (`registrar_pago`, `confirmar_reserva`, `crear_prereserva`, `cancelar_prereserva`, `crear_bloqueo`). Asignaciones de extract unificadas al patrón:
 
 ```sql
 v_campo := NULLIF(TRIM(payload->>'campo'), '')::TIPO;
