@@ -1,253 +1,386 @@
 # Vita Delta Reservas
 
-Sistema de automatización integral para el complejo de cabañas Vita Delta.
+Sistema integral de gestión y automatización de reservas para el complejo de cabañas **Vita Delta**.
+
+El proyecto busca centralizar disponibilidad, pre-reservas, reservas, pagos, bloqueos administrativos, operación interna y futura comunicación con huéspedes sobre una arquitectura trazable, automatizable y escalable.
 
 ---
 
-## Qué es este proyecto
+## Estado actual del proyecto
 
-Vita Delta Reservas es un sistema de gestión operativa para un complejo de 5 cabañas. El objetivo es centralizar disponibilidad, reservas, pricing, pagos, operación interna y comunicación con huéspedes en una arquitectura automatizable, trazable y escalable.
+**Estado general:** backend Supabase DEV implementado, workflows n8n contra Supabase validados, hardening pre-producción cerrado y documentación canónica actualizada.
 
-El stack actual es **Supabase / PostgreSQL** como base de datos operativa, **n8n** como motor de automatización y **Claude API** como capa conversacional futura. La arquitectura migró desde Google Sheets a una base de datos relacional en la Etapa 6B, y los workflows n8n fueron reescritos contra Supabase en la Etapa 6C. Ambas etapas están cerradas formalmente sobre el entorno DEV.
+El proyecto ya superó la etapa de Google Sheets como backend operativo. La fuente de verdad actual es **Supabase / PostgreSQL**.
 
----
-
-## Estado actual
-
-### Arquitectura — Completada y aprobada
-
-Todas las etapas de diseño están cerradas. No se reabren.
+### Etapas cerradas
 
 | Etapa | Descripción | Estado |
 |---|---|---|
-| 1 | Arquitectura base | Cerrada |
-| 2 | Motor de disponibilidad | Cerrada |
-| 3 | Motor de precios | Cerrada |
-| 4A | Motor de reservas determinístico | Cerrada |
-| 4B | Bot conversacional con IA | Cerrada (diseño) |
-| 5A | Modelo de datos real (Sheets) | Cerrada |
-| 5B | Implementación vertical mínima | Cerrada |
-| 6A | Decisión de migración a base relacional | Cerrada |
-| 6B | Migración a Supabase / PostgreSQL | Cerrada — DEV 100% alineado con v1.7.1 |
-| 6C | Reescritura de workflows n8n contra Supabase DEV | Cerrada — 8 workflows operativos |
-
-### Backend Supabase DEV — Completado
-
-La base de datos PostgreSQL está implementada y validada en el proyecto DEV.
-
-| Fase | Descripción | Estado |
-|---|---|---|
-| 1 | Schema base (Bloques 1-8): extensiones, enums, 20 tablas, constraints | Cerrada |
-| 2 | Funciones y triggers (Bloques 9-19): 12 funciones + 13 triggers | Cerrada |
-| 3 | Vistas + seed operativo + pg_cron (Bloques 20-22) | Cerrada |
-| Hotfix v1.7 | Regla `hora_checkout_domingo = 16:00` | Aplicado en DEV |
-| Alineación v1.7.1 | `obtener_disponibilidad_rango` con CASE de domingo | Aplicada en DEV |
-
-**Schema canónico actual:** `Docs/Implementacion/6B_SCHEMA_SQL.md v1.7.1`. **DEV está 100% alineado.**
-
-### Workflows n8n contra Supabase — Completados
-
-8 workflows operativos en DEV con 40 tests funcionales aprobados y 3 verificaciones cruzadas end-to-end.
-
-| Workflow | Función / vista | Estado |
-|---|---|---|
-| `vita_w00_smoke_test_supabase` | conexión Supabase | Cerrado |
-| `vita_w01_consultar_disponibilidad_supabase` | `obtener_disponibilidad_rango()` | Cerrado |
-| `vita_w02_crear_prereserva_supabase` | `crear_prereserva()` | Cerrado |
-| `vita_w03_registrar_pago_supabase` | `registrar_pago()` | Cerrado |
-| `vita_w04_confirmar_reserva_supabase` | `confirmar_reserva()` | Cerrado |
-| `vita_w05_cancelar_prereserva_supabase` | `cancelar_prereserva()` | Cerrado |
-| `vita_w06_crear_bloqueo_supabase` | `crear_bloqueo()` | Cerrado |
-| `vita_w07_vistas_operativas_supabase` | 6 vistas operativas (read-only) | Cerrado |
-
-Los templates sanitizados están en `Workflows/n8n/supabase/`. La bitácora detallada está en `Docs/Bitacora/6C_EJECUCION.md`. El documento de cierre formal de la etapa es `Docs/Implementacion/6C_CIERRE.md`.
-
-### Workflows legacy (Sheets) — Congelados
-
-Los workflows de la Etapa 5 contra Google Sheets están en `Workflows/n8n/*.template.json` (sin subcarpeta) y se conservan como referencia histórica. **No se mantienen ni se actualizan.** Fueron reemplazados funcionalmente por los workflows de 6C contra Supabase.
+| 1 | Arquitectura base | ✅ Cerrada |
+| 2 | Motor de disponibilidad | ✅ Cerrada |
+| 3 | Motor de precios | ✅ Cerrada |
+| 4A | Motor de reservas determinístico | ✅ Cerrada |
+| 4B | Bot conversacional con IA | ✅ Cerrada a nivel diseño |
+| 5A | Modelo de datos real inicial | ✅ Cerrada |
+| 5B | Implementación vertical mínima | ✅ Cerrada |
+| 6A | Decisión de migración a base relacional | ✅ Cerrada |
+| 6B | Migración a Supabase / PostgreSQL DEV | ✅ Cerrada |
+| 6C | Reescritura de workflows n8n contra Supabase DEV | ✅ Cerrada |
+| 6D | Hardening pre-producción + cierre documental | ✅ Cerrada |
 
 ---
 
-## Cómo funciona el sistema (estado actual)
+## Arquitectura vigente
 
-```
+La arquitectura vigente se organiza en cuatro capas:
+
+```text
+Huésped / operador
+        ↓
+Canales futuros: WhatsApp, Instagram, web, MercadoPago
+        ↓
+n8n — orquestación operativa
+        ↓
+Supabase / PostgreSQL — fuente de verdad
+        ↓
+Vistas, funciones SQL, triggers, logs y auditoría
+Fuente de verdad
+
+Supabase / PostgreSQL es la fuente de verdad del sistema.
+
+Viven ahí:
+
+cabañas;
+huéspedes;
+pre-reservas;
+reservas;
+pagos;
+bloqueos;
+tarifas;
+configuración general;
+eventos especiales;
+logs de cambios;
+funciones SQL;
+vistas operativas;
+triggers;
+jobs programados con pg_cron.
+Orquestación
+
+n8n es el orquestador operativo.
+
+Los workflows reciben eventos, arman payloads JSONB, llaman funciones SQL, procesan respuestas y, en el futuro, dispararán comunicaciones o integraciones externas.
+
+IA
+
+La IA queda como capa conversacional futura.
+
+Puede conversar, interpretar intención, ordenar datos y guiar al huésped, pero no decide disponibilidad, no confirma pagos y no escribe reservas directamente. Las decisiones críticas viven en PostgreSQL y en workflows determinísticos.
+
+Schema canónico vigente
+
+El schema canónico vigente es:
+
+Docs/Implementacion/6B_SCHEMA_SQL.md
+
+Versión vigente: v1.7.2.
+
+La versión v1.7.2 refleja el estado real de DEV post-hardening H2-H6-bis y post-validación H7 en los objetos afectados.
+
+Backup histórico:
+
+Docs/Implementacion/Archivados/6B_SCHEMA_SQL_v1.7.1_PRE_HARDENING.md
+
+Ese backup es histórico y no es fuente canónica vigente.
+
+Backend Supabase DEV
+
+El backend Supabase DEV está implementado y validado.
+
+Incluye:
+
+schema PostgreSQL completo;
+funciones write críticas;
+funciones read;
+vistas operativas;
+triggers de auditoría;
+constraints estructurales;
+jobs con pg_cron;
+seed operativo mínimo;
+hardening defensivo en funciones write;
+validación de concurrencia real.
+Funciones principales
+Función	Rol
+obtener_disponibilidad_rango()	Consulta de disponibilidad
+crear_prereserva()	Puerta única para crear pre-reservas
+registrar_pago()	Registro de pagos
+confirmar_reserva()	Confirmación de reservas
+cancelar_prereserva()	Cancelación de pre-reservas
+crear_bloqueo()	Bloqueos administrativos
+expirar_prereservas_vencidas()	Expiración automática de pre-reservas
+upsert_huesped()	Alta o actualización de huéspedes
+validar_disponibilidad()	Validación interna de disponibilidad
+Workflows n8n vigentes
+
+Los workflows vigentes están en:
+
+Workflows/n8n/Supabase/
+
+Si el sistema de archivos del repo usa minúsculas en la carpeta, la ruta equivalente es:
+
+Workflows/n8n/supabase/
+
+La Etapa 6C cerró con:
+
+8 workflows Supabase W0-W7;
+40 tests funcionales aprobados;
+3 verificaciones cruzadas end-to-end;
+templates sanitizados para versionado;
+wrapper de respuesta unificado.
+Workflow	Rol
+vita_w00_smoke_test_supabase	Smoke test de conexión
+vita_w01_consultar_disponibilidad_supabase	Consulta disponibilidad
+vita_w02_crear_prereserva_supabase	Crea pre-reserva
+vita_w03_registrar_pago_supabase	Registra pago
+vita_w04_confirmar_reserva_supabase	Confirma reserva
+vita_w05_cancelar_prereserva_supabase	Cancela pre-reserva
+vita_w06_crear_bloqueo_supabase	Crea bloqueo administrativo
+vita_w07_vistas_operativas_supabase	Consulta vistas operativas read-only
+Hardening pre-producción cerrado
+
+La Etapa 6D cerró formalmente el hardening pre-producción.
+
+Incluyó tres frentes:
+
+Hardening estructural H1-H6-bis
+extracts defensivos en 5 funciones write críticas;
+fix de rango en vista_ocupacion;
+fix cosmético de TRIM en vistas con concatenación nombre + apellido.
+Validación de concurrencia H7
+6/6 tests aprobados;
+0 deadlocks 40P01;
+0 races observados;
+0 doble booking;
+baseline final restaurado.
+Cierre documental H8
+bump documental del schema canónico a v1.7.2;
+backup histórico v1.7.1;
+actualización de archivos satélite;
+creación de 6D_CIERRE.md.
+
+Documento de cierre:
+
+Docs/Bitacora/6D_CIERRE.md
+Cómo funciona el sistema
 La IA conversa.
-Los workflows operan.
-Supabase persiste.
+n8n orquesta.
+PostgreSQL decide y persiste.
 Los humanos auditan.
-```
 
-**Supabase / PostgreSQL** es la fuente de verdad operativa. Todas las tablas (RESERVAS, PRE_RESERVAS, PAGOS, HUESPEDES, BLOQUEOS, LOG_CAMBIOS, etc.) viven ahí. Las funciones SQL del schema (`crear_prereserva`, `confirmar_reserva`, `cancelar_prereserva`, `registrar_pago`, `crear_bloqueo`, `obtener_disponibilidad_rango`) son los contratos estables que n8n invoca.
+Flujo base de reserva:
 
-**n8n** ejecuta la lógica de orquestación: recibe eventos, arma payloads JSONB, llama funciones SQL, maneja respuestas y dispara comunicaciones. Ninguna decisión crítica depende de la IA ni se calcula fuera de PostgreSQL.
-
-**Claude / IA** es la capa conversacional futura. Conversa con el huésped, recolecta intención y llama a los workflows determinísticos. No calcula disponibilidad ni confirma reservas por sí sola.
-
-### Flujo de una reserva
-
-```
 Consulta entrante
-  → vita_w01_consultar_disponibilidad_supabase    consulta disponibilidad
-  → vita_w02_crear_prereserva_supabase            crea pre-reserva temporal con locks + validación
-  → vita_w03_registrar_pago_supabase              registra el pago reportado
-  → vita_w04_confirmar_reserva_supabase           confirma la reserva tras verificar el pago
-                                                  (caminos estricto y combinado disponibles)
-```
+  → vita_w01_consultar_disponibilidad_supabase
+  → vita_w02_crear_prereserva_supabase
+  → vita_w03_registrar_pago_supabase
+  → vita_w04_confirmar_reserva_supabase
 
-`vita_w02_crear_prereserva_supabase` crea un bloqueo temporal con vencimiento de 60 minutos. No es una reserva confirmada. El huésped debe completar el pago antes de que la pre-reserva expire (el job `expirar_prereservas` en pg_cron las vence automáticamente cada 5 minutos).
+La pre-reserva bloquea disponibilidad temporalmente. La reserva se confirma solo después de validar pago y disponibilidad bajo locks.
 
 Operaciones adicionales:
-- `vita_w05_cancelar_prereserva_supabase` — cancela una pre-reserva activa.
-- `vita_w06_crear_bloqueo_supabase` — crea bloqueos administrativos (mantenimiento, tormenta, etc.).
-- `vita_w07_vistas_operativas_supabase` — consulta paramétrica de 6 vistas operativas.
 
----
+vita_w05_cancelar_prereserva_supabase;
+vita_w06_crear_bloqueo_supabase;
+vita_w07_vistas_operativas_supabase.
+Qué está implementado
 
-## Sobre `index.html`
+Está implementado y validado en DEV:
 
-El archivo `index.html` en la raíz del repositorio es una **presentación visual del estado actual del sistema Vita Delta Reservas**. Está pensado para explicar el proyecto a socios, colaboradores y personas no técnicas. No es la web pública de reservas ni está conectado a Supabase o n8n.
+schema PostgreSQL completo;
+funciones SQL principales;
+vistas operativas;
+triggers de auditoría;
+pg_cron para expiración de pre-reservas;
+workflows n8n contra Supabase;
+wrapper de respuesta unificado;
+validaciones funcionales W0-W7;
+hardening pre-producción;
+tests de concurrencia H7;
+documentación canónica v1.7.2;
+cierre formal de Etapas 6C y 6D.
+Qué no está implementado todavía
 
-El prototipo visual original de la futura web de reservas fue movido a `Prototipos/prototipo_web_reservas.html`. Tampoco está conectado al sistema: no consulta disponibilidad real, no genera pre-reservas y no procesa pagos.
+Todavía no está implementado o no está productivo:
 
----
+entorno TEST separado;
+webhook real de MercadoPago;
+integración real con WhatsApp / Instagram mediante Meta API;
+bot conversacional conectado a canales reales;
+web pública de reservas conectada al backend;
+panel administrativo;
+dashboard operativo;
+contabilidad automatizada;
+RLS final para frontend público;
+tarifas reales productivas completas;
+feriados productivos definitivos;
+entorno PROD.
+Próxima etapa recomendada
 
-## Qué no está implementado todavía
+La recomendación documentada al cierre de 6D es:
 
-- Hardening pre-producción: aplicar `NULLIF(TRIM(...))` en funciones write y fix de `vista_ocupacion`.
-- Entorno TEST levantado en Supabase.
-- Workflow del webhook de MercadoPago.
-- Integración con WhatsApp e Instagram (Meta API).
-- Bot conversacional implementado (Claude API) conectado a canales reales.
-- Web pública de reservas (solo existe el prototipo estático).
-- Panel administrativo y dashboard operativo.
-- Contabilidad automatizada.
-- RLS configurado (pendiente hasta tener frontend público).
-- Tarifas reales cargadas (DEV usa baseline neutro).
-- Feriados productivos cargados.
+Opción B — crear entorno TEST antes de conectar consumidores reales.
 
----
+Motivo:
 
-## Próximo paso
+evita contaminar DEV;
+permite probar MercadoPago, bot, frontend y canales reales sin riesgo operativo;
+permite resolver pendientes livianos antes de productizar;
+deja una frontera clara entre desarrollo, integración y producción.
 
-Con las Etapas 6B y 6C cerradas, el sistema tiene backend + workflows determinísticos operativos en DEV. El siguiente eje es **decidir entre 4 opciones**:
+Opciones posteriores:
 
-### Opción A — Hardening pre-producción
-
-Ejecutar los items de `Docs/Implementacion/Pendiente_pre_produccion.md`:
-- `NULLIF(TRIM(...))` en funciones write para campos obligatorios de texto.
-- Fix de `vista_ocupacion` (25 vs 24 meses).
-- Fix cosmético de concatenaciones `nombre + apellido` en vistas.
-
-**Ventaja:** cierra deudas técnicas conocidas antes de habilitar consumidores reales.
-
-### Opción B — Entorno TEST
-
-Replicar DEV en un proyecto Supabase separado para integrar consumidores reales sin riesgo a datos reales.
-
-### Opción C — Webhook MercadoPago
-
-Workflow operativo real que invoca W3 (registrar_pago) tras un webhook de MP, con deduplicación por `payment_id`. Primer flujo productivo end-to-end.
-
-### Opción D — Bot conversacional (Etapa 4B implementación)
-
-Implementar el bot diseñado en Etapa 4B usando Claude API + Meta API.
-
-**Recomendación documentada en `Docs/Implementacion/6C_CIERRE.md`:** A primero, después B. Cerrar deudas técnicas conocidas antes de complicar el sistema con nuevos consumidores.
-
-### Posterior a la decisión de etapa actual
-
-- Integrar canales reales: WhatsApp e Instagram (Meta API).
-- Implementar la capa conversacional con Claude API conectada a los workflows determinísticos.
-- Integrar MercadoPago real.
-- Implementar la web pública de reservas conectada al sistema.
-- Configurar RLS antes de exponer frontend público.
-
----
-
-## Estructura del repositorio
-
-```
-index.html                                    ← Presentación visual del estado del sistema
-
-Prototipos/
-└── prototipo_web_reservas.html               ← Boceto visual estático de futura web de reservas
-
-Docs/
-├── Arquitectura/
-│   ├── ARQUITECTURA_ETAPA_1_VITA_DELTA.md
-│   ├── ARQUITECTURA_ETAPA_2_VITA_DELTA.md
-│   ├── ARQUITECTURA_ETAPA_3_VITA_DELTA.md
-│   ├── ARQUITECTURA_ETAPA_4A_MOTOR_RESERVAS.md
-│   ├── ARQUITECTURA_ETAPA_4B_BOT_CONVERSACIONAL.md
-│   ├── ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md
-│   ├── ARQUITECTURA_ETAPA_5B_IMPLEMENTACION_VERTICAL_MINIMA.md
-│   ├── ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md
-│   └── ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md
+Opción	Descripción	Recomendación
+B	Entorno TEST	Recomendada como próxima etapa
+C	Webhook MercadoPago	Después de TEST, salvo decisión de asumir más riesgo
+D	Bot conversacional	Después de TEST, salvo decisión de asumir más riesgo
+Frontend	Web pública de reservas	Después de TEST y con RLS definido
+Documentos clave
+Estado y cierre
+Documento	Rol
+Docs/Operacional/ESTADO_ACTUAL_VITA_DELTA.md	Estado vigente del proyecto
+Docs/Bitacora/6D_CIERRE.md	Cierre formal de Etapa 6D
+Docs/Implementacion/6C_CIERRE.md	Cierre formal de Etapa 6C
+Docs/Operacional/Pendiente_pre_produccion.md	Pendientes antes de TEST/PROD
+Docs/Operacional/DECISIONES_NO_REABRIR.md	Decisiones cerradas
+Implementación
+Documento	Rol
+Docs/Implementacion/6B_SCHEMA_SQL.md	Schema canónico vigente
+Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md	Bitácora H1-H7
+Docs/Bitacora/6C_EJECUCION.md	Bitácora W0-W7
+Docs/Operacional/Lecciones_Aprendidas.md	Gotchas y lecciones operativas
+Arquitectura
+Documento	Rol
+Docs/Arquitectura/ARQUITECTURA_ETAPA_1_VITA_DELTA.md	Arquitectura base
+Docs/Arquitectura/ARQUITECTURA_ETAPA_2_VITA_DELTA.md	Disponibilidad
+Docs/Arquitectura/ARQUITECTURA_ETAPA_3_VITA_DELTA.md	Pricing
+Docs/Arquitectura/ARQUITECTURA_ETAPA_4A_MOTOR_RESERVAS.md	Motor de reservas
+Docs/Arquitectura/ARQUITECTURA_ETAPA_4B_BOT_CONVERSACIONAL.md	Bot conversacional
+Docs/Arquitectura/ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md	Migración Supabase
+Estructura del repositorio
+.
+├── README.md
+├── CLAUDE.md
+├── index.html
+├── Prototipos/
+│   └── prototipo_web_reservas.html
 │
-├── API_CONTRACTS/                            ← Contratos técnicos de workflows legacy (referencia histórica)
-│   ├── README.md
-│   ├── db_recalcular_disponibilidad.md
-│   ├── db_crear_consulta.md
-│   ├── db_crear_huesped.md
-│   ├── db_crear_prereserva.md
-│   ├── db_registrar_pago.md
-│   ├── db_confirmar_reserva.md
-│   └── sistema_expirar_prereservas.md
+├── Docs/
+│   ├── Arquitectura/
+│   │   ├── ARQUITECTURA_ETAPA_1_VITA_DELTA.md
+│   │   ├── ARQUITECTURA_ETAPA_2_VITA_DELTA.md
+│   │   ├── ARQUITECTURA_ETAPA_3_VITA_DELTA.md
+│   │   ├── ARQUITECTURA_ETAPA_4A_MOTOR_RESERVAS.md
+│   │   ├── ARQUITECTURA_ETAPA_4B_BOT_CONVERSACIONAL.md
+│   │   ├── ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md
+│   │   ├── ARQUITECTURA_ETAPA_5B_IMPLEMENTACION_VERTICAL_MINIMA.md
+│   │   ├── ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md
+│   │   └── ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md
+│   │
+│   ├── Docs/Implementacion/
+│   │   ├── README.md
+│   │   ├── 6B_SCHEMA_SQL.md
+│   │   ├── 6B_PLAN_FASES.md
+│   │   ├── 6C_CIERRE.md
+│   │   └── Archivados/
+│   │       ├── 6B_SCHEMA_SQL_v1.7.1_PRE_HARDENING.md
+│   │       ├── 6B_SCHEMA_SQL_AJUSTES_PENDIENTES_RESUELTOS.md
+│   │       ├── PLAN_CIERRE_6B_ALINEACION_v1.7.1.md
+│   │       ├── 6C_REESCRITURA_WORKFLOWS_SUPABASE.md
+│   │       └── Legacy_Sheets/
+│   │        ├── PLAN_ETAPA_5_IMPLEMENTACION_REAL.md
+│   │        └── ESTADO_IMPLEMENTACIÓN_ETAPA_5.md
+│   │
+│   ├── Bitacora/
+│   │   ├── 6B_EJECUCION_DEV.md
+│   │   ├── 6C_EJECUCION.md
+│   │   ├── 6D_CIERRE.md
+│   │   ├── HARDENING_PRE_PRODUCCION_EJECUCION.md
+│   │   └── Archivados/
+│   │       └── H8_SNAPSHOTS_SCHEMA_v1.7.2_WORKING_NOTES.md
+│   │
+│   └── Operacional/
+│       ├── ESTADO_ACTUAL_VITA_DELTA.md
+│       ├── Pendiente_pre_produccion.md
+│       ├── DECISIONES_NO_REABRIR.md
+│       ├── Lecciones_Aprendidas.md
+│       └── Archivados/
+│           ├── H8_SNAPSHOTS_SCHEMA_v1.7.2_WORKING_NOTES.md
+│           ├── obtener_disponibilidad_rango.md
+│           └── vista_disponibilidad.md
 │
-├── Implementacion/
-│   ├── README.md
-│   ├── PLAN_ETAPA_5_IMPLEMENTACION_REAL.md
-│   ├── 6B_SCHEMA_SQL.md                      ← Schema PostgreSQL completo (v1.7.1)
-│   ├── 6B_PLAN_FASES.md                      ← Plan de ejecución bloque por bloque (v1.1)
-│   ├── 6B_SCHEMA_SQL_AJUSTES_PENDIENTES.md   ← Pendientes documentales detectados en DEV
-│   ├── 6C_CIERRE.md                          ← Cierre formal de Etapa 6C
-│   ├── Pendiente_pre_produccion.md           ← Cambios a aplicar antes del despliegue productivo
-│   └── AppsScript/
-│       ├── validaciones_vita_delta_v3.gs     ← Validaciones de datos (Fase 4 — legacy)
-│       ├── protecciones_vita_delta_v1.gs     ← Protecciones por entorno (Fase 5 — legacy)
-│       └── auditoria_fase6_v2.gs             ← Auditoría de estructura y datos (Fase 6 — legacy)
-│
-├── Operacional/
-│   └── Lecciones_Aprendidas.md               ← Gotchas operativos (incluye L-6C-01 a L-6C-09)
-│
-└── Bitacora/                                 ← Bitácora de ejecución por etapa
-    ├── 6B_EJECUCION_DEV.md                   ← Bloques 1-22 + hotfix v1.7 + alineación v1.7.1
-    └── 6C_EJECUCION.md                       ← Workflows W0-W7 contra Supabase DEV
-
-Workflows/
-└── n8n/                                      ← Templates sanitizados para importar en n8n
-    ├── README.md                             ← Workflows legacy (Sheets) — congelados
-    ├── db_recalcular_disponibilidad.template.json  ← legacy
-    ├── db_crear_consulta.template.json             ← legacy
-    ├── db_crear_huesped.template.json              ← legacy
-    ├── db_crear_prereserva.template.json           ← legacy
-    ├── db_registrar_pago.template.json             ← legacy
-    ├── db_confirmar_reserva.template.json          ← legacy
-    ├── sistema_expirar_prereservas.template.json   ← legacy
-    │
-    └── supabase/                             ← Workflows contra Supabase (Etapa 6C, vigentes)
+└── Workflows/
+    └── n8n/
         ├── README.md
-        ├── vita_w00_smoke_test_supabase.template.json
-        ├── vita_w01_consultar_disponibilidad_supabase.template.json
-        ├── vita_w02_crear_prereserva_supabase.template.json
-        ├── vita_w03_registrar_pago_supabase.template.json
-        ├── vita_w04_confirmar_reserva_supabase.template.json
-        ├── vita_w05_cancelar_prereserva_supabase.template.json
-        ├── vita_w06_crear_bloqueo_supabase.template.json
-        └── vita_w07_vistas_operativas_supabase.template.json
-```
+        ├── *.template.json                 # legacy Sheets, congelados
+        └── Supabase/
+            ├── README.md
+            └── *.template.json             # workflows vigentes contra Supabase
 
----
+Si la carpeta Supabase está en minúsculas en el repo, mantener el nombre real de la carpeta al commitear.
 
-## Principios de trabajo
+Sobre index.html y prototipos
 
-Antes de agregar cualquier automatización o integración, verificar:
+index.html es una presentación visual estática del estado del sistema. Sirve para explicar el proyecto a socios o colaboradores, pero no es una web pública de reservas.
 
-1. Si ya existe una fuente de verdad para ese dato (Supabase).
-2. Si la lógica pertenece a un workflow determinístico o a la IA.
-3. Si afecta disponibilidad, reservas, pagos o pricing — esos casos pasan por funciones SQL del schema, no por lógica n8n.
-4. Si necesita trazabilidad en `log_cambios` con `source_event`.
-5. Si puede romper la implementación validada en DEV.
-6. Si el cambio es estructural (schema, función SQL) o solo de workflow (n8n).
+Prototipos/prototipo_web_reservas.html es un prototipo visual de futura web de reservas. No consulta disponibilidad real, no crea pre-reservas, no registra pagos y no está conectado a Supabase.
 
-Antes de cualquier cambio crítico, verificar el contrato real con queries read-only (`pg_get_function_result`, `pg_get_functiondef`, `information_schema.columns`). Patrón consolidado durante Etapa 6C.
+Workflows legacy
+
+Los workflows legacy contra Google Sheets se conservan como referencia histórica.
+
+No son la ruta productiva actual, no se mantienen y no deben usarse como fuente de verdad.
+
+Ubicación típica:
+
+Workflows/n8n/*.template.json
+
+Los contratos técnicos legacy y archivos Apps Script también son históricos, salvo que se usen explícitamente para reportería o comparación documental.
+
+Principios operativos
+
+Decisiones que no deben reabrirse salvo contradicción crítica explícita:
+
+Supabase/PostgreSQL es la fuente de verdad.
+Google Sheets no es backend operativo.
+n8n orquesta; PostgreSQL decide y persiste.
+La IA no confirma reservas, pagos ni disponibilidad real por sí sola.
+Toda reserva confirmada pasa por confirmar_reserva().
+Toda pre-reserva se crea por crear_prereserva().
+No hay INSERT directo a reservas desde workflows.
+No usar DROP ... CASCADE sin decisión explícita.
+Mantener nv() defensivo en workflows n8n como defensa en profundidad.
+No reabrir D-HARD-01 a D-HARD-11 sin contradicción crítica.
+
+Documento de referencia:
+
+Docs/Operacional/DECISIONES_NO_REABRIR.md
+Pendientes livianos antes de TEST/PROD
+
+Pendientes documentados al cierre de 6D:
+
+Evaluar alineación de tipo ninos entre función y tablas.
+Evaluar contrato de canal_pago_esperado: restaurar validación manual con payload_invalido o hacer nullable la columna.
+Evaluar validaciones para tipos inválidos no vacíos.
+Evaluar cobertura empírica opcional de ramas pre_lock y unique_violation en idempotencia de crear_prereserva.
+
+Documento de referencia:
+
+Docs/Operacional/Pendiente_pre_produccion.md
+Estado de producción
+
+El sistema no está en producción.
+
+Estado actual:
+
+DEV consolidado → próximo paso recomendado: TEST → luego consumidores reales → PROD futuro
+
+No conectar consumidores reales —MercadoPago, bot, frontend público— sin definir antes el entorno TEST o asumir explícitamente el riesgo operativo.
