@@ -487,3 +487,56 @@ Estrategia recomendada
 Aplicar junto con el fix de vista_ocupacion (Bloque 1) en la sesión post-6C de hardening de vistas. Revisar también si hay otras concatenaciones similares en el schema.
 Nota sobre la fuente del problema
 El espacio colgando aparece porque las huéspedes en DEV se crearon con apellido: "" (string vacío) en lugar de apellido: NULL. La función crear_prereserva u upsert_huesped podría también normalizar este input con NULLIF(TRIM(apellido), '') antes de insertar. Esto se solapa con el item de hardening de validación SQL ya documentado.
+
+## 10. Tests pendientes
+
+## Tests de concurrencia Sección 6.8 (Fase 4 original) — pendiente de ejecución
+
+**Origen:** Plan operativo de Etapa 6B (`Docs/Implementacion/6B_PLAN_FASES.md v1.1` Sección 6.8) — los 4 tests de concurrencia con `pg_sleep` no se ejecutaron formalmente ni durante 6B ni durante 6C.
+**Fecha de registro:** 2026-05-26.
+**Prioridad:** alta antes de TEST/PROD.
+**Documentos relacionados:** `Docs/Implementacion/6B_PLAN_FASES.md` Sección 6.8, `Docs/Implementacion/6C_CIERRE.md` sección "Tests cruzados diferidos".
+
+### Contexto
+
+El plan original de Etapa 6B contemplaba **36 tests obligatorios** divididos en 8 categorías. Durante la ejecución real:
+
+- **Tests funcionales por bloque (categorías 6.1 a 6.7)**: cubiertos parcial pero ampliamente durante la implementación de funciones SQL en 6B (Bloques 9-22) y validados end-to-end durante la implementación de workflows n8n en 6C (40 tests funcionales sobre W0-W7). Las funciones del schema están validadas funcionalmente.
+
+- **Tests de concurrencia (categoría 6.8)**: NO ejecutados formalmente. Requieren un patrón específico (2 pestañas del SQL Editor en paralelo, `pg_sleep` para forzar overlap) que no se aplicó en 6B ni en 6C.
+
+### Qué tests faltan
+
+Los 4 tests de concurrencia de Sección 6.8 del plan original:
+
+1. **Doble `crear_prereserva` simultánea** sobre el mismo rango y cabaña — validar que el lock global serializa y la segunda invocación rebota con `no_disponible`.
+2. **`crear_prereserva` + `crear_bloqueo` simultáneos** sobre el mismo rango y cabaña — validar que uno gana y el otro rebota.
+3. **`confirmar_reserva` + `crear_bloqueo` simultáneos** sobre el rango de la pre-reserva — validar que la pre-reserva se convierte primero y el bloqueo rebota con `conflicto_con_reserva`.
+4. **Doble `confirmar_reserva` simultánea** sobre la misma pre-reserva — validar que solo una invocación crea la reserva (la otra rebota con `estado_invalido`).
+
+Detalle completo de cada test (queries con `pg_sleep`, esperado, pre-requisitos): ver `6B_PLAN_FASES.md` Sección 6.8.
+
+### Por qué se difirieron
+
+1. Durante 6B (implementación de funciones), se priorizó "función compila y se comporta básicamente" para avanzar al siguiente bloque.
+2. Durante 6C (workflows), los tests fueron funcionales end-to-end, no de concurrencia. n8n manual no permite reproducir la condición de carrera con `pg_sleep`.
+3. Operativamente no es bloqueante hasta tener consumidores reales que generen concurrencia (webhook MP, bot multicanal, frontend público).
+
+### Estrategia de ejecución recomendada
+
+Ejecutar como **parte del bloque "Opción A — Hardening pre-producción"**, agrupado con los demás items de hardening SQL:
+
+1. NULLIF + TRIM en funciones write.
+2. Fix de `vista_ocupacion` (25 vs 24 meses).
+3. Fix cosmético de concatenación nombre+apellido.
+4. **Tests de concurrencia de Sección 6.8** ← este item.
+
+Mini-sesión de 2-3 horas dedicada a hardening + tests cierra los 4 frentes juntos. Patrón de ejecución según `6B_PLAN_FASES.md` Sección 6.8: dos pestañas SQL Editor en paralelo, `pg_sleep(2)` o similar para forzar overlap, validar respuestas y estado final de la DB.
+
+### Riesgo de no ejecutar antes de TEST/PROD
+
+Los locks (`pg_advisory_xact_lock(10, 0)` y `(1, id_cabana::INTEGER)`) están implementados en todas las funciones críticas y el `EXCLUDE constraint` actúa como red de seguridad estructural. **Lo más probable es que pasen sin sorpresas.** Pero un test empírico es la única forma de confirmar que los patrones de lock anidado funcionan bajo concurrencia real, no solo en aislamiento.
+
+Sin estos tests, el primer evento de concurrencia real en producción (ej. dos clientes que clickean "reservar" simultáneamente, o webhook MP que dispara al mismo tiempo que confirmación manual) sería el primer test de concurrencia del sistema. Es preferible que ocurra en DEV controlado.
+
+Generado el 2026-05-26 como complemento del cierre formal de 6C.
