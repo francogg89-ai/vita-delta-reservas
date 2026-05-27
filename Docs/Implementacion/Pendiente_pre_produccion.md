@@ -1,9 +1,25 @@
 # Pendientes Pre-Producción
 
 Lista de cambios y configuraciones a aplicar antes del despliegue de
-producción. Ítems destinados a producción que NO se hicieron en DEV para
-mantener la trazabilidad de cómo evolucionó el sistema o que no se podían
-hacer técnicamente en DEV.
+producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
+
+**Estado del archivo:** actualizado al cierre de H6-bis (sesión 2026-05-26).
+Items cerrados durante Etapa 6D listados en el resumen de abajo; detalle
+histórico de cada uno en el Apéndice al final del documento.
+
+---
+
+## Items cerrados en Etapa 6D — resumen
+
+| Item | Estado | Bloque que lo cerró | Apéndice |
+|---|---|---|---|
+| Hardening de validación SQL en funciones write | ✅ Cerrado | H2, H3, H4, H4-bis, H4-ter | A.1 |
+| Fix `vista_ocupacion` (rango 25 → 24 meses) | ✅ Cerrado | H5 | A.2 |
+| Espacio colgando en concatenación nombre + apellido | ✅ Cerrado | H6, H6-bis | A.3 |
+
+**Items pendientes activos:** ver secciones 1 a 8 abajo.
+
+**Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H6-bis documentados; H7-H8 pendientes).
 
 ---
 
@@ -39,12 +55,13 @@ FROM obtener_disponibilidad_rango(
 );
 
 -- vista_calendario con horizonte configurable
+-- Nota: el TRIM en huesped_nombre ya fue aplicado en H6 (Etapa 6D).
 CREATE OR REPLACE VIEW vista_calendario AS
 SELECT
   c.id_cabana, c.nombre AS cabana, r.id_reserva,
   r.fecha_checkin, r.fecha_checkout, r.hora_checkin, r.hora_checkout,
   r.personas, r.estado AS estado_reserva,
-  h.nombre || ' ' || COALESCE(h.apellido, '') AS huesped_nombre,
+  TRIM(h.nombre || ' ' || COALESCE(h.apellido, '')) AS huesped_nombre,
   h.telefono AS huesped_telefono,
   r.monto_total, r.monto_saldo, r.encargado_semana
 FROM reservas r
@@ -79,37 +96,43 @@ WHERE clave = 'horizonte_disponibilidad_dias';
 
 ### 2.1 Schedule pg_cron — expirar_prereservas_vencidas
 
-**Estado actual (DEV):** la función `expirar_prereservas_vencidas()` está
-creada y probada (Bloque 18), pero NO está programada en pg_cron.
+**Estado actual (DEV):** ✅ Cerrado / activo. El job `expirar_prereservas`
+está programado en pg_cron con schedule `*/5 * * * *` y validado end-to-end
+(verificado 2026-05-27: 12 ejecuciones consecutivas con status `succeeded`
+en una hora, una pre-reserva real procesada durante 6C).
 
-**Razón:** pg_cron requiere ser superuser en Supabase, restricción de DEV.
+**Pendiente pre-producción:** replicar y verificar el schedule cuando se
+creen los ambientes TEST y PROD.
 
-**Cambio para producción:**
+**Query a aplicar en TEST/PROD:**
 
 ```sql
 SELECT cron.schedule(
-  'expirar-prereservas',
+  'expirar_prereservas',
   '*/5 * * * *',  -- cada 5 minutos
   'SELECT expirar_prereservas_vencidas()'
 );
 ```
 
-**Verificación post-schedule:**
+**Verificación post-schedule en TEST/PROD:**
 
 ```sql
-SELECT * FROM cron.job WHERE jobname = 'expirar-prereservas';
+SELECT * FROM cron.job WHERE jobname = 'expirar_prereservas';
 ```
 
 **Cambio futuro de frecuencia (si fuera necesario):**
 
 ```sql
-SELECT cron.unschedule('expirar-prereservas');
-SELECT cron.schedule('expirar-prereservas', '*/10 * * * *',
+SELECT cron.unschedule('expirar_prereservas');
+SELECT cron.schedule('expirar_prereservas', '*/10 * * * *',
                      'SELECT expirar_prereservas_vencidas()');
 ```
 
-**Origen:** decisión del Bloque 18, Fase 2. A ejecutar en Bloque 22 (Fase 3)
-si el ambiente lo permite, o quedar como tarea de despliegue final.
+**Nota adicional:** en DEV también está activo el job `cleanup_cron_history`
+(día 1 de cada mes a las 03:00 UTC) para purgar registros viejos de
+`cron.job_run_details`. Replicar también en TEST/PROD.
+
+**Origen:** decisión del Bloque 18, Fase 2. Ejecutado en Bloque 22 (Fase 3).
 
 ---
 
@@ -130,14 +153,13 @@ NO aparecerá en lo que ya consultó.
 
 Workflow disparado cuando se crea una reserva (vía evento de
 `confirmar_reserva`):
-
-```
 SI fecha_checkin de la nueva reserva está dentro de los próximos 7 días
 ENTONCES enviar notificación a Jennifer (WhatsApp/Email) con:
-  - Cabaña, fecha, hora checkin
-  - Datos del huésped (nombre, teléfono, personas, mascotas)
-  - Tipo: "Reserva nueva confirmada dentro de tu semana"
-```
+
+Cabaña, fecha, hora checkin
+Datos del huésped (nombre, teléfono, personas, mascotas)
+Tipo: "Reserva nueva confirmada dentro de tu semana"
+
 
 **Origen:** discusión del Bloque 20, Fase 3 (decisión de diseño confirmada
 por Franco — Jennifer necesita updates cuando la semana cambia).
@@ -169,17 +191,18 @@ Crear un endpoint backend —inicialmente en n8n o Supabase Edge Function— que
 
 ### 4.1 Cabañas reales
 
-**Estado actual (DEV):** se usaron cabañas test (B11, B12, etc.) que se
-crean y borran en cada test.
+**Estado actual (DEV):** ✅ Parcialmente cerrado. Las 5 cabañas reales de
+Vita Delta están cargadas en DEV con IDs 17-21:
+- Bamboo (id=17, grande, capacidad 3-5)
+- Madre Selva (id=18, grande, capacidad 3-5)
+- Arrebol (id=19, grande, capacidad 3-5)
+- Guatemala (id=20, chica, capacidad 2-4)
+- Tokio (id=21, chica, capacidad 2-4)
 
-**Para producción (Bloque 21):**
-
-Cargar las 5 cabañas reales de Vita Delta:
-- Bamboo (grande, capacidad 3-5)
-- Madre Selva (grande, capacidad 3-5)
-- Arrebol (grande, capacidad 3-5)
-- Guatemala (chica, capacidad 2-4)
-- Tokio (chica, capacidad 2-4)
+**Pendiente pre-producción:** replicar el mismo seed en TEST y PROD cuando
+se creen esos ambientes. Decidir si mantener los IDs actuales o re-crear
+desde 1.
+Si se decide conservar referencias o migrar datos desde DEV/TEST, no asumir IDs secuenciales desde 1. Preferir seeds explícitos o mapeos controlados.
 
 ### 4.2 Tarifas reales por temporada
 
@@ -187,6 +210,9 @@ Pendiente acordar con Franco y socios:
 - Tarifas base por tipo (grande / chica)
 - Tarifas por temporada (alta / media / baja)
 - Tarifas por evento especial (años nuevo, semana santa, etc.)
+
+**Estado actual:** DEV tiene solo una temporada baseline con multiplicador
+neutro (no productiva).
 
 ### 4.3 Configuración productiva en `configuracion_general`
 
@@ -196,21 +222,23 @@ Valores sugeridos para producción (ajustar según decisión operativa):
 - `hora_checkin_max_cliente`: 22:00
 - `hora_checkout_min_cliente`: 07:00
 - `hora_checkout_default`: 10:00
+- `hora_checkout_domingo`: 16:00 (ver 4.4)
 - `prereserva_expiracion_minutos`: 60 (revisable según patrones reales)
 - `horizonte_disponibilidad_dias`: 120 (ver punto 1.1)
 
 ### 4.4 Agregar clave `hora_checkout_domingo` al seed productivo
 
-**Estado actual:** clave cargada en DEV vía hotfix v1.7. Falta agregarla
-al seed productivo (Bloque 21).
+**Estado actual (DEV):** ✅ Parcialmente cerrado. Clave cargada en DEV vía
+hotfix v1.7 con valor `16:00`. Función `crear_prereserva` v1.7 ya la usa.
 
-**Cuando se despliegue producción, agregar al seed:**
+**Pendiente pre-producción:** agregar al seed productivo cuando se cree
+PROD. Snippet:
 
-\`\`\`sql
+```sql
 INSERT INTO configuracion_general (clave, valor, descripcion, categoria) VALUES
-  ('hora_checkout_domingo', '16:00', 
+  ('hora_checkout_domingo', '16:00',
    'Check-out cuando domingo es último día (vs default 10:00)', 'horarios');
-\`\`\`
+```
 
 **Razón operativa:** los clientes que se van un domingo se quedan hasta las
 16:00 (última lancha colectiva). Sin esta clave, `crear_prereserva` usaría el
@@ -262,14 +290,69 @@ que haya frontend público. n8n con service_role_key no la necesita."
 
 ---
 
-## 6. Validaciones empíricas pendientes (Fase 4)
+## 6. Validaciones empíricas pendientes
 
-### 6.1 Tests de concurrencia
+### 6.1 Tests de concurrencia — H7 de Etapa 6D
 
-Validar comportamiento del sistema bajo carga real:
+**Estado:** ⏳ Pendiente. Bloque H7 de Etapa 6D (Hardening pre-producción).
+Fuente: `6B_PLAN_FASES.md` Sección 6.8.
+Ejecución prevista: sesión separada con setup explícito, dos pestañas SQL
+Editor en paralelo, y plan de limpieza dirigida por `source_event`.
+
+**Por qué se difirieron:**
+
+1. Durante 6B (implementación de funciones), se priorizó "función compila y
+   se comporta básicamente" para avanzar al siguiente bloque.
+2. Durante 6C (workflows), los tests fueron funcionales end-to-end, no de
+   concurrencia. n8n manual no permite reproducir la condición de carrera
+   con `pg_sleep`.
+3. Operativamente no es bloqueante hasta tener consumidores reales que
+   generen concurrencia (webhook MP, bot multicanal, frontend público).
+
+**Los 4 tests pendientes (según `6B_PLAN_FASES.md` Sección 6.8):**
+
+1. **C-1**: `crear_prereserva` + `crear_bloqueo total` simultáneos sobre el
+   mismo rango — validar que uno gana y el otro rebota con conflicto.
+2. **C-2**: `cancelar_prereserva` + `crear_bloqueo total` simultáneos sobre
+   rango con pre-reserva pre-existente — validar el orden correcto.
+3. **C-3**: `confirmar_reserva` + `crear_bloqueo` simultáneos sobre el rango
+   de la pre-reserva — validar que la pre-reserva se convierte primero y el
+   bloqueo rebota con `conflicto_con_reserva`. **Test crítico** — está en
+   criterios de freno por riesgo histórico de deadlock pre-v1.5.
+4. **C-4**: Doble `confirmar_reserva` simultánea sobre la misma pre-reserva
+   — validar que solo una invocación crea la reserva.
+
+**Setup requerido:**
+
+- Pre-reservas y/o bloqueos creados específicamente para los tests, con
+  `source_event LIKE 'test_C%'`.
+- Patrón con `pg_sleep(8)` en una pestaña y lanzamiento manual de la
+  segunda pestaña a los ~2 segundos.
+- Limpieza al cierre: `DELETE` dirigido por `source_event` para no dejar
+  residuos en DEV.
+
+**Riesgo de no ejecutar antes de TEST/PROD:**
+
+Los locks (`pg_advisory_xact_lock(10, 0)` y `(1, id_cabana::INTEGER)`) están
+implementados en todas las funciones críticas y el `EXCLUDE constraint`
+actúa como red de seguridad estructural. **Lo más probable es que pasen sin
+sorpresas.** Pero un test empírico es la única forma de confirmar que los
+patrones de lock anidado funcionan bajo concurrencia real, no solo en
+aislamiento. Sin estos tests, el primer evento de concurrencia real en
+producción (ej. dos clientes que clickean "reservar" simultáneamente, o
+webhook MP que dispara al mismo tiempo que confirmación manual) sería el
+primer test de concurrencia del sistema. Es preferible que ocurra en DEV
+controlado.
+
+### 6.2 Tests de carga real (post-tests-de-concurrencia)
+
+Pendiente histórico. Validar comportamiento del sistema bajo carga real:
+
 - 2 clientes intentando reservar la misma cabaña simultáneamente.
 - Webhook MP llegando mientras Vicky confirma manualmente.
 - Cron de expiración corriendo mientras hay pago en proceso.
+
+Estos no reemplazan H7. H7 valida concurrencia controlada con SQL y locks; 6.2 queda como validación posterior de carga/uso real cuando existan consumidores reales conectados.
 
 **Origen:** plan de Fase 4 según `6B_PLAN_FASES.md`.
 
@@ -323,6 +406,7 @@ Mantener solo placeholders:
 SUPABASE_URL=__SUPABASE_URL__
 SUPABASE_SERVICE_ROLE_KEY=__SUPABASE_SERVICE_ROLE_KEY__
 MERCADOPAGO_ACCESS_TOKEN=__MERCADOPAGO_ACCESS_TOKEN__
+```
 
 ---
 
@@ -330,28 +414,45 @@ MERCADOPAGO_ACCESS_TOKEN=__MERCADOPAGO_ACCESS_TOKEN__
 
 - **Cuando se identifica un nuevo pendiente:** agregar acá con título,
   estado actual, cambio para producción, y origen.
-- **Cuando se completa un pendiente:** mover a un archivo
-  `Pendientes_Completados.md` con fecha de implementación.
+- **Cuando se completa un pendiente:** marcar como cerrado y, si genera
+  contexto histórico relevante, mover a `Apéndice histórico` al final.
 - **En la revisión pre-deploy:** verificar que TODOS los items se hayan
   resuelto o tengan decisión explícita de postergación.
 
-  ## Hardening de validación en funciones SQL write
+---
+
+# Apéndice histórico — items cerrados en Etapa 6D
+
+Esta sección preserva el contexto técnico de los items resueltos durante
+Etapa 6D (Hardening pre-producción), sesión 2026-05-26. Las secciones que
+siguen describen cómo fueron descubiertos los problemas y qué se decidió
+en cada caso. **Para detalle de ejecución, ver `HARDENING_PRE_PRODUCCION_EJECUCION.md`.**
+
+---
+
+## A.1 [CERRADO en H2-H4-ter] Hardening de validación en funciones SQL write
 
 **Descubierto durante:** 6C — implementación de W3 (registrar_pago).
-**Fecha:** 2026-05-25.
-**Prioridad:** alta antes de TEST/PROD.
-**Bitácora detallada:** `Docs/Bitacora/6C_EJECUCION.md` — entrada W3, sección "Hallazgo importante".
+**Fecha de descubrimiento:** 2026-05-25.
+**Estado:** ✅ Cerrado en bloques H2, H3, H4, H4-bis, H4-ter de Etapa 6D
+(sesión 2026-05-26).
+**Bitácora detallada:** `Docs/Bitacora/6C_EJECUCION.md` — entrada W3,
+sección "Hallazgo importante". Ejecución del fix en
+`Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md`.
 
-### Problema
+### Problema original (pre-hardening)
 
-Las funciones de escritura del schema no son uniformes en cómo manejan strings vacíos en campos obligatorios. Específicamente, `registrar_pago()` extrae los campos obligatorios `tipo` y `medio_pago` así:
+Las funciones de escritura del schema no eran uniformes en cómo manejaban
+strings vacíos en campos obligatorios. Específicamente, `registrar_pago()`
+extraía los campos obligatorios `tipo` y `medio_pago` así:
 
 ```sql
 v_tipo := payload->>'tipo';
 v_medio_pago := payload->>'medio_pago';
 ```
 
-Sin `NULLIF` y sin `TRIM`. Si el payload trae estos campos como `""` (string vacío), la validación posterior:
+Sin `NULLIF` y sin `TRIM`. Si el payload traía estos campos como `""`
+(string vacío), la validación posterior:
 
 ```sql
 IF v_tipo IS NULL OR v_medio_pago IS NULL OR ... THEN
@@ -359,184 +460,163 @@ IF v_tipo IS NULL OR v_medio_pago IS NULL OR ... THEN
 END IF;
 ```
 
-No los detecta como faltantes, porque `""` no es `NULL`. La función avanza hasta el INSERT y choca contra los CHECK constraints (`chk_pagos_tipo`, `chk_pagos_medio`), generando un error crudo de Postgres en vez de un JSONB estructurado.
+No los detectaba como faltantes, porque `""` no es `NULL`. La función
+avanzaba hasta el INSERT y chocaba contra los CHECK constraints
+(`chk_pagos_tipo`, `chk_pagos_medio`), generando un error crudo de Postgres
+en vez de un JSONB estructurado.
 
-**Impacto:** un cliente que mande payload con campo obligatorio vacío recibe error 500 técnico en vez de `{ok: false, error: 'payload_invalido'}` controlado.
+### Mitigación temporal aplicada en 6C
 
-### Mitigación temporal aplicada (6C)
+En W3 — Build Payload, n8n normalizaba con `nv()` los campos obligatorios
+antes de mandarlos al payload (convertía `""` a `null` explícito). Esto
+hacía que `payload->>'campo'` devolviera NULL real y la validación de la
+función rebotara limpio.
 
-En W3 — Build Payload normaliza con `nv()` los campos obligatorios antes de mandar al payload (convierte `""` a `null` explícito). Esto hace que `payload->>'campo'` devuelve NULL real y la validación de la función rebota limpio.
+**Limitación de la mitigación:** solo cubría el camino de W3. Si otro
+consumidor de la función (otro workflow, llamada directa SQL, bot, etc.)
+mandaba payload con string vacío, el agujero seguía.
 
-**Limitación de la mitigación:** solo cubre el camino de W3. Si en el futuro otro consumidor de la función (otro workflow, llamada directa SQL, etc.) manda payload con string vacío, el agujero sigue.
+### Fix definitivo aplicado en Etapa 6D
 
-### Fix estructural a aplicar antes de TEST/PROD
-
-Auditar todas las funciones write del schema y asegurar que los campos obligatorios de texto se normalicen con `NULLIF(TRIM(payload->>'campo'), '')` en el extract inicial:
+Patrón canónico unificado aplicado al extract de payload de las 5
+funciones write críticas:
 
 ```sql
--- Patrón correcto
-v_tipo := NULLIF(TRIM(payload->>'tipo'), '');
-v_medio_pago := NULLIF(TRIM(payload->>'medio_pago'), '');
+v_campo := NULLIF(TRIM(payload->>'campo'), '')::TIPO;
 ```
 
-**Pattern de referencia:** `crear_prereserva()` v1.7 ya aplica este patrón al nombre del huésped:
+Cubre vacíos y whitespace antes del cast. Aplicado a 56 asignaciones
+totales en las funciones:
+- `registrar_pago` (H2)
+- `confirmar_reserva` (H3)
+- `crear_prereserva` (H4)
+- `cancelar_prereserva` (H4-bis)
+- `crear_bloqueo` (H4-ter)
+
+`upsert_huesped` ya cumplía el patrón desde antes.
+
+**101 tests de hardening** sobre las 5 funciones, todos con `ok=true`. Cero
+side effects: conteos de DEV idénticos pre y post hardening.
+
+**Mitigación defensiva `nv()` en n8n:** se mantiene como defensa en
+profundidad. No se removió.
+
+---
+
+## A.2 [CERRADO en H5] Vista_ocupacion devuelve 25 meses en vez de 24
+
+**Descubierto durante:** 6C — implementación de W7 (vistas operativas),
+Test 4.
+**Fecha de descubrimiento:** 2026-05-26.
+**Estado:** ✅ Cerrado en bloque H5 de Etapa 6D (sesión 2026-05-26).
+**Bitácora detallada:** `Docs/Bitacora/6C_EJECUCION.md` — entrada W7,
+sección "Test 4". Ejecución del fix en
+`Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md`.
+
+### Problema original (pre-hardening)
+
+`vista_ocupacion` estaba definida con:
 
 ```sql
-IF v_huesped_payload IS NULL OR NULLIF(TRIM(v_huesped_payload->>'nombre'), '') IS NULL THEN
-  RETURN jsonb_build_object('ok', false, 'error', 'huesped_nombre_requerido', ...);
-END IF;
-```
-
-### Funciones a auditar
-
-Al menos las siguientes (lista completa pendiente al revisar el schema):
-
-- [ ] `registrar_pago()` — confirmado: aplica al menos a `tipo` y `medio_pago`.
-- [ ] `crear_prereserva()` — revisar campos obligatorios distintos a `huesped.nombre`.
-- [ ] `confirmar_reserva()` — revisar al implementar W4.
-- [ ] `cancelar_prereserva()` — revisar al implementar W5.
-- [ ] `crear_bloqueo()` — revisar al implementar W6.
-- [ ] `upsert_huesped()` — revisar campos obligatorios.
-
-### Estrategia recomendada de implementación
-
-Hacerlo como cierre formal post-6C, análogo al cierre de 6B v1.7.1:
-
-1. Generar plan de cambio con snapshots de cada función previo a modificar.
-2. Aplicar `CREATE OR REPLACE FUNCTION` con el patrón unificado.
-3. Re-ejecutar los tests de cada workflow (W2-W6) para confirmar que el comportamiento de "happy path" no cambia.
-4. Confirmar que los tests negativos ahora devuelven `{ok: false, error: 'payload_invalido'}` aun **sin** la mitigación de Build Payload en n8n.
-5. Una vez confirmado, podemos **opcionalmente** retirar la mitigación defensiva de los workflows (los `nv()` en obligatorios). No es estrictamente necesario — pueden coexistir.
-
-### Decisión a tomar antes del fix
-
-¿La función debería rechazar también strings con solo whitespace (`"   "`)? El patrón con `TRIM` lo haría. **Recomendación: sí**, porque un campo con solo espacios no tiene valor semántico. Pero si algún caso de negocio real lo necesita, ajustar.
-
-Generado como parte del cierre de W3 — 2026-05-25.
-
-## 9. Vistas operativas — ajustes menores detectados en W7
-
-Bloque 1 — vista_ocupacion devuelve 25 meses en vez de 24
-Descubierto durante: 6C — implementación de W7 (vistas operativas), Test 4.
-Fecha: 2026-05-26.
-Prioridad: baja (micro-imprecisión, no rompe lógica).
-Bitácora detallada: Docs/Bitacora/6C_EJECUCION.md — entrada W7, sección "Test 4 — vista_ocupacion".
-Problema
-vista_ocupacion está definida con:
-sqlgenerate_series(
+generate_series(
   date_trunc('month', CURRENT_DATE) - '1 year'::interval,
   date_trunc('month', CURRENT_DATE) + '1 year'::interval,
   '1 mon'
 )
-generate_series con paso temporal incluye ambos extremos, generando 25 puntos en vez de 24. Esto resulta en 25 meses × 5 cabañas = 125 filas en el output, en vez del valor teóricamente esperado de 120.
-Ejemplo concreto al 2026-05-26:
+```
 
-date_trunc('month', hoy) = 2026-05-01.
-Inicio del rango: 2025-05-01. Fin del rango: 2027-05-01.
-Pasos: 2025-05, 2025-06, ..., 2026-04, 2026-05, 2026-06, ..., 2027-04, 2027-05.
-Total: 25 puntos.
+`generate_series` con paso temporal incluye ambos extremos, generando 25
+puntos en vez de 24. Esto resultaba en 25 meses × 5 cabañas = 125 filas en
+el output, en vez del valor teóricamente esperado de 120.
 
-Impacto
-Funcional: ninguno. Los cálculos de noches_ocupadas para cada mes siguen siendo correctos. El mes "extra" tiene noches_ocupadas: 0 mientras no haya reservas tan lejanas en el futuro.
-Operativo: una fila más por cabaña por consulta. En reportes que consumen la vista, puede causar confusión si alguien espera "exactamente 24 meses" para gráficos.
-Fix propuesto
-Cambiar la cláusula del generate_series para que excluya el último mes:
-sql-- Opción A: usar interval - 1 mes en el límite superior
+**Impacto:**
+- Funcional: ninguno. Los cálculos de `noches_ocupadas` para cada mes
+  seguían siendo correctos.
+- Operativo: una fila más por cabaña por consulta. En reportes que
+  consumían la vista, podía causar confusión si alguien esperaba
+  "exactamente 24 meses" para gráficos.
+
+### Fix aplicado en Etapa 6D
+
+Una sola línea modificada — al límite superior del `generate_series` se le
+resta `'1 mon'::interval`:
+
+```sql
 generate_series(
   date_trunc('month', CURRENT_DATE) - '1 year'::interval,
   date_trunc('month', CURRENT_DATE) + '1 year'::interval - '1 mon'::interval,
   '1 mon'
 )
-O:
-sql-- Opción B: usar < en un WHERE
-SELECT * FROM generate_series(
-  date_trunc('month', CURRENT_DATE) - '1 year'::interval,
-  date_trunc('month', CURRENT_DATE) + '1 year'::interval,
-  '1 mon'
-) AS d(fecha)
-WHERE d.fecha < date_trunc('month', CURRENT_DATE) + '1 year'::interval
-Recomendación: Opción A, más simple y mantiene el espíritu del código original.
-Estrategia recomendada
-Aplicar como mini-fix junto con el hardening SQL ya documentado (NULLIF en funciones write). En la misma sesión post-6C de hardening pre-producción, revisar las vistas operativas y aplicar este fix.
+```
 
-Bloque 2 — Espacio colgando en concatenación de nombre + apellido
-Descubierto durante: 6C — implementación de W7 (vistas operativas), Test 3.
-Fecha: 2026-05-26.
-Prioridad: muy baja (cosmético).
-Bitácora detallada: Docs/Bitacora/6C_EJECUCION.md — entrada W7, sección "Test 3 — vista_calendario".
-Problema
-Las vistas vista_calendario y vista_limpieza_semana concatenan el nombre del huésped así:
-sqlnombre || ' ' || COALESCE(apellido, '')
-Cuando apellido es string vacío "" (no NULL), COALESCE(apellido, '') devuelve "" sin reemplazar. La concatenación queda como "Juan Pérez Test " || ' ' || "" = "Juan Pérez Test " con espacio al final.
-Ejemplo real visto en Test 3 de W7: huesped_nombre: "Juan Pérez Test ".
-Impacto
-Funcional: ninguno.
-UX/Cosmético: strings con espacios colgando se ven mal en UI / mensajes a clientes. Si una futura plantilla hace "Hola {huesped_nombre}," queda "Hola Juan Pérez Test ," con espacio antes de la coma.
-Fix propuesto
-Reemplazar la concatenación por una forma que normalice el resultado:
-sql-- Opción A: trim al final
+Resultado: 120 filas (24 meses × 5 cabañas). 7 tests con `ok=true`.
+Cálculos de `noches_ocupadas` idénticos a los previos.
+
+---
+
+## A.3 [CERRADO en H6, H6-bis] Espacio colgando en concatenación nombre + apellido
+
+**Descubierto durante:** 6C — implementación de W7 (vistas operativas),
+Test 3.
+**Fecha de descubrimiento:** 2026-05-26.
+**Estado:** ✅ Cerrado en bloques H6 y H6-bis de Etapa 6D (sesión 2026-05-26).
+**Bitácora detallada:** `Docs/Bitacora/6C_EJECUCION.md` — entrada W7,
+sección "Test 3". Ejecución del fix en
+`Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md`.
+
+### Problema original (pre-hardening)
+
+Las vistas `vista_calendario`, `vista_limpieza_semana` y
+`vista_prereservas_activas` concatenaban el nombre del huésped así:
+
+```sql
+nombre || ' ' || COALESCE(apellido, '')
+```
+
+Cuando `apellido` era string vacío `""` (no NULL), `COALESCE(apellido, '')`
+devolvía `""` sin reemplazar. La concatenación quedaba como
+`"Juan Pérez Test "` con espacio al final.
+
+**Impacto:**
+- Funcional: ninguno.
+- UX/Cosmético: strings con espacios colgando se veían mal en UI / mensajes
+  a clientes. Si una plantilla hacía `"Hola {huesped_nombre},"` quedaba
+  `"Hola Juan Pérez Test ,"` con espacio antes de la coma.
+
+### Fix aplicado en Etapa 6D
+
+Reemplazo en las 3 vistas afectadas:
+
+```sql
 TRIM(nombre || ' ' || COALESCE(apellido, ''))
+```
 
--- Opción B: solo agregar el espacio si hay apellido real
-CASE
-  WHEN NULLIF(TRIM(apellido), '') IS NULL THEN nombre
-  ELSE nombre || ' ' || apellido
-END
-Recomendación: Opción A es más simple y funciona en ambos casos (apellido NULL o vacío).
-Estrategia recomendada
-Aplicar junto con el fix de vista_ocupacion (Bloque 1) en la sesión post-6C de hardening de vistas. Revisar también si hay otras concatenaciones similares en el schema.
-Nota sobre la fuente del problema
-El espacio colgando aparece porque las huéspedes en DEV se crearon con apellido: "" (string vacío) en lugar de apellido: NULL. La función crear_prereserva u upsert_huesped podría también normalizar este input con NULLIF(TRIM(apellido), '') antes de insertar. Esto se solapa con el item de hardening de validación SQL ya documentado.
+Aplicado a `vista_calendario`, `vista_limpieza_semana` (2 ocurrencias por
+UNION ALL), y `vista_prereservas_activas` (1 ocurrencia).
 
-## 10. Tests pendientes
+PostgreSQL al persistir normalizó `TRIM(...)` a `TRIM(BOTH FROM ...)`.
+Sintaxis equivalente.
 
-## Tests de concurrencia Sección 6.8 (Fase 4 original) — pendiente de ejecución
+H6: 7 tests con `ok=true`. H6-bis: 5 tests con `ok=true`. Categoría
+cosmética cerrada.
 
-**Origen:** Plan operativo de Etapa 6B (`Docs/Implementacion/6B_PLAN_FASES.md v1.1` Sección 6.8) — los 4 tests de concurrencia con `pg_sleep` no se ejecutaron formalmente ni durante 6B ni durante 6C.
+**Parte 6.2 (UPDATE de huéspedes):** NO ejecutado. DEV ya tiene
+`apellido = NULL` en los 2 huéspedes existentes (limpieza pre-hardening
+eliminó los problemáticos). `upsert_huesped` aplica `NULLIF(TRIM(...))` para
+casos futuros.
+
+---
+
+## A.4 [MIGRADO a Sección 6.1] Tests de concurrencia Sección 6.8
+
+**Descubierto durante:** preparación del cierre formal post-6C.
 **Fecha de registro:** 2026-05-26.
-**Prioridad:** alta antes de TEST/PROD.
-**Documentos relacionados:** `Docs/Implementacion/6B_PLAN_FASES.md` Sección 6.8, `Docs/Implementacion/6C_CIERRE.md` sección "Tests cruzados diferidos".
+**Estado:** ⏳ Pendiente. Migrado y consolidado en **Sección 6.1** de este
+documento. Asignado al bloque H7 de Etapa 6D.
 
-### Contexto
+Este item NO está cerrado. Se mueve al apéndice porque originalmente
+ocupaba la Sección 10 del archivo y se consolidó con la Sección 6.1 para
+evitar duplicación. El contenido actual está en Sección 6.1.
 
-El plan original de Etapa 6B contemplaba **36 tests obligatorios** divididos en 8 categorías. Durante la ejecución real:
-
-- **Tests funcionales por bloque (categorías 6.1 a 6.7)**: cubiertos parcial pero ampliamente durante la implementación de funciones SQL en 6B (Bloques 9-22) y validados end-to-end durante la implementación de workflows n8n en 6C (40 tests funcionales sobre W0-W7). Las funciones del schema están validadas funcionalmente.
-
-- **Tests de concurrencia (categoría 6.8)**: NO ejecutados formalmente. Requieren un patrón específico (2 pestañas del SQL Editor en paralelo, `pg_sleep` para forzar overlap) que no se aplicó en 6B ni en 6C.
-
-### Qué tests faltan
-
-Los 4 tests de concurrencia de Sección 6.8 del plan original:
-
-1. **Doble `crear_prereserva` simultánea** sobre el mismo rango y cabaña — validar que el lock global serializa y la segunda invocación rebota con `no_disponible`.
-2. **`crear_prereserva` + `crear_bloqueo` simultáneos** sobre el mismo rango y cabaña — validar que uno gana y el otro rebota.
-3. **`confirmar_reserva` + `crear_bloqueo` simultáneos** sobre el rango de la pre-reserva — validar que la pre-reserva se convierte primero y el bloqueo rebota con `conflicto_con_reserva`.
-4. **Doble `confirmar_reserva` simultánea** sobre la misma pre-reserva — validar que solo una invocación crea la reserva (la otra rebota con `estado_invalido`).
-
-Detalle completo de cada test (queries con `pg_sleep`, esperado, pre-requisitos): ver `6B_PLAN_FASES.md` Sección 6.8.
-
-### Por qué se difirieron
-
-1. Durante 6B (implementación de funciones), se priorizó "función compila y se comporta básicamente" para avanzar al siguiente bloque.
-2. Durante 6C (workflows), los tests fueron funcionales end-to-end, no de concurrencia. n8n manual no permite reproducir la condición de carrera con `pg_sleep`.
-3. Operativamente no es bloqueante hasta tener consumidores reales que generen concurrencia (webhook MP, bot multicanal, frontend público).
-
-### Estrategia de ejecución recomendada
-
-Ejecutar como **parte del bloque "Opción A — Hardening pre-producción"**, agrupado con los demás items de hardening SQL:
-
-1. NULLIF + TRIM en funciones write.
-2. Fix de `vista_ocupacion` (25 vs 24 meses).
-3. Fix cosmético de concatenación nombre+apellido.
-4. **Tests de concurrencia de Sección 6.8** ← este item.
-
-Mini-sesión de 2-3 horas dedicada a hardening + tests cierra los 4 frentes juntos. Patrón de ejecución según `6B_PLAN_FASES.md` Sección 6.8: dos pestañas SQL Editor en paralelo, `pg_sleep(2)` o similar para forzar overlap, validar respuestas y estado final de la DB.
-
-### Riesgo de no ejecutar antes de TEST/PROD
-
-Los locks (`pg_advisory_xact_lock(10, 0)` y `(1, id_cabana::INTEGER)`) están implementados en todas las funciones críticas y el `EXCLUDE constraint` actúa como red de seguridad estructural. **Lo más probable es que pasen sin sorpresas.** Pero un test empírico es la única forma de confirmar que los patrones de lock anidado funcionan bajo concurrencia real, no solo en aislamiento.
-
-Sin estos tests, el primer evento de concurrencia real en producción (ej. dos clientes que clickean "reservar" simultáneamente, o webhook MP que dispara al mismo tiempo que confirmación manual) sería el primer test de concurrencia del sistema. Es preferible que ocurra en DEV controlado.
-
-Generado el 2026-05-26 como complemento del cierre formal de 6C.
+**Plan de ejecución:** sesión separada con foco completo en concurrencia
+y limpieza. Decisión tomada al cierre de la sesión 2026-05-26 (H6-bis).

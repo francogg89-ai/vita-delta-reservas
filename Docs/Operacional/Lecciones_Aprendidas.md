@@ -19,6 +19,8 @@ Solo tiene updated_at. No usar created_at en queries sobre esa tabla.
 
 *Origen: Bloque 19 / 2026-05-24*
 
+---
+
 ## Sobre Setup y Limpieza
 
 ### Re-ejecutar setups después de errores
@@ -38,6 +40,8 @@ que la función toca, no solo el output esperado.
 
 *Origen: Bloque 19 / 2026-05-24*
 
+---
+
 ## Sobre Display de Resultados en Supabase
 
 ### SQL Editor muestra solo el último SELECT
@@ -46,6 +50,8 @@ del último SELECT. Para ver varios resultados: usar `UNION ALL` con columna
 identificadora (`test`, `momento`, `caso`).
 
 *Origen: Bloque 19 / 2026-05-24*
+
+---
 
 ## Modelo de daterange `[)` y check-in/check-out
 
@@ -76,6 +82,8 @@ en lógica de aplicación.
 
 Validado empíricamente en Bloque 20 (Fase 3).
 
+---
+
 ## Sobre `orden_limpieza` y operativa de limpieza
 
 El campo `cabanas.orden_limpieza` define un orden default sugerido para
@@ -96,10 +104,13 @@ la rutina de limpieza diaria de Jennifer. No es regla rígida.
 - Notas especiales de la reserva
 
 ### Para cambiar el orden default
-\`\`\`sql
+
+```sql
 UPDATE cabanas SET orden_limpieza = 3 WHERE nombre = 'Bamboo';
 UPDATE cabanas SET orden_limpieza = 1 WHERE nombre = 'Tokio';
-\`\`\`
+```
+
+---
 
 ## Bug crítico de Supabase Dashboard con CREATE OR REPLACE FUNCTION
 
@@ -108,11 +119,11 @@ con una función PL/pgSQL que contiene variables locales con prefijo `v_`,
 Supabase puede detectar incorrectamente esas variables como **nombres de tabla**
 e intentar agregar automáticamente al final del SQL:
 
-\`\`\`sql
+```sql
 ALTER TABLE v_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE v_existente ENABLE ROW LEVEL SECURITY;
 -- source: dashboard
-\`\`\`
+```
 
 Esto trunca el SQL original a mitad y causa errores tipo:
 `ERROR 42601: unterminated dollar-quoted string`
@@ -122,18 +133,18 @@ Esto trunca el SQL original a mitad y causa errores tipo:
 Usar `DROP FUNCTION` seguido de `CREATE FUNCTION` (sin `OR REPLACE`) en runs
 separados:
 
-\`\`\`sql
+```sql
 -- Paso 1: DROP en su propio Run
 DROP FUNCTION IF EXISTS mi_funcion(jsonb);
-\`\`\`
+```
 
-\`\`\`sql
+```sql
 -- Paso 2: CREATE en su propio Run
 CREATE FUNCTION mi_funcion(payload JSONB) RETURNS JSONB ... AS $$
 DECLARE
   v_config JSONB;  -- ← Supabase ya no lo confunde con tabla
   ...
-\`\`\`
+```
 
 Supabase no activa el feature de auto-RLS cuando hay un DROP previo, porque
 entiende que estás reemplazando una función existente.
@@ -141,8 +152,9 @@ entiende que estás reemplazando una función existente.
 Origen: Hotfix v1.7 (Fase 3, post-cierre), reemplazo de `crear_prereserva`
 con la regla de `hora_checkout_domingo`.
 
-Bloque para Lecciones_Aprendidas.md — Gotchas de la integración n8n ↔ Supabase
+---
 
+## Gotchas de la integración n8n ↔ Supabase
 
 Estas lecciones surgieron durante la Etapa 6C (Reescritura de Workflows n8n contra Supabase DEV).
 Aplican a n8n cloud + pooler transaccional de Supabase.
@@ -275,16 +287,9 @@ Si se copia un connection string sin verificar puerto y usuario, es fácil confu
 
 **Descubierto:** 2026-05-25, durante validación de W1.
 
-Notas para el mantenedor del archivo
+---
 
-Las lecciones están numeradas con prefijo L-6C-NN para distinguirlas de lecciones de etapas anteriores (Etapa 6B usaría L-6B-NN).
-Si Lecciones_Aprendidas.md ya tiene su propio sistema de numeración o categorización, adaptar los headers manteniendo el contenido.
-L-6C-01 a L-6C-04 son gotchas accionables (problema → solución). L-6C-05 es informativa (no hay un bug que solucionar, solo entender el comportamiento).
-Los IDs (L-6C-01, etc.) son útiles para referenciar desde código o bitácora más adelante (ej. en comentarios del JSON del workflow: // Workaround L-6C-03).
-
-Generado como parte del cierre de W1 — 2026-05-25.
-
-markdown### L-6C-06 — Payload JSONB grande vía `JSON.stringify` en queryReplacement funciona limpio
+### L-6C-06 — Payload JSONB grande vía `JSON.stringify` en queryReplacement funciona limpio
 
 **Cuándo aplica:** al invocar funciones SQL que reciben un único parámetro JSONB (típicamente funciones de escritura tipo `crear_prereserva(jsonb)`, `registrar_pago(jsonb)`, `confirmar_reserva(jsonb)`, etc.).
 
@@ -324,10 +329,174 @@ El problema documentado en L-6C-03 era **el valor vacío específico**, no el ta
 
 **Descubierto:** 2026-05-25, durante W2 Tests 1–5.
 
-Notas para el mantenedor del archivo
+---
 
-L-6C-06 cierra la duda abierta implícitamente por L-6C-03: el problema de Query Parameters NO afecta payloads JSONB serializados.
-L-6C-03 sigue vigente para parámetros sueltos (números, fechas, strings opcionales). El workaround 0 = todas documentado allí sigue siendo la solución correcta para esos casos.
-Los dos patrones coexisten: lecturas con parámetros sueltos (W1, W7) usan el patrón de L-6C-03; escrituras con payload JSONB (W2, W3+) usan el patrón de L-6C-06.
+## Lecciones del Hardening — Etapa 6D
 
-Generado como parte del cierre de W2 — 2026-05-25.
+Estas lecciones surgieron durante la sesión 2026-05-26 (bloques H1-H6-bis del hardening estructural).
+Aplican al diseño de cambios sobre funciones write y vistas en Supabase.
+Bitácora detallada: `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md`.
+
+### L-6D-01 — Schema canónico no es fuente de verdad para cuerpos reales
+
+**Cuándo aplica:** al diseñar cambios sobre funciones o vistas existentes en Supabase, donde se tiene un schema canónico documentado (ej. `6B_SCHEMA_SQL.md v1.7.1`).
+
+**Detalle:** el schema canónico documenta la **intención** del diseño, no necesariamente refleja el cuerpo real de los objetos en DEV. Las funciones y vistas pueden haber evolucionado por hotfixes, ajustes de alineación o ediciones puntuales no reflejadas en el canónico.
+
+**Divergencias detectadas durante 6D:**
+
+1. `registrar_pago` (H2): el cuerpo real tenía líneas de log con `COALESCE(v_validado_por, 'registrar_pago')` para `modificado_por`, cast `::nivel_log_enum` explícito, y un campo `es_automatico` en el JSONB del log, ninguno documentado en el schema canónico.
+2. `crear_prereserva` (H4): `canal_pago_esperado` es opcional en DEV (no aparece en el check de obligatorios), pero el schema canónico lo describía como obligatorio.
+3. `crear_prereserva` (H4): `v_ninos` está declarado como BOOLEAN en DEV, pero el schema canónico lo declaraba TEXT.
+
+**Solución (flujo snapshot-first):**
+
+Antes de proponer cualquier cambio sobre una función o vista existente, capturar su cuerpo real:
+
+```sql
+-- Para funciones
+SELECT pg_get_functiondef('nombre_funcion(jsonb)'::regprocedure);
+
+-- Para vistas
+SELECT pg_get_viewdef('nombre_vista'::regclass, true);
+```
+
+Reconstruir cualquier `CREATE OR REPLACE` desde el cuerpo real, no desde el schema canónico. Documentar las divergencias detectadas para decidir si conviene actualizar el schema canónico.
+
+**Descubierto:** 2026-05-26, durante H2 (extract de `registrar_pago` no coincidía con schema canónico v1.7.1).
+
+---
+
+### L-6D-02 — PostgreSQL normaliza expresiones al persistir vistas y funciones
+
+**Cuándo aplica:** al verificar el cuerpo de una vista o función después de un `CREATE OR REPLACE`, comparándolo contra lo que escribimos.
+
+**Detalle:** PostgreSQL al persistir el objeto reescribe ciertas expresiones a su forma canónica interna. Esto puede sorprender si esperás byte-equivalencia entre lo que pegaste y lo que `pg_get_viewdef` devuelve.
+
+**Normalizaciones observadas durante 6D:**
+
+| Lo que escribís | Cómo lo persiste PostgreSQL |
+|---|---|
+| `TRIM(x)` | `TRIM(BOTH FROM x)` |
+| `'12 months'::interval` | `'1 year'::interval` |
+| `'1 month'::interval` | `'1 mon'::interval` |
+
+**Implicancias prácticas:**
+
+- No son cambios funcionales. Son sintaxis equivalentes.
+- Para facilitar verificaciones futuras (`pg_get_viewdef` o `pg_get_functiondef` comparados con el código fuente), conviene escribir directamente la forma normalizada. Ej. escribir `'1 mon'::interval` en lugar de `'1 month'::interval` ahorra confusión post-deploy.
+- Si pegás SQL desde un schema canónico viejo con la forma no normalizada, el cuerpo persistido va a verse "distinto" aunque sea idéntico funcionalmente.
+
+**Descubierto:** 2026-05-26, durante H5 (vista_ocupacion) y H6 (TRIM en concatenación de nombre).
+
+---
+
+### L-6D-03 — Patrón canónico de extract defensivo para funciones write
+
+**Cuándo aplica:** al diseñar o auditar funciones PL/pgSQL que reciben un parámetro `jsonb` con campos del cual extraen valores.
+
+**Patrón canónico:**
+
+```sql
+v_campo := NULLIF(TRIM(payload->>'campo'), '')::TIPO;
+```
+
+**Qué cubre:**
+
+- Strings vacíos (`""`) → NULL real (no string vacío que pasaría las validaciones `IS NULL`).
+- Whitespace puro (`"   "`) → NULL real.
+- Errores crudos de cast en BIGINT, DATE, INTEGER, NUMERIC, TIME, BOOLEAN cuando llegan strings vacíos o whitespace.
+
+**Qué NO cubre:**
+
+- Tipos inválidos no vacíos (ej. `id_cabana="abc"` con cast a BIGINT). Siguen rompiendo con error crudo de PostgreSQL. Queda como hardening adicional opcional pre-PROD.
+
+**Cambio observable consistente al aplicar el patrón:**
+
+Cuando un campo obligatorio llega con whitespace (`"   "`), la función rebota con `payload_invalido` en vez de errores específicos del dominio. Por ejemplo, antes del fix `motivo: "   "` en `cancelar_prereserva` devolvía `motivo_invalido` (con lista de motivos válidos); después del fix devuelve `payload_invalido` antes de llegar al check de enum.
+
+Esto es **consistente** con la semántica del patrón: whitespace en obligatorio = valor ausente = `payload_invalido`. Aceptado por consistencia con los demás errores estructurales.
+
+**Aplicado en las 5 funciones write críticas del schema durante 6D:** `registrar_pago` (H2), `confirmar_reserva` (H3), `crear_prereserva` (H4), `cancelar_prereserva` (H4-bis), `crear_bloqueo` (H4-ter). Total: 56 asignaciones unificadas al patrón. `upsert_huesped` ya cumplía el patrón desde antes.
+
+**Descubierto:** 2026-05-26, durante H1 (decisiones previas) y aplicado en H2-H4-ter.
+
+---
+
+### L-6D-04 — Diseño de tests no destructivos en funciones write con operaciones tempranas en tablas
+
+**Cuándo aplica:** al diseñar tests sobre funciones que modifican múltiples tablas, donde algunas modificaciones ocurren temprano en el flujo (antes de validaciones específicas).
+
+**Detalle:** algunas funciones write (notablemente `crear_prereserva`) tienen operaciones que tocan tablas en pasos tempranos del flujo. Específicamente, `crear_prereserva` llama a `upsert_huesped` en sección 4, **antes** de validar la cabaña en sección 6. Cualquier test que pase las validaciones tempranas y llegue al paso 4 va a crear o actualizar un huésped, aunque el test "rebote" después con `cabana_no_existe` u otro error de validación tardía.
+
+**Implicación para diseño de tests:**
+
+1. Identificar el **orden exacto de validaciones y operaciones** de la función. La fuente es el cuerpo real (`pg_get_functiondef`), no el schema canónico.
+2. Identificar la **última validación que rebota antes de la primera operación de escritura**. Esa es la frontera segura para tests no destructivos.
+3. Diseñar tests que rebotan en o antes de esa frontera.
+
+**Ejemplo concreto (`crear_prereserva`):**
+
+Orden de validaciones y operaciones:
+
+1. Extract de payload (paso 1) — puede romper con cast crudo si no hay defensa.
+2. Validación obligatorios → `payload_invalido`.
+3. Validación montos → `precio_requerido`.
+4. Validación fechas → `fechas_invalidas`.
+5. Validación nombre huésped → `huesped_nombre_requerido`.
+6. Validación contacto huésped → `huesped_contacto_requerido` ← **última frontera antes de tocar tablas.**
+7. `upsert_huesped()` (paso 4) ← **primer punto donde la función modifica DB.**
+8. Locks (paso 5).
+9. Validación cabaña (paso 6) → `cabana_no_existe`, `cabana_inactiva`, `excede_capacidad`.
+
+Para tests no destructivos de campos opcionales con whitespace, una estrategia segura y simple es enviar un huésped inválido por nombre (`{nombre: "", telefono: "+..."}`), que rebota en `huesped_nombre_requerido`, antes de llegar a `upsert_huesped`.
+
+**Verificación empírica:** comparar `SELECT COUNT(*) FROM huespedes` antes y después de los tests para confirmar que ningún test creó filas.
+
+**Descubierto:** 2026-05-26, durante H4 (diseño de tests para `crear_prereserva`).
+
+---
+
+### L-6D-05 — Verificación de dependencias antes de `CREATE OR REPLACE VIEW`
+
+**Cuándo aplica:** al modificar una vista existente con `CREATE OR REPLACE VIEW`.
+
+**Reglas de PostgreSQL para `CREATE OR REPLACE VIEW`:**
+
+- Permite cambiar el cuerpo de la vista.
+- NO permite eliminar columnas existentes, ni cambiar su tipo, ni renombrarlas.
+- Permite agregar columnas al final del SELECT.
+
+**Riesgo a verificar:** si otra vista, función u objeto público depende de la vista que vas a modificar, un cambio que altere estructura de columnas puede romper el dependiente. Aún sin cambios de estructura, conviene tener visibilidad del grafo antes de tocar.
+
+**Query de verificación:**
+
+```sql
+SELECT
+  dependent_obj.relname AS objeto_dependiente,
+  CASE dependent_obj.relkind
+    WHEN 'v' THEN 'vista'
+    WHEN 'm' THEN 'materialized view'
+    WHEN 'r' THEN 'tabla'
+    WHEN 'i' THEN 'indice'
+    WHEN 'f' THEN 'foreign table'
+    ELSE 'otro'
+  END AS tipo_descripcion
+FROM pg_depend d
+JOIN pg_rewrite r ON r.oid = d.objid
+JOIN pg_class dependent_obj ON dependent_obj.oid = r.ev_class
+JOIN pg_class source_obj ON source_obj.oid = d.refobjid
+WHERE source_obj.relname = 'nombre_vista'
+  AND dependent_obj.relname != 'nombre_vista'
+ORDER BY dependent_obj.relname;
+```
+
+**Criterios:**
+
+- 0 filas → vía libre.
+- Solo objetos internos PostgreSQL → revisar y seguir.
+- Vista pública o función operativa dependiente → freno y revisar impacto.
+
+**Validado empíricamente durante 6D:** las 4 vistas modificadas (`vista_ocupacion`, `vista_calendario`, `vista_limpieza_semana`, `vista_prereservas_activas`) tenían 0 dependientes según esta query. `CREATE OR REPLACE VIEW` fue seguro en todos los casos.
+
+**Descubierto:** 2026-05-26, durante H5 (preparación de fix de `vista_ocupacion`).

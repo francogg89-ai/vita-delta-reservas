@@ -2,11 +2,11 @@
 
 ## Resumen ejecutivo
 
-El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.1) + workflows n8n contra DEV operativos (6C)**. El contrato n8n ↔ Supabase está validado end-to-end con 40 tests funcionales sobre los 8 workflows críticos.
+El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.2 con hardening estructural H1-H6-bis aplicado) + workflows n8n contra DEV operativos (6C) + hardening cerrado en su frente de funciones write y vistas (Etapa 6D, bloques H1-H6-bis)**. El contrato n8n ↔ Supabase está validado end-to-end con 40 tests funcionales de 6C + 101 tests adicionales de hardening sobre funciones write y vistas.
 
-**Próxima etapa:** por decidir entre 4 opciones (ver al final del documento). Recomendación: hardening pre-producción (Opción A) antes de habilitar consumidores reales.
+**Etapa actual:** 6D — Hardening pre-producción. H1-H6-bis cerrados; pendientes H7 (tests de concurrencia) y H8 (cierre documental).
 
-**No es producción.** DEV es entorno funcional con backend + workflows validados. Falta hardening final + entorno TEST + integración con consumidores reales (webhook MP, bot, frontend).
+**No es producción.** DEV es entorno funcional con backend + workflows validados + hardening estructural aplicado. Falta hardening de concurrencia + entorno TEST + integración con consumidores reales (webhook MP, bot, frontend).
 
 ---
 
@@ -55,11 +55,16 @@ El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV compl
 ### Etapa 6B — Migración a Supabase ✅ Cerrada (diseño + implementación)
 - Schema completo en PostgreSQL.
 - Plan de fases de ejecución.
-- Schema canónico: `6B_SCHEMA_SQL.md v1.7.1`.
+- Schema canónico de referencia: `6B_SCHEMA_SQL.md v1.7.1` (DEV está en v1.7.2 con hardening; ver sección "Schema canónico actual" abajo).
 
 ### Etapa 6C — Reescritura de workflows n8n contra Supabase DEV ✅ Cerrada
 - 8 workflows manuales operativos en DEV.
 - Documento de cierre formal: `6C_CIERRE.md`.
+
+### Etapa 6D — Hardening pre-producción 🚧 En curso (H1-H6-bis cerrados; H7-H8 pendientes)
+- 9 bloques de hardening cerrados (ver sección "Fases de IMPLEMENTACIÓN").
+- 2 bloques pendientes: H7 (concurrencia) y H8 (cierre documental).
+- Bitácora de ejecución: `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md`. Documento de cierre formal: pendiente en H8.
 
 ---
 
@@ -97,7 +102,7 @@ Triggers:
 - `vista_disponibilidad` (60 días forward).
 - `vista_calendario` (60 días forward).
 - `vista_prereservas_activas` (cronómetro en vivo).
-- `vista_ocupacion` (matriz ~24 meses — micro-bug del +1 mes documentado en pendientes).
+- `vista_ocupacion` (24 meses exactos desde hardening H5).
 - `vista_calendario_semanal` (7 días forward).
 - `vista_limpieza_semana` (7 días forward).
 
@@ -121,7 +126,7 @@ Implementa la regla operativa de check-out dominical a las 16:00 (por última la
 
 Actualización de `obtener_disponibilidad_rango()` para aplicar el CASE de domingo en `hora_checkout_base`. Ejecutado con `CREATE OR REPLACE FUNCTION` sin pop-up destructivo. 5 verificaciones OK post-deploy.
 
-**DEV quedó 100% alineado con schema canónico v1.7.1.**
+**Nota histórica:** al cierre de esta alineación, DEV quedó 100% alineado con schema canónico v1.7.1. Posteriormente, durante Etapa 6D, DEV avanzó a v1.7.2 con la aplicación del hardening H2-H6-bis. La actualización del schema canónico a v1.7.2 queda diferida a H8.
 
 Documentación: `BITACORA_ENTRADA_CIERRE_6B_v1.7.1.md`.
 
@@ -142,10 +147,7 @@ Documentación: `BITACORA_ENTRADA_CIERRE_6B_v1.7.1.md`.
 | W7 — vistas operativas | 6 vistas read-only | 7 tests |
 
 **Patrón establecido y reutilizable:**
-
-```
 Manual Trigger → Build Input → Build Payload/Query → Postgres → Build Response
-```
 
 Excepción: W7 incorpora nodo IF para ramificación de validación temprana.
 
@@ -159,7 +161,64 @@ Excepción: W7 incorpora nodo IF para ramificación de validación temprana.
 
 **Documento de cierre formal:** `6C_CIERRE.md`.
 
-### Estado de DEV al cierre de 6C
+### Etapa 6D — Hardening pre-producción 🚧 En curso
+
+**Sesión 2026-05-26.** Cierre del frente estructural (H1-H6-bis); pendiente concurrencia (H7) y cierre documental (H8).
+
+**Bloques cerrados:**
+
+| Bloque | Descripción | Tests |
+|---|---|---|
+| H1 | Decisiones previas (patrón canónico, TRIM agresivo) | n/a |
+| H2 | Hardening `registrar_pago` (extract defensivo) | 15/15 |
+| H3 | Hardening `confirmar_reserva` (extract defensivo) | 11/11 |
+| H4 | Hardening `crear_prereserva` (extract defensivo) | 31/31 |
+| H4-bis | Hardening `cancelar_prereserva` (extract defensivo) | 9/9 |
+| H4-ter | Hardening `crear_bloqueo` (extract defensivo) | 17/17 |
+| H5 | Fix `vista_ocupacion` (rango 25→24 meses) | 7/7 |
+| H6 | Fix `vista_calendario` + `vista_limpieza_semana` (TRIM) | 7/7 |
+| H6-bis | Fix `vista_prereservas_activas` (TRIM) | 5/5 |
+
+**Resumen:**
+- 5 funciones write con patrón `NULLIF(TRIM(...),'')` aplicado a 56 asignaciones totales.
+- 4 vistas corregidas (1 de rango, 3 cosméticas).
+- 101 tests de hardening con `ok=true` en todos.
+- Cero side effects: conteos de DEV idénticos a pre-sesión (pagos=1, prereservas=2, reservas=1, huespedes=2, bloqueos=2, logs=11).
+- Schema bumped a **v1.7.2** (documentado en bitácora; pendiente decisión sobre cómo actualizar `6B_SCHEMA_SQL.md` — ver "Schema canónico actual" abajo).
+
+**Bloques pendientes:**
+
+| Bloque | Descripción | Estado |
+|---|---|---|
+| H7 | Tests de concurrencia C-1 a C-4 | ⏳ Pendiente |
+| H8 | Actualización documental y cierre formal | ⏳ Pendiente |
+
+**Bitácora de ejecución:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md`. Documento de cierre formal: pendiente en H8.
+
+---
+
+## Estado actual de DEV al cierre de H6-bis
+
+**Esta es la fuente vigente del estado de DEV.**
+
+| Recurso | Conteo | Detalle |
+|---|---|---|
+| Pre-reservas | 2 | estados terminales (`convertida`, `cancelada_por_cliente`) |
+| Pagos | 1 | `confirmado` |
+| Reservas | 1 | `confirmada`, cabaña 17, 10-13 jul 2026 |
+| Huéspedes | 2 | id 34 ("Juan Pérez Test") y id 35 ("Test W5 Cliente"), ambos con `apellido=NULL` |
+| Bloqueos | 2 | activos |
+| Logs | 11 | en `log_cambios` |
+
+Conteos idénticos a pre-hardening — confirma cero side effects de la sesión completa.
+
+**Nota:** DEV fue limpiado entre el cierre de 6C y el inicio de 6D (huéspedes de 35→2, pre-reservas de 26→2). Esa limpieza no fue parte del hardening; quedó como contexto operativo.
+
+---
+
+## Estado histórico de DEV al cierre de 6C
+
+**Este estado es histórico. No refleja el estado actual post-limpieza y post-hardening.** La fuente vigente es la sección anterior ("Estado actual de DEV al cierre de H6-bis").
 
 | Recurso | ID | Estado |
 |---|---|---|
@@ -175,63 +234,63 @@ Excepción: W7 incorpora nodo IF para ramificación de validación temprana.
 
 ---
 
-## Schema canónico actual: `6B_SCHEMA_SQL.md v1.7.1`
+## Schema canónico actual
 
-**DEV está 100% alineado con v1.7.1.** Alineación final ejecutada el 2026-05-25 antes de abrir 6C.
+**Schema canónico documentado:** `6B_SCHEMA_SQL.md v1.7.1`.
+
+**Estado real de DEV:** v1.7.2, con hardening H2-H6-bis aplicado sobre v1.7.1.
+
+**La actualización del schema canónico a v1.7.2 queda diferida a H8.** En H8 se decidirá entre:
+- Actualizar `6B_SCHEMA_SQL.md` a v1.7.2 corrigiendo también las divergencias detectadas con DEV real (ver lecciones H2-L1 y H4-L2).
+- Crear `6B_SCHEMA_OBSERVADO.md` v1.7.2 como documento separado.
+- Decisión híbrida.
+
+**Divergencias conocidas entre schema canónico v1.7.1 y DEV real (descubiertas durante hardening):**
+1. `registrar_pago`: líneas de log con `COALESCE(v_validado_por, 'registrar_pago')` y cast `::nivel_log_enum` explícito, no documentados en schema canónico.
+2. `crear_prereserva`: `canal_pago_esperado` es opcional en DEV pero el schema canónico lo describía como obligatorio.
+3. `crear_prereserva`: `v_ninos` es BOOLEAN en DEV pero el schema canónico lo declaraba TEXT.
 
 ---
 
-## Próxima etapa — Por decidir
+## Próxima etapa inmediata — Cerrar Etapa 6D
 
-Con 6C cerrado, las opciones inmediatas son 4. La recomendación **A primero, después B** está documentada en `6C_CIERRE.md`.
+1. **H7** — Tests de concurrencia C-1 a C-4. Sesión separada con foco completo en concurrencia (decisión tomada al cierre de la sesión 2026-05-26).
+2. **H8** — Actualización documental y cierre formal.
 
-### Opción A — Hardening pre-producción
-
-Ejecutar los items de `Pendiente_pre_produccion.md`:
-- `NULLIF(TRIM(...))` en funciones write para campos obligatorios de texto.
-- Fix de `vista_ocupacion` (25 vs 24 meses).
-- Fix cosmético de concatenaciones `nombre + apellido` en vistas (o `upsert_huesped`).
-
-**Ventaja:** cierra deudas técnicas conocidas antes de TEST/PROD.
-**Costo:** sesión corta (1-2 horas), poco riesgo.
-
-### Opción B — Entorno TEST
+### Después de cerrar 6D — Opción B (recomendada por `6C_CIERRE.md`)
 
 Replicar DEV en un proyecto Supabase separado para integrar consumidores reales sin riesgo a datos reales.
 
 **Ventaja:** habilita pruebas con webhook MP, frontend, etc.
 **Costo:** sesión media (2-3 horas) — duplicar schema, seeds, credenciales, parametrizar ambiente en workflows n8n.
 
-### Opción C — Webhook MercadoPago
+### Posteriores — Opciones C y D (orden por decidir)
 
-Workflow operativo real que invoca W3 tras webhook de MP, con deduplicación por `payment_id`.
+**C — Webhook MercadoPago:** workflow operativo real que invoca W3 tras webhook de MP, con deduplicación por `payment_id`.
 
-**Ventaja:** primer flujo productivo end-to-end.
-**Costo:** sesión larga (3-4 horas) — diseño del webhook + integración con W4.
-
-### Opción D — Bot conversacional (Etapa 4B implementación)
-
-Implementar el bot diseñado en Etapa 4B usando Claude API + Meta API.
-
-**Ventaja:** habilita canal principal de consultas (Instagram + WhatsApp).
-**Costo:** sesión larga, requiere Meta API conectada.
-
-**Recomendación documentada en `6C_CIERRE.md`:** **A primero, después B.** Cerrar deudas técnicas conocidas antes de complicar el sistema con nuevos consumidores.
+**D — Bot conversacional (Etapa 4B implementación):** implementar el bot diseñado en Etapa 4B usando Claude API + Meta API.
 
 ---
 
 ## Pendientes técnicos abiertos
 
-`Pendiente_pre_produccion.md` consolida los items a cerrar antes de TEST/PROD:
+**Items cerrados en Etapa 6D:**
 
-1. **Hardening de validación SQL en funciones write** — agregado durante 6C (W3).
-2. **Horizonte de `vista_disponibilidad` y `vista_calendario` a 120 días** — pendiente histórico (Franco confirmó 120 da margen).
-3. **`vista_ocupacion` devuelve 25 meses en vez de 24** — agregado durante 6C (W7).
-4. **Espacio colgando en concatenación nombre+apellido** — agregado durante 6C (W7).
+| Item | Estado | Bloque que lo cerró |
+|---|---|---|
+| Hardening de validación SQL en funciones write | ✅ Cerrado | H2, H3, H4, H4-bis, H4-ter |
+| Fix `vista_ocupacion` 25→24 meses | ✅ Cerrado | H5 |
+| Espacio colgando en concatenación nombre+apellido | ✅ Cerrado | H6, H6-bis |
+
+**Items pendientes:**
+
+1. **Tests de concurrencia formales** — pendiente (H7 de Etapa 6D).
+2. **Horizonte de `vista_disponibilidad` y `vista_calendario` a 120 días** — pendiente histórico. Hoy hardcoded en 60 días; mover a `configuracion_general` cuando se considere oportuno.
+3. **Validación de tipos inválidos no vacíos** — nuevo, surgido durante hardening. Casos como `id_cabana="abc"` o `fecha_in="no-es-fecha"` siguen rompiendo con error crudo. Fuera del alcance del hardening por strings/whitespace.
+4. **Decisión sobre actualización de schema canónico** — pendiente, se resolverá en H8.
 5. **RLS configurado** — pendiente histórico, decisión postergada hasta tener frontend público.
 6. **Tarifas reales cargadas** — pendiente histórico.
 7. **Feriados productivos cargados** — pendiente histórico.
-8. **Tests de concurrencia formales (Fase 4)** — pendiente histórico, diferido como hardening pre-TEST/PROD.
 
 ---
 
@@ -242,21 +301,24 @@ Implementar el bot diseñado en Etapa 4B usando Claude API + Meta API.
 - **No tiene RLS configurado.** Decisión postergada hasta tener frontend público.
 - **No tiene tarifas reales cargadas.** El seed solo tiene una temporada baseline DEV con multiplicador neutro.
 - **No tiene feriados productivos cargados.**
-- **No tiene tests de concurrencia formales completos.**
+- **No tiene tests de concurrencia formales completos.** Pendiente en H7 de Etapa 6D.
 - **No tiene entorno TEST levantado.** DEV es el único ambiente operativo.
 - **No tiene consumidores reales conectados.** Webhook MP, bot conversacional y frontend son etapas futuras.
+- **No tiene schema canónico actualizado a v1.7.2.** DEV ya está en v1.7.2 (hardening), pero el documento `6B_SCHEMA_SQL.md` sigue en v1.7.1. Decisión diferida a H8.
 
 ---
 
 ## Documentación viva del proyecto
 
-- `6B_SCHEMA_SQL.md v1.7.1` — schema canónico SQL.
-- `6B_PLAN_FASES.md` — plan ejecutado, conservado como referencia.
+- `6B_SCHEMA_SQL.md v1.7.1` — schema canónico SQL (DEV está en v1.7.2; actualización diferida a H8).
+- `6B_PLAN_FASES.md` — plan ejecutado, conservado como referencia. Sección 6.8 es fuente para H7.
 - `ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md` — arquitectura consolidada de migración.
 - `6C_CIERRE.md` — documento formal de cierre de etapa 6C.
 - `Docs/Bitacora/6B_EJECUCION_DEV.md` — bitácora bloque por bloque de 6B.
 - `Docs/Bitacora/6C_EJECUCION.md` — bitácora workflow por workflow de 6C.
-- `Docs/Operacional/Lecciones_Aprendidas.md` — gotchas operativos (incluye L-6C-01 a L-6C-09).
-- `Pendiente_pre_produccion.md` — pendientes de deploy productivo.
+- `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` — bitácora bloque por bloque de Etapa 6D (H1-H6-bis cerrados; H7-H8 pendientes).
+- `Docs/Operacional/Lecciones_Aprendidas.md` — gotchas operativos (incluye L-6C-01 a L-6C-09 + nuevas lecciones de hardening pendientes de agregar).
+- `Pendiente_pre_produccion.md` — pendientes de deploy productivo (items A1-A3 marcados como cerrados; A4 pendiente).
+- `DECISIONES_NO_REABRIR.md` — decisiones cerradas no reabribles (incluye decisiones de hardening pendientes de agregar).
 - Documentos de arquitectura de Etapas 1-5 (referencia histórica).
 - `Workflows/n8n/supabase/*.template.json` — 8 templates sanitizados de 6C.
