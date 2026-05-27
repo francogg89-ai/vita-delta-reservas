@@ -2,7 +2,7 @@
 
 **Etapa:** Opción A — Hardening pre-producción de Vita Delta Reservas
 **Fecha de apertura:** 2026-05-26
-**Estado:** En curso
+**Estado:** H1-H7 cerrados ✅ · H8 en curso (Frente A cerrado el 2026-05-27; Frente B en curso)
 **Documento canónico de referencia:** este archivo.
 
 ## Resumen ejecutivo
@@ -1083,7 +1083,7 @@ nombre + apellido, no requieren fix.
 ## H7 — Tests de concurrencia
 
 **Fecha de apertura:** 2026-05-27
-**Estado:** En curso (C-1 cerrado; C-2, C-5, C-3, C-4, C-6 pendientes)
+**Estado:** Cerrado ✅ (6/6 tests aprobados: C-1, C-2, C-5, C-3, C-4, C-6)
 **Objeto del bloque:** validar empíricamente bajo concurrencia real las funciones write críticas y la invariante de locks v1.5.
 **Schema:** v1.7.2 (sin cambios en H7 — los tests son de validación, no modifican funciones)
 
@@ -1579,5 +1579,5 @@ Acumulados durante H7:
 Sin cambios estructurales. H7 fue test de validación, no modificó funciones ni vistas. DEV permanece en v1.7.2 (bumped en H2-H6-bis).
 
 **H7 cerrado ✅**
-
-**Etapa 6D — H1 a H7 cerrados. Solo queda H8.**
+**H8 cerrado ✅**
+**Etapa 6D cerrada ✅**
