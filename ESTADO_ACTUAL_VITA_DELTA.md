@@ -55,7 +55,7 @@ El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV compl
 ### Etapa 6B — Migración a Supabase ✅ Cerrada (diseño + implementación)
 - Schema completo en PostgreSQL.
 - Plan de fases de ejecución.
-- Schema canónico de referencia: `6B_SCHEMA_SQL.md v1.7.1` (DEV está en v1.7.2 con hardening; ver sección "Schema canónico actual" abajo).
+- Schema canónico de referencia: `6B_SCHEMA_SQL.md v1.7.2` (bump documental ejecutado en H8 Frente A; ver sección "Schema canónico actual" abajo).
 
 ### Etapa 6C — Reescritura de workflows n8n contra Supabase DEV ✅ Cerrada
 - 8 workflows manuales operativos en DEV.
@@ -126,7 +126,7 @@ Implementa la regla operativa de check-out dominical a las 16:00 (por última la
 
 Actualización de `obtener_disponibilidad_rango()` para aplicar el CASE de domingo en `hora_checkout_base`. Ejecutado con `CREATE OR REPLACE FUNCTION` sin pop-up destructivo. 5 verificaciones OK post-deploy.
 
-**Nota histórica:** al cierre de esta alineación, DEV quedó 100% alineado con schema canónico v1.7.1. Posteriormente, durante Etapa 6D, DEV avanzó a v1.7.2 con la aplicación del hardening H2-H6-bis. La actualización del schema canónico a v1.7.2 queda diferida a H8.
+**Nota histórica:** al cierre de esta alineación, DEV quedó 100% alineado con schema canónico v1.7.1. Posteriormente, durante Etapa 6D, DEV avanzó a v1.7.2 con la aplicación del hardening H2-H6-bis. La actualización del schema canónico a v1.7.2 se ejecutó posteriormente en H8 Frente A.
 
 Documentación: `BITACORA_ENTRADA_CIERRE_6B_v1.7.1.md`.
 
@@ -161,9 +161,9 @@ Excepción: W7 incorpora nodo IF para ramificación de validación temprana.
 
 **Documento de cierre formal:** `6C_CIERRE.md`.
 
-### Etapa 6D — Hardening pre-producción 🚧 En curso
+### Etapa 6D — Hardening pre-producción 🚧 H1-H7 cerrados · H8 en curso
 
-**Sesión 2026-05-26.** Cierre del frente estructural (H1-H6-bis); pendiente concurrencia (H7) y cierre documental (H8).
+**Sesiones 2026-05-26 y 2026-05-27.** Cerrado el frente estructural (H1-H6-bis) y la validación de concurrencia (H7); pendiente cierre documental (H8).
 
 **Bloques cerrados:**
 
@@ -181,7 +181,7 @@ Excepción: W7 incorpora nodo IF para ramificación de validación temprana.
 | H7 | Tests de concurrencia C-1, C-2, C-5, C-3, C-4, C-6 | 6/6 |
 
 **Resumen:**
-- 5 funciones write con patrón `NULLIF(TRIM(...),'')` aplicado a 56 asignaciones totales.
+- 5 funciones write con patrón `NULLIF(TRIM(...),'')` aplicado en sus extracts de payload.
 - 4 vistas corregidas (1 de rango, 3 cosméticas).
 - 101 tests de hardening estructural con `ok=true`.
 - 6 tests de concurrencia real en DEV, todos aprobados (sin deadlocks, sin races, sin doble booking).
@@ -219,7 +219,7 @@ Conteos idénticos al baseline pre-H7 — confirma cero side effects persistente
 
 ## Estado histórico de DEV al cierre de 6C
 
-**Este estado es histórico. No refleja el estado actual post-limpieza y post-hardening.** La fuente vigente es la sección anterior ("Estado actual de DEV al cierre de H6-bis").
+**Este estado es histórico. No refleja el estado actual post-limpieza y post-hardening.** La fuente vigente es la sección anterior ("Estado actual de DEV al cierre de H7").
 
 | Recurso | ID | Estado |
 |---|---|---|
@@ -237,32 +237,26 @@ Conteos idénticos al baseline pre-H7 — confirma cero side effects persistente
 
 ## Schema canónico actual
 
-**Schema canónico documentado:** `6B_SCHEMA_SQL.md v1.7.1`.
+**Schema canónico vigente:** `6B_SCHEMA_SQL.md v1.7.2`. El documento refleja el estado real de DEV post-hardening H2-H6-bis y post-validación H7, con hallazgos menores gestionados como pendientes pre-TEST/PROD.
 
-**Estado real de DEV:** v1.7.2, con hardening H2-H6-bis aplicado sobre v1.7.1. H7 no introdujo cambios estructurales.
+**Backup histórico:** `Docs/Implementacion/Archivados/6B_SCHEMA_SQL_v1.7.1_PRE_HARDENING.md` con banner explícito de archivo no canónico, conservado para auditoría/rollback.
 
-**La actualización del schema canónico a v1.7.2 queda diferida a H8.** **Decisión preliminar:** actualizar completo `6B_SCHEMA_SQL.md` a v1.7.2 como schema canónico vigente, conservando backup versionado de v1.7.1 para auditoría/rollback. Plan:
+El bump v1.7.2 reflejó documentalmente el estado real de DEV post-hardening H2-H6-bis aplicado durante Etapa 6D. H7 (tests de concurrencia) no introdujo cambios SQL. El bump se ejecutó en H8 Frente A vía snapshots read-only contra DEV (`pg_get_functiondef`, `pg_get_viewdef`) y edición in-place quirúrgica del canónico.
 
-1. Backup/versionado del actual v1.7.1 antes de modificarlo:
-   - idealmente commit/tag en Git;
-   - opcionalmente copia archivada tipo `Docs/Implementacion/Archivados/6B_SCHEMA_SQL_v1.7.1_PRE_HARDENING.md`.
-2. Actualizar `6B_SCHEMA_SQL.md` a v1.7.2 reflejando DEV real post-H6-bis y H7.
-3. Agregar changelog v1.7.1 → v1.7.2:
-   - H2-H4-ter: hardening de 5 funciones write (`NULLIF(TRIM(...),'')`).
-   - H5: fix `vista_ocupacion` (rango 25 → 24 meses).
-   - H6/H6-bis: TRIM en vistas con concatenación nombre + apellido.
-   - H7: tests de concurrencia aprobados, sin cambios SQL.
-   - 101 tests estructurales + 6 tests de concurrencia aprobados.
-4. Para funciones y vistas, no reconstruir desde memoria ni desde el viejo canónico: usar cuerpos reales de DEV (`pg_get_functiondef`, `pg_get_viewdef`) o los bloques ya documentados en la bitácora.
+**Lo que el bump v1.7.2 documentó:**
 
-**Esta decisión no crea schema paralelo que compita como fuente de verdad. El canónico actualizado pasa a reflejar DEV real.**
+1. Patrón defensivo `NULLIF(TRIM(...), '')` en los extracts de payload de las 5 funciones write críticas (`registrar_pago`, `confirmar_reserva`, `crear_prereserva`, `cancelar_prereserva`, `crear_bloqueo`).
+2. Fix de rango en `vista_ocupacion` (24 meses exactos).
+3. Fix cosmético de `TRIM` en concatenación nombre + apellido en `vista_calendario`, `vista_limpieza_semana` y `vista_prereservas_activas`.
+4. Correcciones documentales de alineación con DEV real: `registrar_pago` log explícito con `COALESCE(v_validado_por, 'registrar_pago')` y cast `::nivel_log_enum`; `confirmar_reserva` retorna `error='estado_invalido'` con campo `estado_actual`; `crear_prereserva` declara `v_ninos BOOLEAN`.
+5. Forma persistida de las vistas adoptada (`pg_get_viewdef()`) para garantizar match byte-exacto contra DEV.
 
-**Divergencias conocidas entre schema canónico v1.7.1 y DEV real (descubiertas durante hardening):**
-1. `registrar_pago`: líneas de log con `COALESCE(v_validado_por, 'registrar_pago')` y cast `::nivel_log_enum` explícito, no documentados en schema canónico.
-2. `crear_prereserva`: `canal_pago_esperado` es opcional en DEV pero el schema canónico lo describía como obligatorio.
-3. `crear_prereserva`: `v_ninos` es BOOLEAN en DEV pero el schema canónico lo declaraba TEXT.
+**Hallazgos no resueltos documentados en el changelog v1.7.2** (gestionados como pendientes livianos pre-TEST/PROD, ver `Pendiente_pre_produccion.md`):
 
-Estas divergencias se corrigen en el bump a v1.7.2 durante H8.
+- Alineación de tipo `ninos` entre función (BOOLEAN) y columnas (TEXT).
+- Contrato de `canal_pago_esperado`: el extract aplica el patrón canónico, pero la columna `pre_reservas.canal_pago_esperado` continúa siendo `TEXT NOT NULL`.
+
+**El canónico v1.7.2 no crea schema paralelo. Es la única fuente de verdad documental del schema.**
 
 ---
 
@@ -295,16 +289,16 @@ Replicar DEV en un proyecto Supabase separado para integrar consumidores reales 
 | Fix `vista_ocupacion` 25→24 meses | ✅ Cerrado | H5 |
 | Espacio colgando en concatenación nombre+apellido | ✅ Cerrado | H6, H6-bis |
 | Tests de concurrencia C-1 a C-6 | ✅ Cerrado | H7 |
+| Bump documental del schema canónico a v1.7.2 | ✅ Cerrado | H8 Frente A |
 
 **Items pendientes:**
 
 1. **Horizonte de `vista_disponibilidad` y `vista_calendario` a 120 días** — pendiente histórico. Hoy hardcoded en 60 días; mover a `configuracion_general` cuando se considere oportuno.
 2. **Validación de tipos inválidos no vacíos** — surgido durante hardening. Casos como `id_cabana="abc"` o `fecha_in="no-es-fecha"` siguen rompiendo con error crudo. Fuera del alcance del hardening por strings/whitespace.
-3. **Bump documental del schema canónico a v1.7.2** — pendiente, se ejecutará en H8. Decisión preliminar: actualizar completo `6B_SCHEMA_SQL.md` con backup versionado de v1.7.1 (ver sección "Schema canónico actual").
-4. **Cobertura empírica de ramas `pre_lock` y `unique_violation` de idempotencia** — opcional, no bloqueante. H7 observó empíricamente la rama `post_lock` en C-6. Las otras dos ramas están vigentes en el cuerpo de `crear_prereserva` y son alcanzables por diseño, pero no fueron gatilladas en H7 por timing del test. Queda como cobertura opcional pre-PROD si se considera necesario.
-5. **RLS configurado** — pendiente histórico, decisión postergada hasta tener frontend público.
-6. **Tarifas reales cargadas** — pendiente histórico.
-7. **Feriados productivos cargados** — pendiente histórico.
+3. **Cobertura empírica de ramas `pre_lock` y `unique_violation` de idempotencia** — opcional, no bloqueante. H7 observó empíricamente la rama `post_lock` en C-6. Las otras dos ramas están vigentes en el cuerpo de `crear_prereserva` y son alcanzables por diseño, pero no fueron gatilladas en H7 por timing del test. Queda como cobertura opcional pre-PROD si se considera necesario.
+4. **RLS configurado** — pendiente histórico, decisión postergada hasta tener frontend público.
+5. **Tarifas reales cargadas** — pendiente histórico.
+6. **Feriados productivos cargados** — pendiente histórico.
 
 ---
 
@@ -318,19 +312,18 @@ Replicar DEV en un proyecto Supabase separado para integrar consumidores reales 
 - **No tiene cobertura exhaustiva de todos los caminos internos posibles.** H7 validó los escenarios críticos de concurrencia (6 tests aprobados); algunas ramas internas defensivas quedan como cobertura opcional no bloqueante.
 - **No tiene entorno TEST levantado.** DEV es el único ambiente operativo.
 - **No tiene consumidores reales conectados.** Webhook MP, bot conversacional y frontend son etapas futuras.
-- **No tiene schema canónico actualizado a v1.7.2.** DEV ya está en v1.7.2 (hardening), pero el documento `6B_SCHEMA_SQL.md` sigue en v1.7.1. Decisión diferida a H8.
 
 ---
 
 ## Documentación viva del proyecto
 
-- `6B_SCHEMA_SQL.md v1.7.1` — schema canónico SQL (DEV está en v1.7.2; actualización diferida a H8).
+- `6B_SCHEMA_SQL.md v1.7.2` — schema canónico SQL vigente. Backup histórico en `Docs/Implementacion/Archivados/6B_SCHEMA_SQL_v1.7.1_PRE_HARDENING.md`.
 - `6B_PLAN_FASES.md` — plan ejecutado, conservado como referencia. Sección 6.8 es fuente para H7.
 - `ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md` — arquitectura consolidada de migración.
 - `6C_CIERRE.md` — documento formal de cierre de etapa 6C.
 - `Docs/Bitacora/6B_EJECUCION_DEV.md` — bitácora bloque por bloque de 6B.
 - `Docs/Bitacora/6C_EJECUCION.md` — bitácora workflow por workflow de 6C.
-- `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` — bitácora bloque por bloque de Etapa 6D (H1-H6-bis cerrados; H7-H8 pendientes).
+- `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` — bitácora bloque por bloque de Etapa 6D (H1-H7 cerrados; H8 en curso).
 - `Docs/Operacional/Lecciones_Aprendidas.md` — gotchas operativos (incluye L-6C-01 a L-6C-09 + nuevas lecciones de hardening pendientes de agregar).
 - `Pendiente_pre_produccion.md` — pendientes de deploy productivo (items A1-A3 marcados como cerrados; A4 pendiente).
 - `DECISIONES_NO_REABRIR.md` — decisiones cerradas no reabribles (incluye decisiones de hardening pendientes de agregar).
