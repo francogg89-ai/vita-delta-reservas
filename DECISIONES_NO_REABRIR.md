@@ -195,9 +195,13 @@ Verificado en 8 workflows consecutivos. **NO saltar pasos:**
 - **`Always Output Data: ON`** es obligatorio (L-6C-04: resultados vacíos detienen el flujo sin esto).
 - **No requiere `Max Concurrency = 1`** porque PostgreSQL serializa con advisory locks. A diferencia de los workflows legacy contra Sheets.
 
-## Hardening pre-producción (Etapa 6D — H1-H6-bis cerrados)
+## Hardening pre-producción (Etapa 6D — H1-H7 cerrados)
 
-Las siguientes decisiones quedaron firmes durante la sesión 2026-05-26 (bloques H1 a H6-bis del hardening estructural). **NO REABRIR sin justificación crítica.**
+Las siguientes decisiones quedaron firmes durante las sesiones del hardening pre-producción:
+- H1 a H6-bis (sesión 2026-05-26, hardening estructural): D-HARD-01 a D-HARD-06.
+- H7 (sesión 2026-05-27, tests de concurrencia): D-HARD-07 a D-HARD-11.
+
+**NO REABRIR sin justificación crítica.**
 Bitácora detallada: `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md`.
 
 ### D-HARD-01 — Patrón canónico de extract defensivo
@@ -251,6 +255,71 @@ Razón: al abrir H6, DEV ya tenía `apellido = NULL` en los 2 huéspedes existen
 
 **No reabrir.** Si en el futuro se detectan huéspedes con `apellido = ''` o whitespace en DEV/TEST/PROD, ejecutar un UPDATE puntual con `WHERE TRIM(apellido) = ''`, pero no es necesario como parte de un plan de hardening estructural.
 
+### D-HARD-07 — Nomenclatura de tests de concurrencia H7 consolidada
+
+Los 6 tests de concurrencia ejecutados en H7 mantienen una nomenclatura mixta consolidada, no se renombran:
+
+- **C-1 a C-4:** versión consolidada documentada en `Pendiente_pre_produccion.md` Sección 6.1 (vigente al iniciar H7).
+  - C-1: `crear_prereserva` + `crear_bloqueo total`.
+  - C-2: `cancelar_prereserva` + `crear_bloqueo total`.
+  - C-3: `confirmar_reserva` + `crear_bloqueo específico`.
+  - C-4: doble `confirmar_reserva` sobre la misma pre-reserva.
+- **C-5 y C-6:** legacy del plan original 6B Sección 6.8, agregados como complementarios para no perder cobertura histórica.
+  - C-5: `confirmar_reserva` + `cancelar_prereserva` (regresión del deadlock pre-v1.5).
+  - C-6: doble `crear_prereserva` con misma `idempotency_key`.
+
+Orden de ejecución en H7: C-1 → C-2 → C-5 → C-3 → C-4 → C-6. Frenos especiales (`40P01` en C-5 bloqueaba C-3/C-4/C-6; `40P01` en C-3 bloqueaba C-4/C-6) no se activaron.
+
+**No reabrir.** Si en el futuro se vuelven a ejecutar tests de concurrencia (en TEST o post-cambios estructurales), mantener esta nomenclatura. No renombrar a "C-3 ↔ C-5" para "alinear con el plan original".
+
+### D-HARD-08 — Convención `source_event` para tests de concurrencia
+
+Todos los recursos creados en H7 usan `source_event` con el prefijo:
+
+```
+test_H7_C{N}_{ROL}
+```
+
+Donde `{N}` ∈ `{1, 2, 3, 4, 5, 6}` y `{ROL}` ∈ `{A, B, FIXTURE, FIXTURE_PR, FIXTURE_PAGO}`. Ejemplos: `test_H7_C1_A`, `test_H7_C5_FIXTURE_PR`, `test_H7_C5_FIXTURE_PAGO`.
+
+**Cleanup por test con prefijo específico** (`LIKE 'test_H7_C{N}_%'`), no cleanup global al final de la sesión. Reduce contaminación si un test rompe a mitad de camino.
+
+**No reabrir.** Para futuras sesiones de concurrencia (TEST, repetir H7, agregar tests nuevos), mantener el mismo patrón pero variando el nombre de la sesión (`test_TEST_C{N}_{ROL}`, `test_H7r_C{N}_{ROL}`, etc.).
+
+### D-HARD-09 — Mecánica de paralelismo para tests con `pg_sleep`
+
+Para tests de concurrencia con `pg_sleep` largo en una transacción y otra lanzada poco después, la mecánica aprobada es:
+
+1. **Dos tabs separadas del navegador** (no la opción "+" interna del SQL Editor que comparte runner cliente).
+2. **Mini-test de validación previo** con `pg_sleep(5)` simultáneo en ambas tabs, verificando PIDs distintos y solapamiento temporal.
+3. **CTEs encadenadas con `MATERIALIZED` + `FROM cte_anterior`** para garantizar orden de ejecución dentro de cada tab.
+4. **`clock_timestamp()` y `pg_backend_pid()`** dentro de las CTEs para captura empírica de inicio/fin/PID y reporte en una sola fila del último SELECT.
+
+Validado empíricamente durante H7. PIDs siempre distintos entre tabs (rango observado: 359653-378629). Lock global serializó consistentemente con `B.elapsed` entre 6.058s y 6.539s.
+
+**No reabrir.** Si por algún motivo dos tabs del navegador no logran paralelismo (versión nueva de Supabase, restricción de sesión, etc.), las alternativas ordenadas son: ventana incógnita o segundo navegador → `psql` local contra el pooler → mover Tab B a un workflow n8n manual (A queda en SQL Editor). Validar siempre con mini-test previo.
+
+### D-HARD-10 — Cobertura empírica parcial de ramas de idempotencia es aceptable
+
+C-6 de H7 observó empíricamente la rama `post_lock` del detector de idempotencia de `crear_prereserva` (sección 5.bis del cuerpo). Las otras dos ramas (`pre_lock` y `unique_violation`, secciones 3 y 9 respectivamente) están vigentes en el cuerpo de la función y son alcanzables por diseño, pero **no fueron gatilladas en H7** por el timing del test (B llegó al pre-check antes del COMMIT de A, no después).
+
+**Decisión:** la cobertura parcial es aceptable y no bloqueante para avanzar a TEST o a integraciones reales. Las 3 ramas están presentes en el cuerpo de la función y validadas estáticamente. La rama `post_lock` queda validada empíricamente bajo concurrencia real.
+
+**No reabrir.** Si en el futuro se considera necesario gatillar empíricamente `pre_lock` o `unique_violation`, queda documentado como item opcional pre-PROD en `Pendiente_pre_produccion.md` Sección 6.3. No es regresión ni bug abierto.
+
+### D-HARD-11 — Freno duro ante `40P01` en cualquier test de concurrencia
+
+Cualquier aparición de `40P01 (deadlock_detected)` en una sesión de tests de concurrencia es **señal de regresión estructural**, no de "mala suerte" ni de un caso edge tolerable. La política aprobada es **freno duro sin reintento**.
+
+Frenos especiales adicionales documentados en H7 (no activados):
+
+- `40P01` en C-5 (regresión v1.5) bloquea C-3, C-4, C-6.
+- `40P01` en C-3 (lock global + lock por cabaña combinados) bloquea C-4, C-6.
+
+Razón: la corrección estructural v1.5 (lock global SIEMPRE primero, antes de FOR UPDATE / lock por cabaña / table-level) elimina la posibilidad de deadlock cruzado. Si aparece `40P01`, una de las funciones involucradas violó la invariante de orden — eso no se resuelve reintentando, se resuelve auditando el cuerpo de la función.
+
+**No reabrir.** Mantener la política. No agregar reintentos automáticos ni tolerancia a deadlocks en workflows n8n o en código de cliente.
+
 ## Decisiones aprobadas con código de referencia
 
 - **D3** — Mantener solo `hora_checkin` y `hora_checkout` en tablas (sin "hora base" vs "hora real").
@@ -273,13 +342,17 @@ Reglas firmes derivadas de la ejecución de la Etapa 6C. Detalle completo en `Le
 
 ## Lecciones operativas hardening consolidadas (L-6D-XX)
 
-Reglas firmes derivadas de la ejecución de la Etapa 6D (bloques H1-H6-bis). Detalle completo en `Lecciones_Aprendidas.md`.
+Reglas firmes derivadas de la ejecución de la Etapa 6D (bloques H1-H7). Detalle completo en `Lecciones_Aprendidas.md`.
 
 - **L-6D-01:** Schema canónico no es fuente de verdad para cuerpos reales. Snapshot con `pg_get_functiondef`/`pg_get_viewdef` antes de proponer cambios.
 - **L-6D-02:** PostgreSQL normaliza expresiones al persistir vistas y funciones (`TRIM(x)` → `TRIM(BOTH FROM x)`, `'12 months'` → `'1 year'`, `'1 month'` → `'1 mon'`).
 - **L-6D-03:** Patrón canónico de extract defensivo para funciones write: `NULLIF(TRIM(payload->>'campo'), '')::TIPO`.
 - **L-6D-04:** Tests no destructivos deben identificar la frontera antes de la primera escritura. En funciones con operaciones tempranas en tablas (ej. `crear_prereserva` → `upsert_huesped` en paso 4), la frontera es la última validación antes de esa escritura.
 - **L-6D-05:** Antes de `CREATE OR REPLACE VIEW`, verificar dependencias con `pg_depend` + `pg_rewrite` y no cambiar estructura de columnas (nombres, tipos, orden).
+- **L-6D-06:** Mecánica para tests de concurrencia en SQL Editor de Supabase: dos tabs separadas del navegador + mini-test de PIDs previo + CTEs encadenadas con `MATERIALIZED` + `FROM`.
+- **L-6D-07:** Contrato real de `registrar_pago` para pago `confirmado` directo: `estado_inicial='confirmado'` + `monto_recibido=monto_esperado` + pre-reserva activa. Campo de referencia es `referencia_externa`, no `referencia`. `modificado_por` del log = `COALESCE(validado_por, 'registrar_pago')`.
+- **L-6D-08:** Trigger `trg_log_*_estado` solo dispara en `AFTER UPDATE OF estado`, no en INSERT ni en UPDATE de otras columnas. Conteo esperado de logs depende de transiciones de estado, no de UPDATE genéricos.
+- **L-6D-09:** Naming real confirmado empíricamente en DEV: `cabanas.capacidad_max`, `bloqueos.activo` BOOLEAN, error `estado_invalido` en `confirmar_reserva` con estado terminal, `telefono_normalizado` preserva `+`, payload de pago usa `referencia_externa`.
 
 ## Prototipos legacy
 

@@ -500,3 +500,163 @@ ORDER BY dependent_obj.relname;
 **Validado empíricamente durante 6D:** las 4 vistas modificadas (`vista_ocupacion`, `vista_calendario`, `vista_limpieza_semana`, `vista_prereservas_activas`) tenían 0 dependientes según esta query. `CREATE OR REPLACE VIEW` fue seguro en todos los casos.
 
 **Descubierto:** 2026-05-26, durante H5 (preparación de fix de `vista_ocupacion`).
+
+---
+
+## Lecciones del Hardening — Etapa 6D (continuación: H7)
+
+Estas lecciones surgieron durante la sesión 2026-05-27 (bloque H7 del hardening — tests de concurrencia C-1 a C-6). Aplican al diseño y ejecución de tests de concurrencia, y al uso correcto del contrato real de funciones write secundarias. Bitácora detallada: `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` sección H7.
+
+### L-6D-06 — Mecánica operativa para tests de concurrencia en Supabase SQL Editor
+
+**Cuándo aplica:** al ejecutar tests que requieren dos conexiones SQL independientes corriendo en paralelo (típicamente con `pg_sleep` en una y otra lanzada poco después), donde el objetivo es validar locks, serialización o detección de race conditions.
+
+**Detalle:** el SQL Editor de Supabase no permite por defecto ejecutar dos queries simultáneamente desde la misma sesión de navegador. El botón "+" interno del editor que abre "New Query" comparte un único runner del lado del cliente; el segundo Run queda en cola hasta que el primero termina. Esto invalida la mecánica del plan original "abrir dos pestañas SQL Editor" cuando hay `pg_sleep` largo en una de ellas.
+
+**Solución validada empíricamente:** abrir **dos tabs separadas del navegador**, cada una con su propio `https://supabase.com/...` cargado. Cada tab mantiene su propia conexión WebSocket al backend, lo que permite paralelismo real. Confirmado en H7 con PIDs distintos en ambas tabs (`pg_backend_pid()` retorna IDs diferentes) y solapamiento temporal de ejecución.
+
+**Mini-test de validación previo a cualquier sesión crítica:**
+
+```sql
+-- Ejecutar simultáneo en dos tabs distintas
+WITH
+inicio AS MATERIALIZED (
+  SELECT clock_timestamp() AS ts_inicio, pg_backend_pid() AS pid
+),
+sleep AS MATERIALIZED (
+  SELECT pg_sleep(5) AS done
+)
+SELECT
+  inicio.pid,
+  inicio.ts_inicio,
+  clock_timestamp() AS ts_fin,
+  clock_timestamp() - inicio.ts_inicio AS elapsed
+FROM inicio, sleep;
+```
+
+Si ambas tabs devuelven `elapsed ≈ 5s` con PIDs distintos y los rangos de `ts_inicio` y `ts_fin` se solapan, hay paralelismo real. Si una tab termina ~10s después de la otra, no hay paralelismo y la mecánica no sirve.
+
+**CTEs encadenadas con `MATERIALIZED` quedan como patrón aprobado para estos tests.** Para garantizar orden de ejecución dentro de cada tab cuando hay `pg_sleep` en transacción, las CTEs deben tener dependencias explícitas (`FROM cte_anterior`), no solo `MATERIALIZED`. El optimizador puede reordenar CTEs independientes; con `FROM` explícito no puede.
+
+Patrón aplicado en H7 a partir de C-2:
+
+```sql
+BEGIN;
+WITH
+t_pre AS MATERIALIZED (
+  SELECT clock_timestamp() AS ts_pre, pg_backend_pid() AS pid
+),
+ejecucion AS MATERIALIZED (
+  SELECT t_pre.ts_pre, t_pre.pid, mi_funcion(...) AS resultado
+  FROM t_pre
+),
+sleep AS MATERIALIZED (
+  SELECT ejecucion.ts_pre, ejecucion.pid, ejecucion.resultado,
+         pg_sleep(8) AS done
+  FROM ejecucion
+)
+SELECT ... FROM sleep;
+COMMIT;
+```
+
+**Output unificado en una sola fila.** Supabase SQL Editor muestra solo el resultado del último SELECT (regla operativa documentada en sección anterior). Con el patrón de arriba, toda la información del test (timestamps, PID, JSON de retorno, elapsed) cabe en una sola fila del último SELECT, sin perder evidencia.
+
+**Alternativa si dos tabs no logran paralelismo:** ventana incógnita o segundo navegador (cada uno con sesión separada), o `psql` local contra el pooler de Supabase. Validar siempre primero con el mini-test antes de empezar tests críticos.
+
+**Descubierto:** 2026-05-27, durante el intento fallido de C-1 (botón "+" interno serializó ambas pestañas) y resuelto inmediatamente con dos tabs del navegador (PIDs 359653 vs 359654, solapamiento confirmado).
+
+---
+
+### L-6D-07 — Contrato real de `registrar_pago` para producir pago `confirmado` directo
+
+**Cuándo aplica:** al construir fixtures multipaso que requieren pre-reserva con pago confirmado asociado, por ejemplo para tests de `confirmar_reserva` por camino estricto.
+
+**Detalle:** `registrar_pago` por defecto inserta pagos en estado `en_revision`. Para que un pago quede `confirmado` directo en el INSERT (sin requerir confirmación manual posterior), el payload debe cumplir simultáneamente:
+
+1. `estado_inicial = 'confirmado'` (explícito en el payload).
+2. `monto_recibido = monto_esperado` (montos coincidentes).
+3. Pre-reserva referenciada debe estar en estado activo (no en estados terminales como `cancelada_por_cliente`, `vencida`, `cancelada_por_bloqueo`, `conflicto_pendiente`).
+
+Si falta `estado_inicial='confirmado'` o los montos no coinciden, el pago cae al flujo `en_revision`. Si la pre-reserva no está activa, la función puede rebotar según validaciones internas.
+
+**`es_automatico=true` por sí solo NO es suficiente.** El flag `es_automatico` se persiste en el INSERT pero no afecta el cálculo de `v_estado_final`. La condición es solamente `estado_inicial='confirmado' AND monto_recibido=monto_esperado`.
+
+**Comportamiento adicional:** `registrar_pago` siempre promueve la pre-reserva de `pendiente_pago` → `pago_en_revision` (sección 6 del cuerpo) cuando la pre-reserva está activa, **independiente del estado final del pago resultante**. Esto significa que un pago `confirmado` directo deja la pre-reserva en `pago_en_revision`, no en un estado nuevo. `confirmar_reserva` acepta `pre.estado IN ('pendiente_pago', 'pago_en_revision')`, así que es funcional.
+
+**Campo correcto del payload:** `referencia_externa`, no `referencia` (este último no es campo válido y se ignora silenciosamente sin error).
+
+**`modificado_por` del log explícito de `registrar_pago`** se calcula como `COALESCE(v_validado_por, 'registrar_pago')`. Si el payload trae `validado_por='X'`, el log queda con `modif_por='X'`. Si no trae `validado_por`, el log queda con `modif_por='registrar_pago'`. Útil para distinguir fixtures de tests reales en auditoría.
+
+**Descubierto:** 2026-05-27, durante el primer intento fallido de C-5 (fixture quedó en `en_revision` porque el payload no traía `estado_inicial='confirmado'`). Diagnóstico tras leer `pg_get_functiondef('registrar_pago(jsonb)')`. Aplicado en re-ejecución de C-5 y en fixtures de C-3 y C-4.
+
+---
+
+### L-6D-08 — Trigger `trg_log_*_estado` solo dispara en UPDATE OF estado
+
+**Cuándo aplica:** al diseñar tests que validan el doble logging documentado en `CLAUDE.md` (trigger automático + log explícito de función), o al estimar el número esperado de logs en `log_cambios` post-test.
+
+**Detalle:** los triggers de logging automático sobre `pre_reservas`, `reservas` y `pagos` están definidos como `AFTER UPDATE OF estado` (no como `AFTER UPDATE` genérico ni como `AFTER INSERT`). Esto significa:
+
+- INSERT no dispara trigger (los logs en INSERT vienen del bloque explícito de la función, no del trigger).
+- UPDATE de cualquier columna que NO sea `estado` no dispara trigger. Ejemplo: el `UPDATE pagos SET id_reserva = ...` que hace `confirmar_reserva` en sección 8 (asociación del pago con la reserva recién creada) NO genera log automático.
+- Solo UPDATE de la columna `estado` específicamente dispara el trigger.
+
+**Confirmación empírica en H7:**
+
+- C-1 (solo INSERT de pre-reserva) → 1 log explícito, 0 logs de trigger.
+- C-2 (INSERT pre-reserva fixture + UPDATE estado pre-reserva por cancelación + INSERT bloqueo) → 4 logs: 1 explícito de fixture + 1 trigger por UPDATE estado + 1 explícito de cancelación + 1 explícito de bloqueo.
+- C-5 (INSERT pre-reserva + INSERT pago + UPDATE estado pre-reserva por pago + UPDATE estado pre-reserva por confirmación + INSERT reserva + UPDATE id_reserva en pago) → 5 logs: 1 explícito pre-reserva + 1 trigger UPDATE pre-reserva (por pago) + 1 explícito pago + 1 trigger UPDATE pre-reserva (por confirmación) + 1 explícito reserva. **El UPDATE de `id_reserva` en pagos NO genera log.**
+
+**Implicación para diseño de tests:** el conteo esperado de logs depende de cuántas transiciones de estado ocurran, no de cuántos UPDATE haya en general. Para estimar logs esperados, contar solamente:
+
+1. Logs explícitos de cada función write involucrada.
+2. UPDATE OF estado en tablas con trigger (`pre_reservas`, `reservas`, `pagos`).
+
+**Tablas SIN trigger automático de estado:** `bloqueos` (su columna de estado es `activo` BOOLEAN, no `estado` enum), `huespedes`, `pagos` en UPDATE de campos distintos a `estado`. Cualquier UPDATE en estas tablas o columnas no genera log automático.
+
+**Descubierto:** 2026-05-27, durante validaciones post-test de C-2 (4 logs, no 3 como inicialmente estimado) y C-5 (5 logs, no 6, porque el UPDATE de id_reserva en pagos no disparó trigger).
+
+---
+
+### L-6D-09 — Naming real de tablas y columnas confirmado empíricamente
+
+**Cuándo aplica:** al diseñar queries de snapshot, validación o cleanup; al estimar expected outputs de funciones write; al armar fixtures multipaso.
+
+**Detalle:** algunos nombres reales del schema DEV difieren de la intuición o de cómo aparecen documentados informalmente. Confirmados empíricamente durante H7:
+
+| Objeto | Naming real | Naming asumido erróneamente |
+|---|---|---|
+| `cabanas.capacidad_max` | columna real | `capacidad_maxima` |
+| `bloqueos.activo` | BOOLEAN | `bloqueos.estado` enum |
+| Error de `confirmar_reserva` con pre-reserva en estado terminal | `estado_invalido` | `estado_no_confirmable` |
+| `huespedes.telefono_normalizado` | preserva el `+` del prefijo internacional | normalización que remueve el `+` |
+| Campo del payload de `registrar_pago` para referencia | `referencia_externa` | `referencia` |
+
+**Implicaciones prácticas:**
+
+- Queries de validación de bloqueos deben usar `activo = TRUE` y `CASE WHEN activo THEN 'activo' ELSE 'inactivo' END`, no `estado::text`. La tabla `bloqueos` no sigue el patrón enum de `reservas` / `pre_reservas` / `pagos`.
+- Cleanup de huéspedes sintéticos debe filtrar por `telefono = '+549...'` (con `+`), no por `telefono_normalizado` sin `+`.
+- Expected del rebote de `confirmar_reserva` cuando la pre-reserva ya está en estado terminal: `error='estado_invalido'`, no `'estado_no_confirmable'` ni `'prereserva_no_confirmable'`.
+- Para tests donde necesites `capacidad_max` (validación de excede_capacidad), usar ese nombre real.
+
+**Para verificar nombres reales antes de diseñar queries:**
+
+```sql
+-- Columnas de una tabla
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name = 'nombre_tabla'
+ORDER BY ordinal_position;
+
+-- Cuerpo real de una función para ver errores que retorna
+SELECT pg_get_functiondef('nombre_funcion(jsonb)'::regprocedure);
+```
+
+**Origen de la divergencia:** algunas de estas diferencias provienen de la evolución natural del schema (decisiones tomadas durante 6B que no quedaron reflejadas uniformemente en la documentación canónica). Otras son convenciones vigentes observadas en DEV (`telefono_normalizado` preserva el `+`; no consta como decisión explícita documentada, pero es el comportamiento real). El bump documental del canónico a v1.7.2 en H8 deberá revisar estos nombres reales y corregir cualquier divergencia documental confirmada.
+
+**Descubierto:** 2026-05-27, durante diferentes momentos de H7:
+- `capacidad_max`: Pieza 2 del snapshot inicial (Franco lo detectó al ajustar la query).
+- `bloqueos.activo`: Pieza 4 del snapshot (error `column b.estado does not exist`).
+- `estado_invalido`: Pieza 5b del snapshot (lectura de `pg_get_functiondef('confirmar_reserva(jsonb)')`).
+- `telefono_normalizado` con `+`: cleanup del primer intento fallido de C-1.
+- `referencia_externa`: lectura de `pg_get_functiondef('registrar_pago(jsonb)')` durante diagnóstico de C-5.
