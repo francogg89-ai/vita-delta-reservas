@@ -3,7 +3,7 @@
 Lista de cambios y configuraciones a aplicar antes del despliegue de
 producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
 
-**Estado del archivo:** actualizado al cierre de H6-bis (sesión 2026-05-26).
+**Estado del archivo:** actualizado al cierre de H7 (sesión 2026-05-27).
 Items cerrados durante Etapa 6D listados en el resumen de abajo; detalle
 histórico de cada uno en el Apéndice al final del documento.
 
@@ -16,10 +16,11 @@ histórico de cada uno en el Apéndice al final del documento.
 | Hardening de validación SQL en funciones write | ✅ Cerrado | H2, H3, H4, H4-bis, H4-ter | A.1 |
 | Fix `vista_ocupacion` (rango 25 → 24 meses) | ✅ Cerrado | H5 | A.2 |
 | Espacio colgando en concatenación nombre + apellido | ✅ Cerrado | H6, H6-bis | A.3 |
+| Tests de concurrencia C-1 a C-6 | ✅ Cerrado | H7 | A.5 |
 
 **Items pendientes activos:** ver secciones 1 a 8 abajo.
 
-**Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H6-bis documentados; H7-H8 pendientes).
+**Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H7 documentados; solo H8 pendiente).
 
 ---
 
@@ -292,57 +293,14 @@ que haya frontend público. n8n con service_role_key no la necesita."
 
 ## 6. Validaciones empíricas pendientes
 
-### 6.1 Tests de concurrencia — H7 de Etapa 6D
+### 6.1 Tests de concurrencia — H7 de Etapa 6D ✅ CERRADO
 
-**Estado:** ⏳ Pendiente. Bloque H7 de Etapa 6D (Hardening pre-producción).
-Fuente: `6B_PLAN_FASES.md` Sección 6.8.
-Ejecución prevista: sesión separada con setup explícito, dos pestañas SQL
-Editor en paralelo, y plan de limpieza dirigida por `source_event`.
+**Estado:** ✅ Cerrado en bloque H7 de Etapa 6D (sesión 2026-05-27).
+**Resultado:** 6 tests de concurrencia real en DEV aprobados (C-1, C-2, C-5, C-3, C-4, C-6). Sin deadlocks, sin races, sin doble booking, sin falsos positivos. Cero side effects persistentes post-cleanup.
 
-**Por qué se difirieron:**
+**Detalle histórico completo:** ver Apéndice A.5 al final de este documento.
 
-1. Durante 6B (implementación de funciones), se priorizó "función compila y
-   se comporta básicamente" para avanzar al siguiente bloque.
-2. Durante 6C (workflows), los tests fueron funcionales end-to-end, no de
-   concurrencia. n8n manual no permite reproducir la condición de carrera
-   con `pg_sleep`.
-3. Operativamente no es bloqueante hasta tener consumidores reales que
-   generen concurrencia (webhook MP, bot multicanal, frontend público).
-
-**Los 4 tests pendientes (según `6B_PLAN_FASES.md` Sección 6.8):**
-
-1. **C-1**: `crear_prereserva` + `crear_bloqueo total` simultáneos sobre el
-   mismo rango — validar que uno gana y el otro rebota con conflicto.
-2. **C-2**: `cancelar_prereserva` + `crear_bloqueo total` simultáneos sobre
-   rango con pre-reserva pre-existente — validar el orden correcto.
-3. **C-3**: `confirmar_reserva` + `crear_bloqueo` simultáneos sobre el rango
-   de la pre-reserva — validar que la pre-reserva se convierte primero y el
-   bloqueo rebota con `conflicto_con_reserva`. **Test crítico** — está en
-   criterios de freno por riesgo histórico de deadlock pre-v1.5.
-4. **C-4**: Doble `confirmar_reserva` simultánea sobre la misma pre-reserva
-   — validar que solo una invocación crea la reserva.
-
-**Setup requerido:**
-
-- Pre-reservas y/o bloqueos creados específicamente para los tests, con
-  `source_event LIKE 'test_C%'`.
-- Patrón con `pg_sleep(8)` en una pestaña y lanzamiento manual de la
-  segunda pestaña a los ~2 segundos.
-- Limpieza al cierre: `DELETE` dirigido por `source_event` para no dejar
-  residuos en DEV.
-
-**Riesgo de no ejecutar antes de TEST/PROD:**
-
-Los locks (`pg_advisory_xact_lock(10, 0)` y `(1, id_cabana::INTEGER)`) están
-implementados en todas las funciones críticas y el `EXCLUDE constraint`
-actúa como red de seguridad estructural. **Lo más probable es que pasen sin
-sorpresas.** Pero un test empírico es la única forma de confirmar que los
-patrones de lock anidado funcionan bajo concurrencia real, no solo en
-aislamiento. Sin estos tests, el primer evento de concurrencia real en
-producción (ej. dos clientes que clickean "reservar" simultáneamente, o
-webhook MP que dispara al mismo tiempo que confirmación manual) sería el
-primer test de concurrencia del sistema. Es preferible que ocurra en DEV
-controlado.
+**Bitácora detallada:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` sección H7.
 
 ### 6.2 Tests de carga real (post-tests-de-concurrencia)
 
@@ -352,9 +310,23 @@ Pendiente histórico. Validar comportamiento del sistema bajo carga real:
 - Webhook MP llegando mientras Vicky confirma manualmente.
 - Cron de expiración corriendo mientras hay pago en proceso.
 
-Estos no reemplazan H7. H7 valida concurrencia controlada con SQL y locks; 6.2 queda como validación posterior de carga/uso real cuando existan consumidores reales conectados.
+Estos no reemplazan H7. H7 validó concurrencia controlada con SQL y locks; 6.2 queda como validación posterior de carga/uso real cuando existan consumidores reales conectados.
 
 **Origen:** plan de Fase 4 según `6B_PLAN_FASES.md`.
+
+### 6.3 Cobertura empírica de ramas `pre_lock` y `unique_violation` de idempotencia
+
+**Estado:** ⏳ Pendiente opcional, no bloqueante.
+
+**Contexto:** C-6 de H7 observó empíricamente la rama `post_lock` del detector de idempotencia de `crear_prereserva`. Las otras dos ramas (`pre_lock` y `unique_violation`) están vigentes en el cuerpo de la función y son alcanzables por diseño, pero no fueron gatilladas en H7 por el timing del test (B llegó al pre-check antes del COMMIT de A).
+
+**Para gatillar `pre_lock`:** lanzar B después del COMMIT de A (sin `pg_sleep` en A o con timing distinto).
+
+**Para gatillar `unique_violation`:** escenario más difícil de reproducir manualmente — requeriría que B pase el pre-check y el double-check post-lock pero choque con la constraint unique en el INSERT. Solo gatillable si ambas transacciones se cruzan dentro de una ventana muy estrecha entre el double-check y el INSERT.
+
+**Decisión:** queda como cobertura opcional pre-PROD si se considera necesario. No bloqueante para avanzar a TEST o a integraciones reales.
+
+**Origen:** observación empírica en C-6 de H7.
 
 ---
 
@@ -424,9 +396,9 @@ MERCADOPAGO_ACCESS_TOKEN=__MERCADOPAGO_ACCESS_TOKEN__
 # Apéndice histórico — items cerrados en Etapa 6D
 
 Esta sección preserva el contexto técnico de los items resueltos durante
-Etapa 6D (Hardening pre-producción), sesión 2026-05-26. Las secciones que
-siguen describen cómo fueron descubiertos los problemas y qué se decidió
-en cada caso. **Para detalle de ejecución, ver `HARDENING_PRE_PRODUCCION_EJECUCION.md`.**
+Etapa 6D (Hardening pre-producción). Las secciones que siguen describen
+cómo fueron descubiertos los problemas y qué se decidió en cada caso.
+**Para detalle de ejecución, ver `HARDENING_PRE_PRODUCCION_EJECUCION.md`.**
 
 ---
 
@@ -607,16 +579,109 @@ casos futuros.
 
 ---
 
-## A.4 [MIGRADO a Sección 6.1] Tests de concurrencia Sección 6.8
+## A.4 [CONSOLIDADO en A.5] Tests de concurrencia Sección 6.8
 
 **Descubierto durante:** preparación del cierre formal post-6C.
 **Fecha de registro:** 2026-05-26.
-**Estado:** ⏳ Pendiente. Migrado y consolidado en **Sección 6.1** de este
-documento. Asignado al bloque H7 de Etapa 6D.
+**Estado:** ✅ Cerrado en H7. Detalle consolidado en **Apéndice A.5**.
 
-Este item NO está cerrado. Se mueve al apéndice porque originalmente
-ocupaba la Sección 10 del archivo y se consolidó con la Sección 6.1 para
-evitar duplicación. El contenido actual está en Sección 6.1.
+Este item originalmente migró desde la Sección 10 del archivo a la
+Sección 6.1 para evitar duplicación. La ejecución se hizo en H7 (sesión
+2026-05-27) con scope ampliado: además de los 4 tests originales del
+plan 6B (C-1 a C-4), se agregaron dos legacy complementarios (C-5
+regresión v1.5 y C-6 idempotencia). El detalle completo de los 6 tests
+ejecutados está en A.5.
 
-**Plan de ejecución:** sesión separada con foco completo en concurrencia
-y limpieza. Decisión tomada al cierre de la sesión 2026-05-26 (H6-bis).
+---
+
+## A.5 [CERRADO en H7] Tests de concurrencia C-1 a C-6
+
+**Descubierto durante:** plan original 6B Sección 6.8 + consolidación
+post-6C en Sección 6.1 + ajuste de nomenclatura al inicio de H7.
+**Fecha de ejecución:** 2026-05-27.
+**Estado:** ✅ Cerrado en bloque H7 de Etapa 6D.
+**Bitácora detallada:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md`
+sección H7.
+
+### Contexto
+
+Los tests de concurrencia con `pg_sleep` se difirieron durante 6B (foco en
+"función compila y se comporta") y durante 6C (n8n manual no permite
+reproducir la condición de carrera con sleep). Operativamente no eran
+bloqueantes hasta tener consumidores reales que generaran concurrencia
+(webhook MP, bot multicanal, frontend público), pero el riesgo de que el
+primer evento de concurrencia real en producción fuera también el primer
+test del sistema motivó ejecutarlos en DEV controlado antes de TEST/PROD.
+
+### Alcance ejecutado
+
+6 tests con paralelismo real en DEV usando dos tabs separadas del
+navegador (no la opción "+" interna del SQL Editor que comparte runner):
+
+| Test | Funciones | Cabaña | Rango | Tipo |
+|---|---|---|---|---|
+| C-1 | `crear_prereserva` + `crear_bloqueo total` | 17 | 2027-03 | Consolidado |
+| C-2 | `cancelar_prereserva` + `crear_bloqueo total` | 18 | 2027-04 | Consolidado |
+| C-5 | `confirmar_reserva` + `cancelar_prereserva` | 19 | 2027-05 | Legacy v1.5 (regresión deadlock) |
+| C-3 | `confirmar_reserva` + `crear_bloqueo específico` | 20 | 2027-06 | Consolidado |
+| C-4 | Doble `confirmar_reserva` | 21 | 2027-07 | Consolidado |
+| C-6 | Doble `crear_prereserva` + `idempotency_key` | 17 | 2027-08 | Legacy idempotencia |
+
+### Resultado
+
+| Métrica | Valor |
+|---|---|
+| Tests aprobados | 6 de 6 |
+| Deadlocks `40P01` | 0 |
+| Races / doble booking / falsos positivos | 0 |
+| Rango de `B.elapsed` | 6.058s a 6.539s (lock global serializa consistentemente) |
+| Residuos `test_H7_%` en DEV post-cleanup | 0 |
+| Schema | Sin cambios (H7 es validación, no modifica SQL) |
+
+### Confirmaciones estructurales
+
+1. **Invariante de locks v1.5 vigente en DEV.** El orden "lock global SIEMPRE primero antes de cualquier FOR UPDATE / lock por cabaña" funciona correctamente bajo concurrencia real.
+2. **Lock global serializa.** `B.elapsed` consistente entre 6.06s y 6.54s, con `B.ts_post ≈ A.ts_post`.
+3. **EXCLUDE constraints no fueron necesarios.** Los chequeos aplicativos rebotaron antes del INSERT en todos los casos.
+4. **Visibilidad post-COMMIT consistente.** B siempre vio los cambios de A después del COMMIT.
+5. **Idempotencia de `crear_prereserva` funcional.** Rama `post_lock` observada empíricamente en C-6.
+6. **Doble logging confirmado en las transiciones de estado observadas durante H7** (trigger automático `trg_log_*_estado` + log explícito de la función cuando aplica).
+
+### Lecciones operativas surgidas en H7
+
+1. SQL Editor "+" interno comparte runner; dos tabs separadas del navegador permiten paralelismo real.
+2. Mini-test de PIDs con `pg_sleep(5)` valida paralelismo antes de tests críticos.
+3. CTEs encadenadas (`MATERIALIZED` + `FROM`) necesarias para tests con `pg_sleep` en transacción.
+4. `registrar_pago` requiere `estado_inicial='confirmado'` + `monto_recibido=monto_esperado` para pago `confirmado` directo (default es `en_revision`).
+5. Trigger `trg_log_*_estado` sobre `pagos` solo dispara en UPDATE OF estado, no en UPDATE de `id_reserva`.
+6. `crear_prereserva` ejecuta `upsert_huesped` antes del lock global; bajo concurrencia con idempotencia, B puede crear huésped huérfano que queda para cleanup.
+7. `bloqueos.activo` BOOLEAN (no enum `estado`) — divergencia de patrón con otras tablas operativas.
+8. `cabanas.capacidad_max` (no `capacidad_maxima`) — naming real confirmado; revisar documentación si corresponde en H8.
+9. `confirmar_reserva` retorna `estado_invalido` cuando estado terminal (no `estado_no_confirmable`).
+10. `telefono_normalizado` preserva el `+` del prefijo internacional.
+
+Estas lecciones se consolidan en `Lecciones_Aprendidas.md` durante H8, agrupadas por tema para no crear entradas redundantes.
+
+### Cobertura parcial documentada
+
+H7 observó empíricamente la rama `post_lock` del detector de idempotencia
+de `crear_prereserva` (C-6). Las ramas `pre_lock` y `unique_violation`
+están vigentes en el cuerpo de la función y son alcanzables por diseño,
+pero no fueron gatilladas en H7 por el timing del test. Queda como
+cobertura opcional no bloqueante (ver Sección 6.3 arriba).
+
+### Decisiones cerradas durante H7
+
+- Mantener nomenclatura consolidada C-1 a C-4 (de este documento) + agregar
+  C-5 y C-6 como complementarios legacy (del plan 6B original), no
+  reemplazar.
+- Convención `source_event = 'test_H7_C{N}_{ROL}'`.
+- Cleanup por test con filtro específico `LIKE 'test_H7_C{N}_%'`, no
+  cleanup global al final.
+- Mecánica de paralelismo: dos tabs del navegador + CTEs encadenadas
+  MATERIALIZED + `clock_timestamp()` + `pg_backend_pid()`.
+- Freno duro ante cualquier `40P01` (frenos especiales en C-5 y C-3 no se
+  activaron).
+
+Estas decisiones se consolidan en `DECISIONES_NO_REABRIR.md` como D-HARD-07
+en adelante durante H8.
