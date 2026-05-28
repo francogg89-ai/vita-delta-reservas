@@ -10,15 +10,15 @@ El proyecto centraliza disponibilidad, pre-reservas, reservas, pagos, bloqueos a
 
 - **Fuente de verdad:** Supabase / PostgreSQL.
 - **Orquestación:** n8n.
-- **Entornos:** DEV operativo + **TEST levantado, paritario y operativo (7B cerrada)**. Schema canónico `v1.7.3`.
-- **Workflows vigentes:** 8 (W0–W7) en `Workflows/n8n/Supabase/`, validados contra DEV en 6C y contra TEST en 7B con cadena end-to-end W2→W3→W4.
-- **Estado:** no productivo. Próximos pasos posibles → validación funcional ampliada sobre TEST, endurecimiento de DEV, diseño de OPS, o integraciones con consumidores reales sobre TEST.
+- **Entornos:** DEV operativo + **TEST levantado, paritario, operativo y validado funcionalmente (7B + 7C cerradas)**. Schema canónico `v1.7.3`.
+- **Workflows vigentes:** 8 (W0–W7) en `Workflows/n8n/Supabase/`, validados contra DEV en 6C, contra TEST en 7B (cadena end-to-end W2→W3→W4) y en 7C (validación funcional ampliada de caminos no-felices, 54 verificaciones conformes).
+- **Estado:** no productivo. Próximos pasos posibles → diseño del bloque de reset de TEST, endurecimiento de DEV, diseño de OPS, o integraciones con consumidores reales sobre TEST.
 
 ---
 
 ## Estado actual del proyecto
 
-**Estado general:** backend Supabase DEV implementado y operativo + entorno TEST levantado como proyecto Supabase independiente, paritario y aislado de DEV (Etapa 7B cerrada). Workflows n8n contra DEV y contra TEST validados, hardening pre-producción cerrado, correcciones pre-TEST/pre-OPS aplicadas (7A), documentación canónica actualizada a `v1.7.3`.
+**Estado general:** backend Supabase DEV implementado y operativo + entorno TEST levantado como proyecto Supabase independiente, paritario y aislado de DEV (Etapa 7B cerrada) y validado funcionalmente de punta a punta en sus caminos no-felices (Etapa 7C cerrada). Workflows n8n contra DEV y contra TEST validados, hardening pre-producción cerrado, correcciones pre-TEST/pre-OPS aplicadas (7A), documentación canónica actualizada a `v1.7.3`.
 
 El proyecto ya superó la etapa de Google Sheets como backend operativo. La fuente de verdad actual es **Supabase / PostgreSQL**.
 
@@ -39,6 +39,7 @@ El proyecto ya superó la etapa de Google Sheets como backend operativo. La fuen
 | 6D    | Hardening pre-producción + cierre documental      | ✅ Cerrada              |
 | 7A    | Correcciones pre-TEST / pre-OPS                   | ✅ Cerrada              |
 | 7B    | Levantamiento del entorno TEST                    | ✅ Cerrada              |
+| 7C    | Validación funcional ampliada sobre TEST          | ✅ Cerrada              |
 
 ---
 
@@ -223,9 +224,30 @@ La Etapa 7B levantó el entorno **TEST** como proyecto Supabase independiente, p
 
 **Aislamiento:** TEST quedó separado por credencial propia, workflows `__TEST` distintos, y marcadores de ambiente en `source_event` (`n8n_test_w0X_..._manual`) e `idempotency_key` (`manual_test_...`) que se persisten en tablas. DEV intacto durante toda la etapa.
 
-**Alcance del cierre:** happy paths como evidencia suficiente. Casos de error (cabaña inexistente, solapamientos, payloads inválidos, etc.) quedan como pendiente: validación funcional ampliada sobre TEST.
+**Alcance del cierre:** happy paths como evidencia suficiente para el levantamiento. Los casos de error (cabaña inexistente, solapamientos, payloads inválidos, etc.) se ejercitaron luego en la Etapa 7C.
 
 **Documento de cierre:** `Docs/Bitacora/7B_CIERRE.md`
+
+---
+
+## Validación funcional ampliada sobre TEST (Etapa 7C)
+
+La Etapa 7C ejecutó la batería sistemática de **caminos no-felices** de los 8 workflows `__TEST` sobre TEST: los casos de error, edge cases, validaciones defensivas y condiciones de borde que 7B dejó fuera de alcance. Donde 7B demostró que el entorno existe y es paritario, 7C demuestra que se comporta como espera bajo casos negativos.
+
+**Resultado:**
+
+- **54 verificaciones conformes:** 48 casos funcionales (Grupo A) + 6 verificaciones transversales (TR-01 persistencia de `source_event`, TR-02 doble logging).
+- **0 fallos inesperados.**
+- **2 comportamientos observados/documentados** (ninguno es defecto): rango invertido en `obtener_disponibilidad_rango` devuelve set vacío (`ok:true, 0 días`), no error; y el bloqueo id 2 generado en A-W6-06 como **mutación no planificada pero válida y comprendida** (el sistema actuó correctamente ante un payload válido).
+- **Idempotencia:** rama `pre_lock` cubierta empíricamente (A-W2-15), sumada a `post_lock` (H7). Resta solo `unique_violation` como cobertura opcional no bloqueante.
+
+**Método:** ejecución manual (Franco edita `Build Input`, ejecuta en n8n contra TEST, pega el output; Claude valida PASS/FAIL contra matriz pre-aprobada). Expected outputs anclados al código SQL real de las funciones, no a supuestos.
+
+**Política de fixtures:** los datos vivos generados (pre-reservas id 3/4, pagos id 2/3, bloqueo id 2, huéspedes id 3/5) se conservan como evidencia (decisión D-7C-01). Cualquier reset de TEST será un bloque separado con SQL aprobado.
+
+**DEV intacto. Schema canónico v1.7.3 sin modificar.** Lecciones L-7C-01 a L-7C-06.
+
+**Documento de cierre:** `Docs/Bitacora/7C_CIERRE.md`
 
 ---
 
@@ -271,9 +293,10 @@ Implementado y validado **en DEV**:
 - hardening pre-producción
 - tests de concurrencia H7
 - documentación canónica `v1.7.3`
-- cierre formal de Etapas 6C, 6D, 7A y 7B
+- cierre formal de Etapas 6C, 6D, 7A, 7B y 7C
 - entorno TEST paritario, operativo y aislado de DEV
 - workflows n8n `__TEST` validados con cadena end-to-end W2→W3→W4
+- validación funcional ampliada de TEST (caminos no-felices): 54 verificaciones conformes, 0 fallos inesperados
 
 ## Qué no está implementado todavía
 
@@ -295,9 +318,9 @@ Todavía no está implementado o no está productivo:
 
 ## Próximos pasos posibles
 
-Con DEV, TEST, 6D, 7A y 7B cerradas, las siguientes son **opciones disponibles** a priorizar (no orden obligatorio):
+Con DEV, TEST, 6D, 7A, 7B y 7C cerradas, las siguientes son **opciones disponibles** a priorizar (orden sugerido):
 
-- **Validación funcional ampliada sobre TEST:** ejecutar la batería de casos de error documentados en `7B_CIERRE.md` sección 14 (cabaña inexistente, solapamientos, doble pre-reserva, re-confirmación, cancelación de estados no cancelables, payloads inválidos, normalización defensiva, pagos tardíos). TEST es el ambiente seguro para ejercitarlos.
+- **Diseño del bloque de limpieza/reset de TEST:** derivado de D-7C-01 (no-limpieza durante 7C) y de la acumulación de fixtures de 7C. SQL explícito y aprobado, sin `DROP ... CASCADE`. Ver `Pendiente_pre_produccion.md` 6.5.
 - **Endurecimiento de permisos en DEV:** aplicar a DEV un modelo equivalente al de TEST (REVOKE EXECUTE a `PUBLIC` sobre las 13 funciones del proyecto). Ver `Pendiente_pre_produccion.md` 1.5.
 - **Diseño del entorno OPS:** operación interna real (Vicky, Franco, Rodrigo, Jennifer) sin consumidores externos automáticos.
 - **Integraciones con consumidores reales sobre TEST:** webhook MercadoPago, bot conversacional, frontend público — siempre sobre TEST primero antes de cualquier consideración productiva.
@@ -313,6 +336,7 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 | Documento                                          | Rol                              |
 | -------------------------------------------------- | -------------------------------- |
 | `Docs/Operacional/ESTADO_ACTUAL_VITA_DELTA.md`     | Estado vigente del proyecto      |
+| `Docs/Bitacora/7C_CIERRE.md`                       | Cierre formal de Etapa 7C        |
 | `Docs/Bitacora/7B_CIERRE.md`                       | Cierre formal de Etapa 7B        |
 | `Docs/Bitacora/7A_CIERRE.md`                       | Cierre formal de Etapa 7A        |
 | `Docs/Bitacora/6D_CIERRE.md`                       | Cierre formal de Etapa 6D        |
@@ -386,16 +410,17 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 │   │   ├── 6D_CIERRE.md
 │   │   ├── 7A_CIERRE.md                              ← cierre Etapa 7A
 │   │   ├── 7B_CIERRE.md                              ← cierre Etapa 7B
+│   │   ├── 7C_CIERRE.md                              ← cierre Etapa 7C
 │   │   ├── 7A_DOCUMENTACION_PENDIENTE.md             ← working note (absorbida, archivable)
 │   │   ├── HARDENING_PRE_PRODUCCION_EJECUCION.md
 │   │   └── Archivados/
 │   │       └── H8_SNAPSHOTS_SCHEMA_v1.7.2_WORKING_NOTES.md
 │   │
 │   └── Operacional/
-│       ├── ESTADO_ACTUAL_VITA_DELTA.md               # actualizado a v1.7.3 / post-7B
-│       ├── Pendiente_pre_produccion.md               # 1.1/1.2/1.3 cerrados, 1.4, 1.5 y 6.4 (post-7B)
-│       ├── DECISIONES_NO_REABRIR.md                  # + D-7A-01/02/03, D-7B-01 a 05, L-7B-01 a 03
-│       ├── Lecciones_Aprendidas.md                   # + L-7B-01/02/03 (Etapa 7B)
+│       ├── ESTADO_ACTUAL_VITA_DELTA.md               # actualizado a v1.7.3 / post-7C
+│       ├── Pendiente_pre_produccion.md               # 1.1/1.2/1.3 cerrados; 1.4/1.5/1.6, 6.3/6.4/6.5 (post-7C)
+│       ├── DECISIONES_NO_REABRIR.md                  # + D-7A/D-7B, D-7C-01, ref L-7C
+│       ├── Lecciones_Aprendidas.md                   # + L-7B-01/02/03, L-7C-01 a 06
 │       └── Archivados/
 │           ├── H8_SNAPSHOTS_SCHEMA_v1.7.2_WORKING_NOTES.md
 │           ├── obtener_disponibilidad_rango.md
@@ -448,6 +473,7 @@ Decisiones que **no deben reabrirse** salvo contradicción crítica explícita:
 10. No reabrir `D-HARD-01` a `D-HARD-11` sin contradicción crítica.
 11. No reabrir `D-7B-01` a `D-7B-05` sin contradicción crítica.
 12. IDs de cabaña **no son portables** entre DEV y TEST (DEV: 17-21, TEST: 1-5). Cada workflow usa los IDs del ambiente al que apunta.
+13. No limpiar fixtures de TEST fuera de un bloque de reset dedicado con SQL aprobado (`D-7C-01`).
 
 **Documento de referencia:** `Docs/Operacional/DECISIONES_NO_REABRIR.md`
 
@@ -455,13 +481,14 @@ Decisiones que **no deben reabrirse** salvo contradicción crítica explícita:
 
 ## Pendientes activos pre-PROD
 
-Pendientes documentados al cierre de 7B (los pendientes 1.1/1.2/1.3 fueron cerrados en 7A):
+Pendientes documentados al cierre de 7C (los pendientes 1.1/1.2/1.3 fueron cerrados en 7A; la validación funcional ampliada sobre TEST fue cerrada en 7C):
 
+- **Diseño del bloque de limpieza/reset de TEST** (derivado de D-7C-01). Sección 6.5.
 - **Endurecimiento de permisos en DEV** (paridad con TEST). Sección 1.5.
-- **Validación funcional ampliada sobre TEST** (casos de error). Sección 6.4.
+- **Contrato SQL de `registrar_pago` frente a entradas no-vacías mal tipadas** (hoy mitigado por `nv()` en n8n). Sección 1.6.
 - `tipo_valor` sin poblar en `configuracion_general` (1.4).
 - Validaciones para tipos inválidos no vacíos (heredado de 6D).
-- Cobertura empírica opcional de ramas `pre_lock` y `unique_violation` (6.3).
+- Cobertura empírica opcional de rama `unique_violation` (6.3; `pre_lock` ya cubierta en 7C).
 - RLS configurado (pendiente histórico hasta frontend público).
 - Tarifas reales productivas y feriados productivos.
 
@@ -474,7 +501,7 @@ Pendientes documentados al cierre de 7B (los pendientes 1.1/1.2/1.3 fueron cerra
 El sistema **no está en producción**.
 
 ```text
-DEV consolidado + TEST operativo → próximos pasos: validación ampliada TEST / endurecimiento DEV / OPS → consumidores reales → PROD futuro
+DEV consolidado + TEST operativo y validado funcionalmente → próximos pasos: reset de TEST / endurecimiento DEV / OPS → consumidores reales → PROD futuro
 ```
 
 > ⚠️ No conectar consumidores reales —MercadoPago, bot, frontend público— sin definir antes el entorno TEST o asumir explícitamente el riesgo operativo.

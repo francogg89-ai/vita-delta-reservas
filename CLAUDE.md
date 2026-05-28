@@ -7,15 +7,16 @@ Antes de trabajar, leer en este orden:
 1. Docs/Operacional/ESTADO_ACTUAL_VITA_DELTA.md
 2. Docs/Operacional/DECISIONES_NO_REABRIR.md
 3. Docs/Implementacion/6B_SCHEMA_SQL.md (schema canónico actual: **v1.7.3**)
-4. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
-5. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
-6. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
-7. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
-8. Docs/Implementacion/6B_PLAN_FASES.md
-9. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a TEST/OPS/PROD)
-10. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
-11. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
-12. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
+4. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
+5. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
+6. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
+7. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
+8. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
+9. Docs/Implementacion/6B_PLAN_FASES.md
+10. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a TEST/OPS/PROD)
+11. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
+12. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
+13. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
 
 No cargar contexto histórico largo salvo pedido explícito del usuario.
 
@@ -136,13 +137,21 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - **IDs de cabaña no portables:** DEV 17-21, TEST 1-5. Cada workflow usa los IDs del ambiente al que apunta.
 - DEV intacto durante toda la etapa. Decisiones D-7B-01 a D-7B-05; lecciones L-7B-01 a L-7B-03. Documento de cierre: `7B_CIERRE.md`.
 
+**Etapa 7C — Validación funcional ampliada sobre TEST ✅ Cerrada (2026-05-28):**
+
+- Batería sistemática de caminos no-felices de los 8 workflows `__TEST` sobre TEST (errores controlados, edge cases, validaciones defensivas, condiciones de borde) que 7B dejó fuera de alcance.
+- **54 verificaciones conformes:** 48 casos funcionales (Grupo A) + 6 verificaciones transversales (TR-01 source_event + TR-02 doble logging). **0 fallos inesperados.**
+- **1 mutación no planificada pero válida y comprendida:** bloqueo id 2 (Bamboo, generado en A-W6-06 con `id_cabana:1`; el sistema actuó correctamente ante un payload válido).
+- Idempotencia: rama `pre_lock` cubierta empíricamente (A-W2-15), sumada a `post_lock` (H7); resta solo `unique_violation` como opcional no bloqueante.
+- DEV intacto; schema canónico v1.7.3 sin modificar; fixtures de TEST conservados como evidencia (D-7C-01, no-limpieza). Lecciones L-7C-01 a L-7C-06. Documento de cierre: `7C_CIERRE.md`.
+
 **Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV y TEST están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B; paridad estructural 10/10).
 
-**Próxima etapa — opciones disponibles (no orden obligatorio):**
+**Próxima etapa — opciones disponibles (orden sugerido):**
 
-Con DEV, TEST, 6D, 7A y 7B cerradas, las opciones a priorizar por Franco son:
+Con DEV, TEST, 6D, 7A, 7B y 7C cerradas, las opciones a priorizar por Franco son:
 
-- Validación funcional ampliada sobre TEST (batería de casos de error documentada en `7B_CIERRE.md` sección 14 y `Pendiente_pre_produccion.md` 6.4).
+- Diseño del bloque de limpieza/reset de TEST (derivado de D-7C-01, por la acumulación de fixtures de 7C — `Pendiente_pre_produccion.md` 6.5).
 - Endurecimiento de permisos en DEV (paridad con TEST — `Pendiente_pre_produccion.md` 1.5).
 - Diseño del entorno OPS (operación interna real sin consumidores externos automáticos).
 - Integraciones con consumidores reales sobre TEST: webhook MercadoPago, bot conversacional, frontend público — siempre sobre TEST primero.
