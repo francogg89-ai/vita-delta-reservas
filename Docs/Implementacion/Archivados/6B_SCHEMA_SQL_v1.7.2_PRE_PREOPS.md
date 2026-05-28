@@ -1,70 +1,16 @@
 # 6B_SCHEMA_SQL.md
 # Schema PostgreSQL — Vita Delta Reservas
 
-**Versión:** 1.7.3
+**Versión:** 1.7.2
 **Fecha:** Mayo 2026
-**Estado:** `6B_SCHEMA_SQL.md v1.7.3` refleja el estado real de DEV tras la Etapa 6D (hardening, cerrada formalmente el 2026-05-27) y la Etapa 7A (correcciones pre-TEST/pre-OPS, cerrada el 2026-05-28). DEV está alineado funcionalmente con v1.7.3.
+**Estado:** `6B_SCHEMA_SQL.md v1.7.2` refleja documentalmente el estado real de DEV post-hardening H2-H6-bis. H7 validó concurrencia sin cambios SQL. Etapa 6D no cerrada todavía — H8 Frente B pendiente.
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1
 **Sucesora directa de:** ARQUITECTURA_ETAPA_5A_MODELO_DATOS_REAL.md v1.1
 
-> **IMPORTANTE:** El SQL de la Parte B se ejecuta bloque por bloque siguiendo `Docs/Implementacion/6B_PLAN_FASES.md`. Los Bloques 1-22 ya fueron ejecutados y verificados en Supabase DEV. Sobre ese estado, durante Etapa 6D se aplicó el hardening estructural H2-H6-bis y se validó concurrencia en H7; Etapa 6D quedó cerrada formalmente el 2026-05-27. Durante Etapa 7A se aplicaron correcciones pre-TEST/pre-OPS: patch de `crear_prereserva`, limpieza legacy de `ninos='false'` y horizonte configurable para `vista_disponibilidad`/`vista_calendario`. v1.7.3 refleja el estado funcional de DEV post-7A, adoptando cuerpos persistidos reales vía `pg_get_functiondef()` / `pg_get_viewdef()` donde aplica.
+> **IMPORTANTE:** El SQL de la Parte B se ejecuta bloque por bloque siguiendo `Docs/Implementacion/6B_PLAN_FASES.md`. Al momento de v1.7.2, los Bloques 1-22 ya fueron ejecutados y verificados en Supabase DEV (Fase 3 cerrada). Sobre ese estado, durante Etapa 6D se aplicó el hardening estructural H2-H6-bis (extracts defensivos en 5 funciones write críticas + fix de rango en `vista_ocupacion` + TRIM cosmético en 3 vistas con concatenación nombre+apellido). H7 ejecutó tests de concurrencia sin modificar SQL. v1.7.2 actualiza los cuerpos de funciones y vistas afectadas reflejándolos en la forma persistida por DEV vía `pg_get_functiondef()` / `pg_get_viewdef()`. Etapa 6D queda pendiente de cierre formal hasta que se complete el Frente B de H8.
 > **NOTA DE SANITIZACIÓN:** Este documento fue revisado para subir a GitHub. No contiene Project ID, Project URL, passwords, connection strings, anon keys, service role keys, JWTs ni datos reales de huéspedes. Los teléfonos en tests funcionales son sintéticos. Las credenciales reales del proyecto Supabase deben vivir fuera del repositorio.
-
----
-
-## RESUMEN DE CAMBIOS v1.7.2 → v1.7.3
-
-Bump documental que refleja las correcciones aplicadas y validadas en DEV durante la **Etapa 7A — Correcciones pre-TEST / pre-OPS** (2026-05-28). Resolvió los pendientes 1.1, 1.2 y 1.3 de `Pendiente_pre_produccion.md`. Decisiones D-7A-01, D-7A-02, D-7A-03. Cierre formal en `7A_CIERRE.md`.
-
-### a) Patch en `crear_prereserva` (Bloque 13)
-
-Tres cambios quirúrgicos, validados con 9 tests funcionales en DEV:
-
-1. **`v_ninos` de `BOOLEAN` a `TEXT`** (D-7A-02). El extract pasó de `COALESCE(NULLIF(TRIM(payload->>'ninos'), '')::BOOLEAN, FALSE)` a `NULLIF(TRIM(payload->>'ninos'), '')`. Alinea la variable con las columnas `pre_reservas.ninos` y `reservas.ninos` (que ya eran `TEXT`). Semántica: `NULL` = no informado; texto libre = detalle operativo. Elimina el residuo `"false"` que generaba el cast implícito BOOLEAN→TEXT.
-
-2. **`canal_pago_esperado` agregado al IF de obligatorios** (D-7A-01). Si llega ausente, vacío o whitespace, la función rebota con `payload_invalido` controlado (antes el INSERT fallaba con error crudo de constraint `NOT NULL`). La columna sigue `TEXT NOT NULL` y el CHECK de 5 valores se mantiene. Validación de valores no-NULL fuera del CHECK queda fuera de alcance (sigue rebotando por constraint).
-
-3. Sin otros cambios en el cuerpo: firma, retorno, locks, idempotencia, validación de cabaña/disponibilidad, cálculo de horarios (regla D47 dominical intacta), INSERT y logs sin tocar.
-
-### b) Horizonte configurable en vistas (Bloque 20, D-7A-03)
-
-`vista_disponibilidad` y `vista_calendario` leen el horizonte forward desde `configuracion_general.horizonte_disponibilidad_dias` con fallback `120` por `COALESCE` (antes hardcoded `CURRENT_DATE + 60`). Validado con 4 tests (1 empírico + 3 estructurales/no-regresión):
-
-- `vista_disponibilidad`: rango exclusivo `[CURRENT_DATE, CURRENT_DATE + N)`. Con N=120: 120 días distintos, `MAX(fecha) = CURRENT_DATE + 119`, 600 filas (120 × 5 cabañas). Forma persistida adoptada (9 columnas explícitas; PostgreSQL absorbe el cast `::DATE` redundante).
-- `vista_calendario`: filtro inclusivo `<= (CURRENT_DATE + N)`. El operador `<=` se mantuvo sin cambios.
-
-### c) Seed (Bloque 21)
-
-Clave `horizonte_disponibilidad_dias` agregada al seed (`categoria='disponibilidad'`, valor `120`). El conteo esperado de `configuracion_general` pasa de 9 a 10. La clave ya existía en DEV antes de 7A (origen probable: ejecución histórica intermedia); el seed la documenta para que TEST/PROD nazcan con ella.
-
-### d) Limpieza puntual de datos legacy (no es decisión)
-
-Los 3 registros con `ninos='false'` (pre_reservas 25, 26; reserva 8) fueron migrados a `NULL`. Limpieza puntual, documentada en `7A_CIERRE.md`, sin número de decisión.
-
-### Lo que NO cambió
-
-- Funciones distintas de `crear_prereserva`: `normalizar_telefono`, `upsert_huesped`, `validar_disponibilidad`, `obtener_disponibilidad_rango`, `confirmar_reserva`, `cancelar_prereserva`, `crear_bloqueo`, `registrar_pago`, `expirar_prereservas_vencidas`.
-- Vistas distintas de `vista_disponibilidad` y `vista_calendario`.
-- Tablas, constraints (incluido `chk_pre_reservas_canal_pago` y el `NOT NULL` de `canal_pago_esperado`), EXCLUDE, triggers, schedules pg_cron.
-- Diseño de locks, motor de precios, RLS, workflows n8n.
-- Decisiones D1-D47 ni D-HARD-01 a D-HARD-11.
-
-### Estado en Supabase DEV
-
-- Bloques 1-22 ejecutados. v1.7.2 aplicado (hardening 6D). Etapa 6D cerrada el 2026-05-27.
-- Patch `crear_prereserva` v1.7.3 aplicado vía `CREATE OR REPLACE FUNCTION` (camino limpio, sin bug del Dashboard). Verificado con `pg_get_functiondef`.
-- Vistas `vista_disponibilidad` y `vista_calendario` actualizadas vía `CREATE OR REPLACE VIEW`. Verificadas con `pg_get_viewdef`.
-- DEV alineado funcionalmente con v1.7.3.
-
-### Observación liviana abierta (no bloqueante)
-
-- **`tipo_valor` sin poblar:** las 10 claves de `configuracion_general` tienen `tipo_valor=NULL`. No afecta funcionamiento (los casts son explícitos). A evaluar antes del dashboard OPS. Ver `Pendiente_pre_produccion.md` 1.4.
-
-### Backup de v1.7.2
-
-Copia archivada del estado pre-7A en `Docs/Implementacion/Archivados/6B_SCHEMA_SQL_v1.7.2_PRE_PREOPS.md`.
 
 ---
 
@@ -126,8 +72,6 @@ Las vistas actualizadas en este bump se reflejan en la forma persistida por Post
 - **Pendiente:** cierre formal de Etapa 6D vía `6D_CIERRE.md` (Frente B de H8).
 
 ### Hallazgos no resueltos en este bump
-
-> **Nota (actualización v1.7.3):** los dos hallazgos listados abajo fueron **resueltos en la Etapa 7A** (bump v1.7.3, 2026-05-28). `ninos` → D-7A-02 (variable `TEXT`); `canal_pago_esperado` → D-7A-01 (restaurada validación manual). Se conserva el texto original para no alterar la historia del changelog. Ver el changelog `v1.7.2 → v1.7.3` arriba.
 
 - **Alineación de tipo `ninos`:** función `crear_prereserva` declara `v_ninos BOOLEAN`, columnas `pre_reservas.ninos` y `reservas.ninos` son `TEXT`. Cast implícito BOOLEAN→TEXT en PostgreSQL al INSERT produce el valor textual `"false"` (observado empíricamente en los 3 registros existentes en DEV). Funcionalmente inocuo hoy. Queda como item liviano para evaluación pre-TEST/PROD durante Frente B de H8, agregado a `Pendiente_pre_produccion.md`. No es freno del bump documental.
 - **Contrato de `canal_pago_esperado`:** el campo ya no está en la validación manual post-extract de `crear_prereserva`, pero la columna `pre_reservas.canal_pago_esperado` sigue siendo `TEXT NOT NULL`. Evaluar antes de TEST/PROD si se restaura validación manual con `payload_invalido` o si se decide nullable a nivel schema.
@@ -1183,7 +1127,7 @@ Reemplaza conceptualmente a `DISPONIBILIDAD_CACHE`. Devuelve disponibilidad calc
   "expiracion_minutos":    number | null,       // default desde configuracion_general
   "mascotas":              boolean | null,
   "detalle_mascotas":      string | null,
-  "ninos":                 string | null,   // detalle operativo libre; NULL = no informado
+  "ninos":                 boolean | string parseable a boolean | null,
   "notas_reserva":         string | null,
   "notas":                 string | null,
   "source_event":          string,
@@ -1191,9 +1135,9 @@ Reemplaza conceptualmente a `DISPONIBILIDAD_CACHE`. Devuelve disponibilidad calc
 }
 ```
 
-> **Nota sobre `canal_pago_esperado` (v1.7.3, D-7A-01):** el campo es obligatorio y está validado en el IF de obligatorios. Si llega ausente, vacío o whitespace, el extract `NULLIF(TRIM(...), '')` lo convierte a NULL y la función rebota con `error='payload_invalido'` (rebote temprano, antes de locks y de `upsert_huesped`). La columna `pre_reservas.canal_pago_esperado` permanece `TEXT NOT NULL` y el CHECK de 5 valores se mantiene. Valores no-NULL fuera del CHECK (ej. `"canal_invalido"`) siguen rebotando por el constraint, no por validación manual (fuera de alcance del patch).
+> **Nota sobre `canal_pago_esperado`:** el extract aplica `NULLIF(TRIM(...), '')` defensivo, pero la columna `pre_reservas.canal_pago_esperado` es `TEXT NOT NULL`, por lo que el campo continúa requerido a nivel schema. Si llega ausente, vacío o whitespace, el INSERT puede fallar por constraint `NOT NULL`. Evaluación en Frente B (ver "Hallazgos no resueltos" del changelog v1.7.1 → v1.7.2).
 >
-> **Nota sobre `ninos` (v1.7.3, D-7A-02):** se interpreta como TEXT libre. Variable local `v_ninos TEXT`, extract `NULLIF(TRIM(payload->>'ninos'), '')`. Semántica: `NULL` = no informado; texto libre = detalle operativo (cantidad/edades/necesidades). Las columnas `pre_reservas.ninos` y `reservas.ninos` son `TEXT nullable` — la variable y las columnas quedan alineadas. El literal `"false"` no es un valor esperado (era residuo del cast BOOLEAN→TEXT de v1.7.2, limpiado en Etapa 7A).
+> **Nota sobre `ninos`:** el payload se interpreta como booleano en `crear_prereserva` (variable local `v_ninos BOOLEAN`), pero las columnas persistidas `pre_reservas.ninos` y `reservas.ninos` siguen siendo `TEXT`. El cast implícito BOOLEAN→TEXT al INSERT genera valores como `"false"`. Alineación pendiente para Frente B.
 
 **Flujo:**
 
@@ -1388,7 +1332,7 @@ Triggers que SÍ se conservan:
 
 | # | Vista | Propósito |
 |---|---|---|
-| V1 | `vista_disponibilidad` | Disponibilidad calculada para el horizonte configurable. *(v1.7.3: horizonte vía `configuracion_general.horizonte_disponibilidad_dias`, default 120)* |
+| V1 | `vista_disponibilidad` | Disponibilidad calculada para los próximos 60 días. *(v1.1: corregido cast a DATE)* |
 | V2 | `vista_calendario` | Calendario operativo de reservas activas/confirmadas |
 | V3 | `vista_prereservas_activas` | Pre-reservas vigentes |
 | V4 | `vista_ocupacion` | Ocupación por cabaña y mes |
@@ -3452,7 +3396,7 @@ DECLARE
   v_notas                TEXT;
   v_mascotas             BOOLEAN;
   v_detalle_mascotas     TEXT;
-  v_ninos                TEXT;
+  v_ninos                BOOLEAN;
   v_notas_reserva        TEXT;
   v_hora_checkin_sol     TIME;
   v_hora_checkout_sol    TIME;
@@ -3494,14 +3438,13 @@ BEGIN
   v_notas               := NULLIF(TRIM(payload->>'notas'), '');
   v_mascotas            := COALESCE(NULLIF(TRIM(payload->>'mascotas'), '')::BOOLEAN, FALSE);
   v_detalle_mascotas    := NULLIF(TRIM(payload->>'detalle_mascotas'), '');
-  v_ninos               := NULLIF(TRIM(payload->>'ninos'), '');
+  v_ninos               := COALESCE(NULLIF(TRIM(payload->>'ninos'), '')::BOOLEAN, FALSE);
   v_notas_reserva       := NULLIF(TRIM(payload->>'notas_reserva'), '');
   v_hora_checkin_sol    := NULLIF(TRIM(payload->>'hora_checkin_solicitada'), '')::TIME;
   v_hora_checkout_sol   := NULLIF(TRIM(payload->>'hora_checkout_solicitada'), '')::TIME;
 
   IF v_id_cabana IS NULL OR v_fecha_in IS NULL OR v_fecha_out IS NULL
-     OR v_personas IS NULL OR v_canal_origen IS NULL OR v_source_event IS NULL
-     OR v_canal_pago_esperado IS NULL THEN
+     OR v_personas IS NULL OR v_canal_origen IS NULL OR v_source_event IS NULL THEN
     RETURN jsonb_build_object('ok', false, 'error', 'payload_invalido');
   END IF;
 
@@ -4811,34 +4754,23 @@ DROP FUNCTION IF EXISTS set_updated_at();
 
 ## BLOQUE 20 — Vistas SQL
 
-**Descripción:** Crea 6 vistas operativas. **Cambio v1.7.3 (D-7A-03):** `vista_disponibilidad` y `vista_calendario` leen el horizonte forward desde `configuracion_general.horizonte_disponibilidad_dias` con fallback 120 (antes hardcoded 60). Las definiciones reflejan la forma persistida por `pg_get_viewdef()`.
+**Descripción:** Crea 6 vistas operativas. **Cambio v1.1:** `vista_disponibilidad` usa `CURRENT_DATE + 60` casteado correctamente a DATE.
 
 ```sql
 -- ─── V1. vista_disponibilidad ──────────────────────────
--- v1.7.3 (D-7A-03): horizonte configurable vía configuracion_general
--- con fallback 120. Rango exclusivo [CURRENT_DATE, CURRENT_DATE + N).
--- Forma persistida (pg_get_viewdef): 9 columnas explícitas; PostgreSQL
--- absorbe el cast ::DATE redundante sobre CURRENT_DATE + INTEGER.
+-- v1.1: Corregido cast — CURRENT_DATE + 60 (no INTERVAL)
 CREATE OR REPLACE VIEW vista_disponibilidad AS
-SELECT id_cabana,
-    fecha,
-    estado,
-    tipo_dia,
-    temporada,
-    hora_checkin_base,
-    hora_checkout_base,
-    id_reserva_activa,
-    id_prereserva_activa
-   FROM obtener_disponibilidad_rango(CURRENT_DATE, CURRENT_DATE + COALESCE(( SELECT configuracion_general.valor::integer AS valor
-           FROM configuracion_general
-          WHERE configuracion_general.clave = 'horizonte_disponibilidad_dias'::text), 120), NULL::bigint);
+SELECT *
+FROM obtener_disponibilidad_rango(
+  CURRENT_DATE,
+  (CURRENT_DATE + 60)::DATE,
+  NULL
+);
 
 -- ─── V2. vista_calendario ──────────────────────────────
--- Calendario operativo de reservas activas/confirmadas dentro del horizonte.
+-- Calendario operativo de próximos 60 días con reservas y bloqueos.
 -- v1.7.2 (H6): TRIM aplicado a la concatenación nombre + apellido para
 -- evitar espacio colgando cuando apellido es NULL o vacío.
--- v1.7.3 (D-7A-03): horizonte configurable vía configuracion_general con
--- fallback 120. Filtro inclusivo <= (operador sin cambios respecto a v1.7.2).
 CREATE OR REPLACE VIEW vista_calendario AS
 SELECT c.id_cabana,
     c.nombre AS cabana,
@@ -4857,9 +4789,7 @@ SELECT c.id_cabana,
    FROM reservas r
      JOIN cabanas c ON c.id_cabana = r.id_cabana
      JOIN huespedes h ON h.id_huesped = r.id_huesped
-  WHERE (r.estado = ANY (ARRAY['confirmada'::estado_reserva_enum, 'activa'::estado_reserva_enum])) AND r.fecha_checkout >= CURRENT_DATE AND r.fecha_checkin <= (CURRENT_DATE + COALESCE(( SELECT configuracion_general.valor::integer AS valor
-           FROM configuracion_general
-          WHERE configuracion_general.clave = 'horizonte_disponibilidad_dias'::text), 120))
+  WHERE (r.estado = ANY (ARRAY['confirmada'::estado_reserva_enum, 'activa'::estado_reserva_enum])) AND r.fecha_checkout >= CURRENT_DATE AND r.fecha_checkin <= (CURRENT_DATE + 60)
   ORDER BY r.fecha_checkin, c.id_cabana;
 
 -- ─── V3. vista_prereservas_activas ─────────────────────
@@ -5061,8 +4991,7 @@ INSERT INTO configuracion_general (clave, valor, descripcion, categoria) VALUES
   ('hora_checkout_min_cliente',    '07:00', 'Hora mínima que puede elegir el cliente', 'horarios'),
   ('escalonamiento_activo',        'true',  'Master switch del escalonamiento', 'escalonamiento'),
   ('escalonamiento_umbral_checkins_dia', '3', 'Check-ins simultáneos sin escalonar', 'escalonamiento'),
-  ('prereserva_expiracion_minutos', '60',    'TTL default de pre-reservas',      'prereservas'),
-  ('horizonte_disponibilidad_dias', '120',   'Horizonte forward en días para vista_disponibilidad y vista_calendario', 'disponibilidad');  -- v1.7.3 (D-7A-03)
+  ('prereserva_expiracion_minutos', '60',    'TTL default de pre-reservas',      'prereservas');
 
 -- ─── CUENTA_COBRO (PLACEHOLDER inactiva) ─────────────
 INSERT INTO cuentas_cobro (alias, medio, detalle, titular, activa) VALUES
@@ -5091,7 +5020,7 @@ UNION ALL SELECT 'temporadas', COUNT(*) FROM temporadas
 UNION ALL SELECT 'plantillas_mensajes', COUNT(*) FROM plantillas_mensajes;
 ```
 
-Esperado: cabanas=5, socios=3, configuracion_general=10, cuentas_cobro=1, temporadas=1, plantillas_mensajes=1.
+Esperado: cabanas=5, socios=3, configuracion_general=9, cuentas_cobro=1, temporadas=1, plantillas_mensajes=1.
 
 **Rollback:**
 

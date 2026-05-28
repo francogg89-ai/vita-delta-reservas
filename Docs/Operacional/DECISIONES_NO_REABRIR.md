@@ -320,6 +320,132 @@ Razón: la corrección estructural v1.5 (lock global SIEMPRE primero, antes de F
 
 **No reabrir.** Mantener la política. No agregar reintentos automáticos ni tolerancia a deadlocks en workflows n8n o en código de cliente.
 
+## Correcciones pre-TEST / pre-OPS (Etapa 7A — cerrada 2026-05-28)
+
+Decisiones firmes derivadas de la Etapa 7A — correcciones livianas pre-TEST/pre-OPS aplicadas y validadas en DEV. Resolvieron los pendientes 1.1, 1.2 y 1.3 de `Pendiente_pre_produccion.md`. Schema canónico bumpeado a v1.7.3. **NO REABRIR sin justificación crítica.**
+
+Bitácora de la etapa: `7A_CIERRE.md`. Todas las decisiones fueron validadas empíricamente en DEV (9 tests funcionales del patch `crear_prereserva` + 4 tests del horizonte configurable).
+
+### D-7A-01 — `canal_pago_esperado` requerido en validación manual de `crear_prereserva`
+
+`crear_prereserva` valida `canal_pago_esperado` en su IF de obligatorios. Si el campo llega ausente, vacío o whitespace puro, el extract canónico `NULLIF(TRIM(...), '')` lo convierte a NULL y la función rebota con `error='payload_invalido'` (rebote temprano, antes de `set_config`, antes de `upsert_huesped` y antes de cualquier lock).
+
+- La columna `pre_reservas.canal_pago_esperado` permanece `TEXT NOT NULL`. **No se hizo nullable.**
+- El CHECK constraint `chk_pre_reservas_canal_pago` (5 valores: `transferencia_bancaria`, `transferencia_mp`, `mp_link`, `cripto`, `efectivo`) permanece sin cambios.
+- **Fuera de alcance del patch:** validación manual de valores no-NULL fuera del CHECK (ej. `canal_pago_esperado="canal_invalido"`). Esos siguen rebotando por el CHECK constraint con error crudo de PostgreSQL, no por validación manual controlada. Coherente con D-HARD-01 (el hardening por strings/whitespace no cubre tipos/valores inválidos no vacíos).
+
+**Motivación:** antes del patch, `canal_pago_esperado` no estaba en la validación manual; un payload sin el campo llegaba al INSERT y fallaba con error crudo de constraint NOT NULL en vez de `payload_invalido` controlado. Relevante para OPS (carga manual de Vicky) y para futuros consumidores (webhook MP, bot, frontend).
+
+**No reabrir.** Si en el futuro aparece un caso de uso "pre-reserva sin canal de pago definido", se resuelve quitando la condición del IF (más simple que recuperar un `NOT NULL` perdido), con decisión explícita.
+
+### D-7A-02 — `ninos` como TEXT nullable con semántica de detalle operativo
+
+`crear_prereserva` declara la variable local `v_ninos` como `TEXT` (antes `BOOLEAN`) y su extract es `v_ninos := NULLIF(TRIM(payload->>'ninos'), '');` (sin cast a BOOLEAN). Las columnas `pre_reservas.ninos` y `reservas.ninos` ya eran `TEXT nullable`; el cambio alinea la variable con las columnas.
+
+Semántica definitiva:
+- `NULL` = no informado (payload ausente, vacío o whitespace).
+- Texto libre = detalle operativo (cantidad, edades, necesidades). Ejemplo: `"2 niños, 3 y 6 años"`, `"Bebé con cuna"`.
+- El literal `"false"` **no** es un valor esperado nuevo (era residuo del cast implícito BOOLEAN→TEXT de v1.7.2).
+- **No se introduce `detalle_ninos`** como columna separada. Se evaluará solo si aparece una necesidad operativa concreta de separar presencia (booleana) de detalle (texto), análogo a `mascotas`/`detalle_mascotas`.
+
+**Motivación:** antes del patch, el cast `::BOOLEAN` persistía `"false"` para payloads sin `ninos` y rompía con error crudo si llegaba texto libre real (ej. `'2 niños...'::BOOLEAN` → `invalid input syntax for type boolean`). El cambio habilita información operativamente útil para Jennifer (limpieza) y Vicky (mensajes a clientes).
+
+**Nota de limpieza (no es decisión):** los 3 registros legacy con `ninos='false'` (pre_reservas 25, 26; reserva 8) fueron migrados a `NULL` mediante limpieza puntual de datos durante 7A. Es limpieza puntual documentada en `7A_CIERRE.md`, **no una decisión arquitectural** y **no tiene número de decisión**.
+
+**No reabrir.**
+
+### D-7A-03 — Horizonte de disponibilidad/calendario configurable
+
+El horizonte forward de `vista_disponibilidad` y `vista_calendario` se lee desde `configuracion_general.horizonte_disponibilidad_dias` (antes hardcoded a 60), con fallback `120` por `COALESCE`. Valor actual en DEV: `120`.
+
+```sql
+... COALESCE(
+  (SELECT valor::INTEGER FROM configuracion_general
+   WHERE clave = 'horizonte_disponibilidad_dias'),
+  120
+) ...
+```
+
+Convenciones de rango (cada vista mantiene la suya; solo cambió el valor, no la semántica del operador):
+- **`vista_disponibilidad`:** rango exclusivo `[CURRENT_DATE, CURRENT_DATE + N)` vía `obtener_disponibilidad_rango`. Con N=120, `MAX(fecha) = CURRENT_DATE + 119`, 120 días distintos.
+- **`vista_calendario`:** filtro inclusivo `r.fecha_checkin <= (CURRENT_DATE + N)`. El operador `<=` se mantuvo; **no se cambió a `<`**.
+
+La clave `horizonte_disponibilidad_dias` se agregó al seed del Bloque 21 (`categoria='disponibilidad'`, `tipo_valor=NULL`, `editable=true`) para que TEST/PROD nazcan con ella y no dependan solo del fallback. Cambio futuro del horizonte sin redeploy: `UPDATE configuracion_general SET valor='<N>' WHERE clave='horizonte_disponibilidad_dias';`.
+
+**Nota:** la clave ya existía en DEV antes de la Etapa 7A (origen probable: ejecución histórica intermedia, no auditada en esta sesión). 7A solo normalizó su `descripcion` y conectó las vistas para que la usen.
+
+**No reabrir** la decisión de hacer el horizonte configurable ni las convenciones de rango por vista. El valor concreto (120) sí es ajustable vía UPDATE sin tocar schema.
+
+## Levantamiento del entorno TEST (Etapa 7B — cerrada 2026-05-28)
+
+Decisiones firmes derivadas de la Etapa 7B — levantamiento del entorno TEST como proyecto Supabase independiente, paritario y aislado de DEV. **NO REABRIR sin justificación crítica.**
+
+Bitácora de la etapa: `7B_CIERRE.md`. Cadena W2 → W3 → W4 validada end-to-end en TEST; 8 workflows con happy paths aprobados. DEV no se tocó durante 7B (solo consultas read-only de diagnóstico).
+
+### D-7B-01 — TEST como proyecto Supabase independiente, no clon físico de DEV
+
+TEST se construyó como **proyecto Supabase separado** (`vita-delta-test`), reconstruyendo el schema **desde el canónico `6B_SCHEMA_SQL.md v1.7.3`** — no por dump/restore desde DEV ni por copia física. La paridad estructural se demostró 10/10 vs DEV mediante script comparativo (extensiones, enums, tablas, vistas, funciones, triggers, EXCLUDE, CHECK, FK, índices únicos).
+
+Esto garantiza que TEST queda alineado con la fuente de verdad documental (el canónico) y evita arrastrar artefactos accidentales de DEV (datos huérfanos, ALTERs históricos no auditados, claves duplicadas, etc.). El procedimiento se ejecutó en 6 tandas (Bloques 1-20 del canónico + Bloque 21 seeds + Bloque 22 cron).
+
+**No reabrir.** Futuros entornos (OPS, PROD) deben seguir el mismo patrón: reconstrucción desde el canónico vigente, no clonación de DEV/TEST/OPS.
+
+### D-7B-02 — IDs de cabaña no portables entre DEV y TEST
+
+DEV conserva IDs históricos `17-21` para las 5 cabañas (Bamboo, Madre Selva, Arrebol, Guatemala, Tokio). TEST nació limpio con IDs `1-5` para las mismas cabañas (mismo seed Bloque 21, secuencia arrancando en 1). **Los IDs no son portables entre ambientes.**
+
+Aprendizaje consolidado: **lo portable es la estructura lógica de los workflows, no los valores de input.** Cada workflow debe usar los IDs reales del ambiente al que apunta. En la práctica:
+- Workflows DEV mantienen inputs de prueba con IDs `17`/`19`/etc.
+- Workflows `__TEST` usan IDs `1`/`3`/etc.
+- Workflows OPS/PROD futuros usarán los IDs que tengan en su seed.
+
+**No reabrir.** No se renumerará DEV (riesgo de romper FKs reales y referencias históricas en `log_cambios`, `reservas`, `pagos`, etc.) ni se renumerará TEST para "alinear" con DEV. Si en el futuro un workflow se mueve entre ambientes, los inputs de prueba se adaptan; la lógica del workflow no cambia.
+
+### D-7B-03 — Modelo de grants mínimo en TEST, no paridad de grants con DEV
+
+TEST adopta un **modelo cerrado de permisos Data API**, distinto al de DEV:
+
+- Roles `anon`, `authenticated`, `service_role`: sin grants Data API útiles sobre objetos del proyecto (solo `Dxtm` residual, ver abajo).
+- `PUBLIC`: sin `EXECUTE` sobre las 13 funciones del proyecto (REVOKE explícito en 7B-GRANTS).
+- Owner `postgres` intacto (n8n entra como owner por pooler, ejecuta por ownership).
+- RLS postergado (decisión histórica: hasta tener frontend público).
+- `Dxtm` residual (TRUNCATE/REFERENCES/TRIGGER) sobre tablas/vistas se documenta como **aceptado, no removido**. No incluye SELECT ni escritura; no habilita lectura/escritura vía Data API; es default de Supabase post-cambio del 30/05/2026; revocarlo agrega complejidad sin cerrar riesgo real.
+- `sequences` sin grants Data API (estado de fábrica respetado).
+
+**DEV queda más abierto que TEST a propósito.** No se aplicó endurecimiento equivalente a DEV durante 7B (decisión explícita: 7B no toca DEV). El endurecimiento de DEV es pendiente futuro separado (ver `Pendiente_pre_produccion.md` 1.5).
+
+**No reabrir.** Ningún workflow ni consumidor en TEST debe asumir grants Data API que no estén explícitos. Si un consumidor futuro requiere acceso vía PostgREST/Data API en TEST (ej. dashboard, frontend), se diseña un perfil de grants específico para ese consumidor — no se reabre el modelo mínimo general.
+
+### D-7B-04 — Convención de aislamiento de workflows TEST
+
+Los workflows que apuntan a TEST se duplican con convenciones explícitas que evitan colisión con los de DEV:
+
+- **Naming:** sufijo `__TEST` en el `name` del workflow (ej. `vita_w02_crear_prereserva_supabase__TEST`).
+- **Credencial:** propia y separada — `vita_supabase_test` (apunta al pooler de TEST con user `postgres.<TEST_REF>`).
+- **Limpieza pre-import:** eliminar `id`, `versionId` y `meta.instanceId` del JSON exportado para que n8n cree workflows nuevos en lugar de pisar los de DEV.
+- **`source_event` con marcador de ambiente:** `n8n_test_w0X_..._manual` (los workflows DEV mantienen `n8n_w0X_..._manual`). Se persiste en `log_cambios` para los writes.
+- **`idempotency_key` de W2 con prefijo de ambiente:** `manual_test_...` (W2 es el único workflow con idempotency_key explícita; W3-W6 no la usan). Se persiste en la pre-reserva → inequívoca de TEST.
+- **`canal` en inputs de prueba:** `manual_test` en TEST (vs `manual_dev` en DEV). Alimenta `id_evento_test` (renombrado desde `id_evento_dev` en los workflows TEST que lo usaban: W5, W6, W3, W4).
+- **IDs de cabaña reales del ambiente** (1-5 en TEST, 17-21 en DEV; ver D-7B-02).
+
+**No reabrir.** Cualquier nuevo workflow para TEST debe mantener esta convención. Para OPS/PROD futuros se generaliza el patrón con sus propios marcadores (`__OPS`, `__PROD`, `n8n_ops_...`, `n8n_prod_...`, etc.).
+
+### D-7B-05 — Regla operativa: funciones nuevas en `public` requieren REVOKE EXECUTE
+
+Los defaults de PostgreSQL aplican `EXECUTE` a `PUBLIC` automáticamente al crear cada función (lo confirmamos empíricamente en 7B-GRANTS: las 13 funciones del proyecto tenían EXECUTE-PUBLIC tras Bloque 9-19 a pesar de que TEST "nació cerrado" en el snapshot pre-objetos).
+
+**Regla:** toda función nueva creada en el schema `public` de TEST (y eventualmente OPS/PROD) debe revisarse y normalizarse con:
+
+```sql
+REVOKE EXECUTE ON FUNCTION <nombre>(<firma>) FROM PUBLIC, anon, authenticated, service_role;
+```
+
+como paso explícito de su creación, no asumir que "nace cerrada". El owner (`postgres`) conserva su capacidad de ejecutar por ownership, independientemente del REVOKE.
+
+Esta regla **no se aplica retroactivamente a DEV** (DEV queda como pendiente futuro de endurecimiento; ver `Pendiente_pre_produccion.md` 1.5).
+
+**No reabrir.** Es una regla operativa de creación, no una decisión arquitectónica negociable.
+
 ## Decisiones aprobadas con código de referencia
 
 - **D3** — Mantener solo `hora_checkin` y `hora_checkout` en tablas (sin "hora base" vs "hora real").
@@ -354,6 +480,14 @@ Reglas firmes derivadas de la ejecución de la Etapa 6D (bloques H1-H7). Detalle
 - **L-6D-08:** Trigger `trg_log_*_estado` solo dispara en `AFTER UPDATE OF estado`, no en INSERT ni en UPDATE de otras columnas. Conteo esperado de logs depende de transiciones de estado, no de UPDATE genéricos.
 - **L-6D-09:** Naming real confirmado empíricamente en DEV: `cabanas.capacidad_max`, `bloqueos.activo` BOOLEAN, error `estado_invalido` en `confirmar_reserva` con estado terminal, `telefono_normalizado` preserva `+`, payload de pago usa `referencia_externa`.
 
+## Lecciones operativas TEST consolidadas (L-7B-XX)
+
+Reglas firmes derivadas de la ejecución de la Etapa 7B (levantamiento del entorno TEST). Detalle en `Lecciones_Aprendidas.md`.
+
+- **L-7B-01:** `current_database()` no discrimina ambiente en Supabase. Todos los proyectos Supabase tienen la base llamada `postgres`, por lo que un chequeo de ambiente basado en `db` es inválido. Para discriminar usar `current_user` (que trae `postgres.<project_ref>` cuando se entra por pooler), `inet_server_addr()` o, mejor, leer datos del seed específicos del ambiente (ej. IDs de cabaña).
+- **L-7B-02:** "Nacer cerrado" solo aplica al snapshot pre-objetos. Los defaults de PostgreSQL/Supabase aplican `Dxtm` (TRUNCATE/REFERENCES/TRIGGER) sobre tablas/vistas y `EXECUTE` para `PUBLIC` sobre funciones al *crear* cada objeto. Cada función nueva en `public` requiere `REVOKE EXECUTE` explícito (ver D-7B-05).
+- **L-7B-03:** Para contar triggers usar `pg_trigger` con filtro `NOT tgisinternal`, no `information_schema.triggers`. Esta última vista multiplica filas por evento (INSERT/UPDATE/DELETE) y genera falsos positivos de conteo: 12 triggers reales pueden aparecer como 18-24 según los eventos definidos. Ejemplo: `SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgrelid::regclass::text NOT LIKE 'pg_%';`
+
 ## Prototipos legacy
 
 - `index.html` — presentación visual estática del estado del sistema. No es frontend operativo ni web pública de reservas.
@@ -362,4 +496,4 @@ Reglas firmes derivadas de la ejecución de la Etapa 6D (bloques H1-H7). Detalle
 - Archivos JSON de tests del Bloque 13 (`dev_db_*.json`, `test_db_*.json`) — artefactos de validación pre-migración.
 - `Workflows/n8n/*.template.json` (sin subcarpeta `supabase/`) — workflows legacy contra Sheets, congelados.
 
-**Ninguno de estos artefactos debe contradecir las decisiones cerradas de las Etapas 1-6D ni de las Fases 1-3 de implementación en DEV.**
+**Ninguno de estos artefactos debe contradecir las decisiones cerradas de las Etapas 1-6D, 7A ni 7B, ni de las Fases 1-3 de implementación en DEV ni del levantamiento de TEST.**

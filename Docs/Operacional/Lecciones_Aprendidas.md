@@ -660,3 +660,203 @@ SELECT pg_get_functiondef('nombre_funcion(jsonb)'::regprocedure);
 - `estado_invalido`: Pieza 5b del snapshot (lectura de `pg_get_functiondef('confirmar_reserva(jsonb)')`).
 - `telefono_normalizado` con `+`: cleanup del primer intento fallido de C-1.
 - `referencia_externa`: lectura de `pg_get_functiondef('registrar_pago(jsonb)')` durante diagnóstico de C-5.
+
+
+
+## Gotchas del levantamiento de entornos paralelos en Supabase
+
+Estas lecciones surgieron durante la Etapa 7B (Levantamiento del entorno TEST como
+proyecto Supabase independiente, paritario y aislado de DEV).
+Bitácora detallada: `7B_CIERRE.md`.
+
+### L-7B-01 — `current_database()` no discrimina ambiente entre proyectos Supabase
+
+**Cuándo aplica:** al diseñar smoke tests, scripts de validación o chequeos
+defensivos que intenten confirmar contra qué ambiente Supabase se está conectando
+una credencial (DEV, TEST, OPS, PROD).
+
+**Síntoma:** una query como `SELECT current_database()` devuelve `postgres` en
+todos los proyectos Supabase, independientemente del ambiente. Si el chequeo
+asume nombres distintos por ambiente (ej. `vita_delta_dev`, `vita_delta_test`),
+el smoke no discrimina y puede dar una falsa sensación de seguridad.
+
+**Por qué pasa:** Supabase crea todos los proyectos con la misma base de datos
+de aplicación llamada literalmente `postgres`. El nombre del proyecto Supabase
+(visible en el dashboard como `vita-delta-dev`, `vita-delta-test`, etc.) es
+metadata del servicio, no del cluster PostgreSQL subyacente. Adentro de la base,
+no hay distinción de nombre entre proyectos.
+
+**Discriminadores válidos para chequear ambiente:**
+
+| Discriminador | Cómo se ve | Notas |
+|---|---|---|
+| `current_user` por pooler | `postgres.<project_ref>` | Trae el project_ref real. Útil pero el `current_user` adentro de la sesión es a veces `postgres` pelado según contexto de pool. |
+| `inet_server_addr()` | IP del servidor Supabase | Distintos proyectos → distintas IPs/IPv6. Robusto pero menos legible. |
+| **Lectura de datos del seed propio del ambiente** | Ej. `SELECT count(*) FROM cabanas WHERE id_cabana IN (1,2,3,4,5)` | **Lo más robusto:** si el seed de TEST tiene IDs 1-5 y el de DEV tiene 17-21, la query confirma ambiente sin ambigüedad. |
+
+**Patrón recomendado para smoke de ambiente:**
+
+```sql
+-- En vez de:
+SELECT current_database();  -- siempre "postgres", inservible
+
+-- Usar combinación de discriminadores:
+SELECT
+  current_user AS usuario,
+  inet_server_addr()::text AS server_ip,
+  (SELECT array_agg(id_cabana ORDER BY id_cabana)
+   FROM cabanas) AS cabana_ids_seed;
+```
+
+**Implicación para diseño de smokes:** al diseñar un W0 smoke que verifique
+ambiente correctamente, no incluir `current_database()` como "chequeo de
+ambiente" — incluirlo solo como confirmación de conectividad. El chequeo real
+de ambiente debe usar uno de los discriminadores válidos.
+
+**Descubierto:** 2026-05-28, durante 7B-4. El W0 inicial verificaba
+`current_database()` esperando distinguir TEST de DEV; al ejecutarlo contra TEST
+devolvió `postgres`, igual que en DEV. Resolución: confirmación de ambiente por
+convergencia (credencial al ref de TEST + lectura de los IDs 1-5 del seed
+propios de TEST + IDs de secuencia arrancando en 1).
+
+---
+
+### L-7B-02 — "Nacer cerrado" solo aplica al snapshot pre-objetos
+
+**Cuándo aplica:** al crear un nuevo proyecto Supabase con la intención de que
+nazca con permisos Data API cerrados (anon/authenticated/service_role sin acceso
+a tablas/funciones), y al asumir que mantener "Automatically expose new tables"
+destildado es suficiente.
+
+**Síntoma:** el snapshot inicial del proyecto (antes de crear cualquier objeto)
+confirma que los roles Data API no tienen grants útiles. Pero después de
+ejecutar el schema (CREATE TABLE, CREATE FUNCTION), una verificación de grants
+muestra:
+
+- `Dxtm` residual (TRUNCATE/REFERENCES/TRIGGER) sobre tablas/vistas para
+  `anon`/`authenticated`/`service_role`. No incluye SELECT/INSERT/UPDATE/DELETE,
+  pero aparece.
+- `EXECUTE` para `PUBLIC` sobre todas las funciones del proyecto.
+
+**Por qué pasa:** los defaults de PostgreSQL aplican grants automáticos al
+*crear* cada objeto, no al snapshot del cluster vacío:
+
+- Para funciones, PostgreSQL aplica `GRANT EXECUTE ... TO PUBLIC` por default
+  en cada `CREATE FUNCTION`, independiente de la configuración del proyecto
+  Supabase.
+- Para tablas/vistas, Supabase aplica `GRANT TRUNCATE, REFERENCES, TRIGGER`
+  (`Dxtm`) a `anon`/`authenticated`/`service_role` como default operativo
+  post-cambio del 30/05/2026 (no documentado oficialmente pero observado
+  empíricamente).
+
+El toggle "Automatically expose new tables to Data API" solo controla la
+exposición vía PostgREST/Data API; no controla los grants subyacentes que
+PostgreSQL aplica al crear cada objeto.
+
+**Implicación práctica:**
+
+1. **Para funciones nuevas:** ejecutar `REVOKE EXECUTE` explícito como parte
+   del workflow de creación. Patrón:
+
+```sql
+CREATE OR REPLACE FUNCTION mi_funcion(...) RETURNS ... AS $$ ... $$;
+REVOKE EXECUTE ON FUNCTION mi_funcion(...) FROM PUBLIC, anon, authenticated, service_role;
+```
+
+   El owner (`postgres`) conserva su capacidad de ejecutar por ownership,
+   independiente del REVOKE.
+
+2. **Para tablas/vistas:** decidir explícitamente si el `Dxtm` residual se
+   acepta o se revoca. En 7B se decidió aceptarlo (no incluye SELECT/escritura,
+   no habilita Data API, revocarlo no cierra riesgo real). Documentar la
+   decisión.
+
+3. **Para nuevos proyectos Supabase (OPS, PROD):** no asumir que el snapshot
+   inicial de "cerrado" se mantiene tras ejecutar el schema. Re-verificar
+   grants después de cada bloque DDL importante.
+
+**Patrón de verificación post-DDL:**
+
+```sql
+-- Grants Data API sobre funciones del proyecto (G3)
+SELECT g.grantee, g.routine_name, g.privilege_type
+FROM information_schema.role_routine_grants g
+WHERE g.routine_schema = 'public'
+  AND g.grantee IN ('anon', 'authenticated', 'service_role', 'PUBLIC')
+  AND g.routine_name IN (<lista de funciones del proyecto>);
+-- Si devuelve filas: hay grants que normalizar.
+```
+
+**Implicación para n8n por pooler:** el REVOKE EXECUTE a PUBLIC y roles Data
+API **no rompe la invocación de funciones desde n8n**, porque n8n entra al
+pooler como `postgres` (owner) y ejecuta funciones por ownership, no por grant
+EXECUTE. Confirmar con `current_user` del pooler antes de hacer el REVOKE.
+
+**Descubierto:** 2026-05-28, durante 7B-GRANTS. El diagnóstico post-creación de
+schema en TEST mostró EXECUTE-PUBLIC sobre las 13 funciones del proyecto, a
+pesar de que el snapshot pre-objetos (7B-1) había confirmado que TEST nacía
+cerrado. Esto motivó el bloque de normalización (REVOKE EXECUTE) y la regla
+operativa D-7B-05.
+
+---
+
+### L-7B-03 — Contar triggers reales con `pg_trigger`, no con `information_schema.triggers`
+
+**Cuándo aplica:** al armar scripts de paridad estructural entre ambientes,
+snapshots de schema, o verificaciones de "cantidad de triggers" tras un
+deploy/replicación.
+
+**Síntoma:** un script de paridad que compara TEST vs DEV reporta que TEST
+tiene **más triggers** que DEV (ej. DEV: 13 triggers, TEST: 18 triggers), a
+pesar de haber ejecutado el mismo schema canónico en ambos. La diferencia es
+sospechosa porque toda la otra estructura (tablas, vistas, funciones,
+constraints) está paritaria 1:1.
+
+**Por qué pasa:** `information_schema.triggers` es una vista del estándar SQL
+que **multiplica una fila por cada evento** definido en el trigger. Un trigger
+declarado como `AFTER INSERT OR UPDATE OR DELETE` aparece como 3 filas en
+`information_schema.triggers`, no como 1.
+
+Si el conteo se hace con `SELECT count(*) FROM information_schema.triggers ...`,
+los triggers multi-evento inflan el conteo. La cantidad varía según cómo cada
+trigger se definió, no según cuántos triggers reales existen.
+
+**Patrón correcto:** usar `pg_trigger` directamente, que tiene **una fila por
+trigger** independiente de la cantidad de eventos:
+
+```sql
+SELECT count(*) AS triggers_proyecto
+FROM pg_trigger t
+JOIN pg_class c ON c.oid = t.tgrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE NOT t.tgisinternal           -- excluir triggers internos del sistema
+  AND n.nspname = 'public'          -- solo schema del proyecto
+  AND c.relname NOT LIKE 'pg_%';    -- defensivo, excluir tablas del catálogo
+```
+
+**Diferencias clave:**
+
+| Aspecto | `information_schema.triggers` | `pg_trigger` |
+|---|---|---|
+| Filas por trigger multi-evento | N (una por evento) | 1 |
+| Incluye triggers internos del sistema | Sí (sin filtro disponible) | Filtrable con `NOT tgisinternal` |
+| Portabilidad SQL estándar | Sí | No (específico de PostgreSQL) |
+| Útil para conteos reales | No | Sí |
+
+**Cuándo SÍ usar `information_schema.triggers`:** si necesitás un detalle
+desglosado por evento (ej. "qué triggers escuchan INSERT" vs "qué triggers
+escuchan UPDATE"). Para conteos agregados, usar `pg_trigger`.
+
+**Implicación para scripts de paridad estructural:** revisar todas las
+queries de conteo (triggers, índices, constraints, etc.) y verificar que cada
+una use el catálogo correcto. PostgreSQL tiene catálogos paralelos
+(`pg_*` vs `information_schema.*`) con semánticas distintas; los `pg_*` suelen
+ser más precisos para conteos reales.
+
+**Descubierto:** 2026-05-28, durante 7B-2 Tanda 4A. La verificación post-deploy
+de funciones + triggers reportó "2 triggers" cuando se esperaba 1 (el trigger
+recién creado `trg_huespedes_set_telefono_normalizado` escucha INSERT y UPDATE,
+generando 2 filas en `information_schema.triggers`). Al revisar con
+`pg_trigger WHERE NOT tgisinternal`, el conteo real fue 1. Aplicado en
+todas las verificaciones posteriores de 7B-2 (Tandas 4B y 5) y en el cierre
+de paridad 10/10 vs DEV.

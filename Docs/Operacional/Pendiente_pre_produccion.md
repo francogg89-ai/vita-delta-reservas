@@ -3,9 +3,9 @@
 Lista de cambios y configuraciones a aplicar antes del despliegue de
 producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
 
-**Estado del archivo:** actualizado al cierre de H7 (sesión 2026-05-27).
-Items cerrados durante Etapa 6D listados en el resumen de abajo; detalle
-histórico de cada uno en el Apéndice al final del documento.
+**Estado del archivo:** actualizado al cierre de Etapa 7B (sesión 2026-05-28).
+Items cerrados durante Etapas 6D, 7A y 7B listados en los resúmenes de abajo;
+detalle histórico de los items 6D en el Apéndice al final del documento.
 
 ---
 
@@ -18,15 +18,44 @@ histórico de cada uno en el Apéndice al final del documento.
 | Espacio colgando en concatenación nombre + apellido | ✅ Cerrado | H6, H6-bis | A.3 |
 | Tests de concurrencia C-1 a C-6 | ✅ Cerrado | H7 | A.5 |
 
-**Items pendientes activos:** ver secciones 1 a 8 abajo.
+## Items cerrados en Etapa 7A — resumen
 
-**Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H7 cerrados; H8 en curso).
+| Item | Estado | Bloque que lo cerró | Referencia |
+|---|---|---|---|
+| 1.1 — Horizonte de disponibilidad/calendario configurable (60 → 120) | ✅ Cerrado | PreOPS-A6 | D-7A-03, `7A_CIERRE.md` |
+| 1.2 — Alineación de tipo `ninos` (función vs columnas) | ✅ Cerrado | Patch `crear_prereserva` v1.7.3 | D-7A-02, `7A_CIERRE.md` |
+| 1.3 — Contrato de `canal_pago_esperado` (validación manual) | ✅ Cerrado | Patch `crear_prereserva` v1.7.3 | D-7A-01, `7A_CIERRE.md` |
+
+## Items cerrados en Etapa 7B — resumen
+
+| Item | Estado | Bloque que lo cerró | Referencia |
+|---|---|---|---|
+| Creación del entorno TEST (proyecto Supabase independiente) | ✅ Cerrado | 7B-1 | D-7B-01, `7B_CIERRE.md` |
+| Paridad estructural TEST vs DEV (schema v1.7.3, 10/10) | ✅ Cerrado | 7B-2 | `7B_CIERRE.md` sección 5 |
+| Seeds mínimos en TEST | ✅ Cerrado | 7B-3 | `7B_CIERRE.md` sección 6 |
+| `pg_cron` activo en TEST con ejecuciones reales | ✅ Cerrado | 7B-3-cron | `7B_CIERRE.md` sección 7 |
+| Permisos Data API normalizados en TEST (REVOKE EXECUTE) | ✅ Cerrado | 7B-GRANTS | D-7B-03, D-7B-05 |
+| Workflows `__TEST` importados y validados (happy path 8/8) | ✅ Cerrado | 7B-4 | D-7B-04, `7B_CIERRE.md` sección 9 |
+| Cadena transaccional end-to-end W2→W3→W4 en TEST | ✅ Cerrado | 7B-4 | `7B_CIERRE.md` sección 10 |
+
+**Items pendientes activos:** ver secciones 1 a 8 abajo. **Nota:** las secciones 1.1, 1.2 y 1.3 quedaron cerradas en Etapa 7A (detalle conservado abajo con marca de cierre). Los items cerrados en 7B (entorno TEST levantado) se registran en el resumen de arriba; detalle completo en `7B_CIERRE.md`, no se duplica aquí.
+
+**Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H7 cerrados; H8 cerrado).
+**Cierre Etapa 7A:** `7A_CIERRE.md`.
+**Cierre Etapa 7B:** `7B_CIERRE.md`.
 
 ---
 
 ## 1. Configuración de schema
 
 ### 1.1 Horizonte de disponibilidad — pasar de hardcoded a configurable
+
+> **✅ CERRADO en Etapa 7A (PreOPS-A6, 2026-05-28).** El horizonte de
+> `vista_disponibilidad` y `vista_calendario` ahora se lee desde
+> `configuracion_general.horizonte_disponibilidad_dias` (valor `120`) con
+> fallback `120`. La clave se agregó al seed del Bloque 21. Decisión D-7A-03.
+> Ver `7A_CIERRE.md`. El contenido original se conserva abajo como referencia
+> histórica del diseño.
 
 **Estado actual (DEV):** `vista_disponibilidad` y `vista_calendario` tienen
 el horizonte hardcoded a 60 días forward.
@@ -93,6 +122,13 @@ WHERE clave = 'horizonte_disponibilidad_dias';
 
 ### 1.2 Alineación de tipo `ninos` entre función y tablas
 
+> **✅ CERRADO en Etapa 7A (patch `crear_prereserva` v1.7.3, 2026-05-28).**
+> Resuelto con Opción 2: variable `v_ninos` alineada a `TEXT` en
+> `crear_prereserva` (extract `NULLIF(TRIM(payload->>'ninos'), '')`, sin cast a
+> BOOLEAN). Semántica: `NULL`=no informado, texto libre=detalle operativo.
+> Los 3 registros legacy con `'false'` migrados a `NULL` (limpieza puntual).
+> Decisión D-7A-02. Ver `7A_CIERRE.md`. Contenido original abajo como referencia.
+
 **Estado actual (DEV):** ⏳ Pendiente liviano, no bloqueante.
 
 **Contexto:** `crear_prereserva` declara la variable local `v_ninos` como `BOOLEAN` y aplica `(NULLIF(TRIM(payload->>'ninos'), ''))::BOOLEAN` en el extract. Sin embargo, las columnas `pre_reservas.ninos` y `reservas.ninos` son `TEXT nullable`. PostgreSQL aplica cast implícito BOOLEAN→TEXT al INSERT, persistiendo el valor textual `"false"` (observado empíricamente en los 3 registros existentes en DEV).
@@ -108,6 +144,14 @@ WHERE clave = 'horizonte_disponibilidad_dias';
 
 ### 1.3 Contrato de `canal_pago_esperado` — validación manual vs schema
 
+> **✅ CERRADO en Etapa 7A (patch `crear_prereserva` v1.7.3, 2026-05-28).**
+> Resuelto con Opción 1: restaurada la validación manual de
+> `canal_pago_esperado` en el IF de obligatorios de `crear_prereserva` →
+> rebota `payload_invalido` para ausente/vacío/whitespace. La columna sigue
+> `TEXT NOT NULL`; el CHECK de 5 valores se mantiene. Validación de valores
+> fuera del CHECK queda fuera de alcance. Decisión D-7A-01. Ver `7A_CIERRE.md`.
+> Contenido original abajo como referencia.
+
 **Estado actual (DEV):** ⏳ Pendiente liviano, no bloqueante.
 
 **Contexto:** el extract de `crear_prereserva` aplica el patrón canónico `NULLIF(TRIM(payload->>'canal_pago_esperado'), '')`, pero `canal_pago_esperado` no aparece en la validación manual post-extract de campos obligatorios. La columna `pre_reservas.canal_pago_esperado` sigue siendo `TEXT NOT NULL`. Si llega ausente, vacío o whitespace, la variable queda NULL y el INSERT falla por constraint `NOT NULL` con error crudo de PostgreSQL, no con `payload_invalido` controlado.
@@ -120,6 +164,69 @@ WHERE clave = 'horizonte_disponibilidad_dias';
 3. Mantener comportamiento actual y documentar como decisión definitiva.
 
 **Origen:** hallazgo gestionado post-revisión del bump v1.7.2 durante H8 Frente A. Documentado en changelog del bump v1.7.2 y en `H8_SNAPSHOTS_SCHEMA_v1.7.2_WORKING_NOTES.md`.
+
+### 1.4 `tipo_valor` sin poblar en `configuracion_general`
+
+**Estado actual (DEV):** ⏳ Observación liviana, no bloqueante.
+
+**Contexto:** las 10 claves de `configuracion_general` en DEV tienen
+`tipo_valor = NULL` sin excepción (incluye enteros como `prereserva_expiracion_minutos=60`
+y `horizonte_disponibilidad_dias=120`, booleanos como `escalonamiento_activo=true`,
+y horas como `hora_checkin_default=13:00`). El campo `tipo_valor` existe en el
+schema pero nunca se pobló. Hallazgo surgido en PreOPS-A6 (Etapa 7A) al
+inspeccionar la tabla completa.
+
+**Por qué es observación, no bloqueo:** ninguna función ni vista depende de
+`tipo_valor` — los casts (`valor::INTEGER`, `valor::TIME`, etc.) son explícitos
+en cada query. El sistema funciona correctamente con `tipo_valor=NULL`.
+
+**Cuándo conviene resolverlo:** antes de construir el dashboard operativo (OPS)
+si el dashboard va a usar `tipo_valor` para decidir cómo renderizar inputs de
+configuración (un campo de texto vs un selector de hora vs un toggle booleano).
+
+**Opción sugerida (no decidida):** poblar `tipo_valor` en las 10 claves con un
+UPDATE puntual, con valores como `integer`, `boolean`, `time` según corresponda.
+No se hizo en 7A para no abrir un mini-proyecto de normalización fuera del
+alcance del horizonte configurable.
+
+**Origen:** hallazgo de PreOPS-A6 (Etapa 7A, 2026-05-28).
+
+### 1.5 Endurecimiento de permisos Data API en DEV (paridad con TEST)
+
+**Estado actual (DEV):** ⏳ Pendiente. No diseñado ni planificado todavía.
+
+**Contexto:** durante Etapa 7B se aplicó en TEST un modelo de grants mínimo
+(REVOKE EXECUTE a `PUBLIC`/`anon`/`authenticated`/`service_role` sobre las 13
+funciones del proyecto; sin grants Data API útiles para roles no-owner; `Dxtm`
+residual documentado como aceptado — ver D-7B-03 y D-7B-05).
+
+**DEV no se tocó durante 7B** (por decisión explícita) y queda más abierto que
+TEST: en DEV las 13 funciones siguen invocables vía Data API por roles
+`PUBLIC`/`anon`/`authenticated`/`service_role`. Esto no es bug de DEV — es el
+default de PostgreSQL/Supabase aplicado al crear cada función — pero rompe la
+simetría con TEST.
+
+**Por qué es pendiente, no urgencia:** mientras DEV no tenga frontend público ni
+consumidores Data API externos, no es un riesgo activo (n8n entra por pooler
+como `postgres` owner y no depende de `EXECUTE` para invocar funciones). El
+endurecimiento de DEV conviene **antes de cualquier integración que exponga
+Data API en DEV** y **antes del diseño de OPS/PROD** (para no propagar la
+asimetría).
+
+**Alcance esperado (a diseñar en una etapa propia):**
+1. Diagnóstico read-only equivalente al G1-G5 de 7B-GRANTS aplicado a DEV.
+2. Verificación previa de que el REVOKE no rompe consumidores existentes (n8n,
+   posibles otros).
+3. REVOKE EXECUTE sobre las 13 funciones a `PUBLIC` + roles Data API,
+   idempotente.
+4. Verificación posterior (G3 sin filas + owner intacto).
+5. Decisión sobre el `Dxtm` residual de DEV (probablemente igual criterio que
+   TEST: aceptado, no tocado).
+
+No diseñar ni ejecutar ahora — queda como pendiente futuro registrado.
+
+**Origen:** decisión explícita de 7B de no tocar DEV; D-7B-03; `7B_CIERRE.md`
+sección 14.
 
 ---
 
@@ -357,6 +464,53 @@ Estos no reemplazan H7. H7 validó concurrencia controlada con SQL y locks; 6.2 
 **Decisión:** queda como cobertura opcional pre-PROD si se considera necesario. No bloqueante para avanzar a TEST o a integraciones reales.
 
 **Origen:** observación empírica en C-6 de H7.
+
+### 6.4 Validación funcional ampliada sobre TEST (casos de error)
+
+**Estado:** ⏳ Pendiente. No diseñado todavía.
+
+**Contexto:** Etapa 7B cerró con happy paths como evidencia suficiente para
+validar el levantamiento del entorno TEST. Los casos de error de los 8
+workflows no fueron ejercitados sobre TEST.
+
+**Por qué no es bloqueante para avanzar:** la validez estructural y los happy
+paths están confirmados (paridad 10/10 vs DEV; cadena W2→W3→W4 end-to-end OK).
+Los casos de error están cubiertos a nivel SQL por las decisiones D-HARD-01 a
+D-HARD-06 (patrón canónico de validación) y por los tests de hardening 6D
+ejecutados en DEV. Ejercitarlos en TEST es validación de regresión sobre el
+ambiente nuevo, no validación de un riesgo abierto.
+
+**Alcance esperado:** ejecutar sobre TEST la batería de casos de error que
+cubren los caminos no-felices de las funciones write y read-only. TEST es el
+ambiente seguro para esto: aislado de DEV, sin consumidores reales, con la
+cadena W2→W3→W4 y el bloqueo W6 ya validados como base.
+
+**Casos a ejercitar (lista completa en `7B_CIERRE.md` sección 14):**
+
+- cabaña inexistente (W1, W2, W6);
+- solapamientos (reserva sobre bloqueo, bloqueo sobre reserva, pre-reserva
+  sobre pre-reserva activa);
+- doble pre-reserva con misma `idempotency_key` (idempotencia bajo colisión —
+  ramas `pre_lock`/`post_lock`/`unique_violation` de `crear_prereserva`);
+- re-confirmación de reserva ya convertida (W4 → `estado_invalido`);
+- cancelación de estados no cancelables (W5 sobre pre-reserva ya terminal);
+- payloads inválidos (campos obligatorios faltantes);
+- campos vacíos / whitespace puro en obligatorios (validación del hardening
+  D-HARD-01 y D-HARD-02);
+- motivos inválidos (W5 con motivo fuera del enum; W6 con motivo fuera del
+  enum);
+- normalización defensiva (W3/W4/W5/W6) — verificar comportamiento con
+  `""`/`"   "` en campos obligatorios de texto;
+- pagos tardíos o inconsistentes (caso v1.3 de `registrar_pago`:
+  `prereserva_no_activa` con `warning`).
+
+**Datos de prueba en TEST como base:** la pre-reserva 2 ya convertida, la
+reserva 1, el pago 1 y el bloqueo 1 conservados desde 7B sirven como fixtures
+para algunos de estos casos (re-confirmación, re-cancelación, solapamiento con
+bloqueo activo).
+
+**Origen:** `7B_CIERRE.md` sección 14; cierre de 7B con scope acotado a happy
+paths.
 
 ---
 

@@ -2,11 +2,11 @@
 
 ## Resumen ejecutivo
 
-El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.2 con hardening estructural y de concurrencia aplicados) + workflows n8n contra DEV operativos (6C) + Etapa 6D cerrada operativamente en H1-H7; pendiente H8 documental**. El contrato n8n ↔ Supabase está validado end-to-end con 40 tests funcionales de 6C + 101 tests de hardening estructural + 6 tests de concurrencia real en DEV.
+El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.3 con hardening estructural y de concurrencia aplicados) + workflows n8n operativos (6C) + Etapa 6D cerrada (2026-05-27) + Etapa 7A de correcciones pre-TEST/pre-OPS cerrada (2026-05-28) + entorno TEST levantado, paritario y operativo (7B, cerrada 2026-05-28)**. Los workflows n8n fueron validados contra DEV en Etapa 6C (40 tests funcionales + verificaciones cruzadas) y contra TEST en Etapa 7B (smokes happy path 8/8); en TEST se validó además la cadena transaccional completa W2→W3→W4 end-to-end. Hardening estructural y de concurrencia validados en DEV: 101 tests de hardening + 6 tests de concurrencia real + 9 tests funcionales y 4 estructurales de 7A.
 
-**Etapa actual:** 6D — Hardening pre-producción. H1-H7 cerrados operativamente; solo queda H8 (cierre documental, sin SQL).
+**Etapa actual:** 7B — Levantamiento del entorno TEST. Cerrada (2026-05-28). TEST creado como proyecto Supabase independiente, schema reconstruido desde el canónico v1.7.3 (paridad estructural 10/10 vs DEV), seeds cargados, `pg_cron` activo con ejecuciones reales verificadas, permisos Data API normalizados, 8 workflows `__TEST` importados y validados con cadena end-to-end W2→W3→W4. DEV no se tocó durante 7B salvo consultas read-only aprobadas.
 
-**No es producción.** DEV es entorno funcional con backend + workflows + hardening estructural + hardening de concurrencia validados. Falta entorno TEST + integración con consumidores reales (webhook MP, bot, frontend).
+**No es producción.** DEV y TEST son entornos funcionales separados. Falta integración con consumidores reales (webhook MP, bot, frontend), endurecimiento de DEV equivalente al de TEST y validación funcional ampliada (casos de error) sobre TEST.
 
 ---
 
@@ -61,10 +61,10 @@ El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV compl
 - 8 workflows manuales operativos en DEV.
 - Documento de cierre formal: `6C_CIERRE.md`.
 
-### Etapa 6D — Hardening pre-producción 🚧 Cerrada operativamente en H1-H7; pendiente H8 documental
+### Etapa 6D — Hardening pre-producción ✅ Cerrada
 - 10 bloques cerrados: H1, H2, H3, H4, H4-bis, H4-ter, H5, H6, H6-bis (hardening estructural) + H7 (tests de concurrencia).
 - 1 bloque pendiente: H8 (cierre documental, sin SQL).
-- Bitácora de ejecución: `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md`. Documento de cierre formal `6D_CIERRE.md`: pendiente en H8.
+- Documento de cierre formal: `6C_CIERRE.md`.
 
 ---
 
@@ -198,22 +198,74 @@ Excepción: W7 incorpora nodo IF para ramificación de validación temprana.
 
 ---
 
-## Estado actual de DEV al cierre de H7
+### Etapa 7B — Levantamiento del entorno TEST ✅ Cerrada
 
-**Esta es la fuente vigente del estado de DEV.**
+**Sesión 2026-05-28.** Cerró el segundo entorno de la estrategia DEV → TEST → OPS → PROD.
+
+**Lo que se construyó:**
+- Proyecto Supabase TEST (`vita-delta-test`, sa-east-1, Free tier).
+- Schema reconstruido desde el canónico v1.7.3 (no clon de DEV). **Paridad estructural demostrada 10/10** vs DEV: extensiones, enums, tablas (20), vistas (6), funciones del proyecto (13), triggers (13), EXCLUDE (2), CHECK (38), FK (15), índices únicos (27).
+- Seeds del Bloque 21 cargados: 5 cabañas, 3 socios, 10 claves de `configuracion_general`, 1 cuenta de cobro, 1 temporada baseline, 1 plantilla.
+- `pg_cron` activo en TEST: `expirar_prereservas` (cada 5 min) con ejecuciones reales verificadas (`status=succeeded`); `cleanup_cron_history` (mensual).
+- Permisos Data API normalizados: REVOKE EXECUTE sobre las 13 funciones a `PUBLIC`/`anon`/`authenticated`/`service_role`; `Dxtm` residual documentado como aceptado; sin grants Data API útiles para roles no-owner. Owner `postgres` intacto (n8n entra como owner por pooler).
+- 8 workflows n8n importados con sufijo `__TEST` y credencial propia `vita_supabase_test`; smokes happy path 8/8.
+- Cadena transaccional end-to-end **W2 → W3 → W4 validada** (pre-reserva → pago `en_revision` → reserva confirmada por camino combinado), más verificación cruzada con W1 que confirmó la transición de estado en el motor de disponibilidad.
+
+**IDs de cabaña en TEST:** `1=Bamboo, 2=Madre Selva, 3=Arrebol, 4=Guatemala, 5=Tokio`. **No coinciden con DEV (17-21).** Los IDs no son portables; cada workflow debe usar los del ambiente al que apunta. Lo portable es la estructura lógica de los workflows, no los valores de input.
+
+**Aislamiento:** TEST quedó separado por credencial propia (`vita_supabase_test`), workflows `__TEST` distintos (objetos nuevos en n8n, no modificaciones de los de DEV), y marcadores de ambiente en `source_event` (`n8n_test_w0X_..._manual`) e `idempotency_key` de W2 (`manual_test_...`) que se persisten en tablas y permiten trazabilidad inequívoca DEV vs TEST. DEV intacto durante toda la etapa.
+
+**Datos de prueba en TEST tras el cierre:** pre-reserva 1 (`cancelada_por_cliente`), pre-reserva 2 (`convertida`), reserva 1 (`confirmada`), pago 1 (`confirmado`), bloqueo 1 (Arrebol activo). Conservados como evidencia/fixtures, no limpiados. Reseteo eventual de TEST se diseñará como bloque específico SQL aprobado.
+
+**Alcance del cierre:** happy paths como evidencia suficiente. Casos de error (cabaña inexistente, solapamientos, payloads inválidos, normalización defensiva en campos vacíos, etc.) quedan como pendiente: validación funcional ampliada sobre TEST (ver `Pendiente_pre_produccion.md` 6.4).
+
+**Documento de cierre formal:** `7B_CIERRE.md`.
+
+---
+
+## Estado actual de DEV (post-7A, intacto durante 7B)
+
+**Esta es la fuente vigente del estado de DEV.** Los conteos son los mismos al cierre de 7B: 7B no modificó DEV. La única actividad en DEV durante 7B fueron consultas read-only de diagnóstico (paridad estructural y verificación del rol de conexión n8n).
 
 | Recurso | Conteo | Detalle |
 |---|---|---|
-| Pre-reservas | 2 | estados terminales (`convertida`, `cancelada_por_cliente`) |
+| Pre-reservas | 7 | 2 de baseline 6D (`convertida`, `cancelada_por_cliente`) + 5 de tests 7A (todas `cancelada_por_cliente`, terminales) |
 | Pagos | 1 | `confirmado` |
-| Reservas | 1 | `confirmada`, cabaña 17, 10-13 jul 2026 |
-| Huéspedes | 2 | id 34 ("Juan Pérez Test") y id 35 ("Test W5 Cliente"), ambos con `apellido=NULL` |
+| Reservas | 1 | `confirmada`, cabaña 17, 10-13 jul 2026 (`ninos=NULL` tras limpieza 7A) |
+| Huéspedes | 3 | id 34, 35 (baseline, `apellido=NULL`) + id 45 ("Test 7A", de tests 7A) |
 | Bloqueos | 2 | activos |
-| Logs | 11 | en `log_cambios` |
+| Logs | 26 | en `log_cambios` (+15 vs baseline 7A: 5 creaciones + 5 cancelaciones + 5 transiciones de estado) |
+| Filas con `ninos='false'` | 0 | limpieza puntual 7A (pre_reservas 25, 26; reserva 8 → NULL) |
+| `configuracion_general` | 10 | incluye `horizonte_disponibilidad_dias=120` |
+| `vista_disponibilidad` / `vista_calendario` | horizonte 120 | configurable vía `configuracion_general`, fallback 120 |
 
-Conteos idénticos al baseline pre-H7 — confirma cero side effects persistentes post-cleanup de la sesión de concurrencia completa (6 tests con fixtures multipaso, todos limpiados al cierre de cada test).
+Los recursos de tests 7A están en estados terminales (canceladas) y no afectan disponibilidad ni operación. Las pre-reservas y el huésped de test se conservan como evidencia, no se borraron físicamente.
+
+**Estado de DEV al cierre de H7 (histórico, pre-7A):** pre-reservas=2, pagos=1, reservas=1, huéspedes=2, bloqueos=2, logs=11. Conteos idénticos al baseline pre-H7 — confirmó cero side effects persistentes post-cleanup de la sesión de concurrencia (6 tests con fixtures multipaso, todos limpiados).
 
 **Nota:** DEV fue limpiado entre el cierre de 6C y el inicio de 6D (huéspedes de 35→2, pre-reservas de 26→2). Esa limpieza no fue parte del hardening; quedó como contexto operativo.
+
+---
+
+## Estado actual de TEST al cierre de Etapa 7B
+
+**Entorno TEST: proyecto Supabase independiente, alineado funcionalmente con el canónico v1.7.3.**
+
+| Recurso | Conteo | Detalle |
+|---|---|---|
+| Pre-reservas | 2 | id 1 `cancelada_por_cliente` (ciclo W2→W5); id 2 `convertida` (cadena W2→W3→W4) |
+| Pagos | 1 | id 1 `confirmado` (camino combinado de W4 desde pago `en_revision`) |
+| Reservas | 1 | id 1 `confirmada`, cabaña 1 (Bamboo), 10-13 jul 2026 |
+| Huéspedes | 1 | id 1 "Juan Pérez Test" (reutilizado vía upsert) |
+| Bloqueos | 1 | id 1 activo, cabaña 3 (Arrebol), 20-22 nov 2026, motivo `tormenta` |
+| Logs | varios | con `source_event` marcado `n8n_test_w0X_..._manual` |
+| `configuracion_general` | 10 | idéntica a DEV (sembrada desde el canónico) |
+| Horizonte de vistas | 120 | igual que DEV |
+| Jobs `pg_cron` | 2 | `expirar_prereservas` (cada 5 min, ejecuciones reales verificadas), `cleanup_cron_history` (mensual) |
+
+**IDs de cabaña:** `1=Bamboo, 2=Madre Selva, 3=Arrebol, 4=Guatemala, 5=Tokio`. **No coinciden con DEV (17-21).**
+
+Datos de prueba conservados como evidencia/fixtures, no limpiados. Reseteo eventual de TEST se diseñará como bloque SQL aprobado separado, no se improvisa.
 
 ---
 
@@ -237,45 +289,48 @@ Conteos idénticos al baseline pre-H7 — confirma cero side effects persistente
 
 ## Schema canónico actual
 
-**Schema canónico vigente:** `6B_SCHEMA_SQL.md v1.7.2`. El documento refleja el estado real de DEV post-hardening H2-H6-bis y post-validación H7, con hallazgos menores gestionados como pendientes pre-TEST/PROD.
+**Schema canónico vigente:** `6B_SCHEMA_SQL.md v1.7.3`. El documento refleja el estado real de DEV post-hardening (6D) y post-correcciones pre-TEST/pre-OPS (7A). DEV está 100% alineado funcionalmente con v1.7.3.
 
-**Backup histórico:** `Docs/Implementacion/Archivados/6B_SCHEMA_SQL_v1.7.1_PRE_HARDENING.md` con banner explícito de archivo no canónico, conservado para auditoría/rollback.
+**Backup histórico:** `Docs/Implementacion/Archivados/6B_SCHEMA_SQL_v1.7.2_PRE_PREOPS.md` (estado pre-7A) y `Docs/Implementacion/Archivados/6B_SCHEMA_SQL_v1.7.1_PRE_HARDENING.md` (estado pre-6D), ambos con banner explícito de archivo no canónico, conservados para auditoría/rollback.
 
-El bump v1.7.2 reflejó documentalmente el estado real de DEV post-hardening H2-H6-bis aplicado durante Etapa 6D. H7 (tests de concurrencia) no introdujo cambios SQL. El bump se ejecutó en H8 Frente A vía snapshots read-only contra DEV (`pg_get_functiondef`, `pg_get_viewdef`) y edición in-place quirúrgica del canónico.
+**Lo que el bump v1.7.3 documentó (Etapa 7A):**
 
-**Lo que el bump v1.7.2 documentó:**
+1. `crear_prereserva`: variable `v_ninos` de `BOOLEAN` a `TEXT`, extract sin cast a BOOLEAN (`NULLIF(TRIM(payload->>'ninos'), '')`). Resuelve el hallazgo de tipo `ninos`.
+2. `crear_prereserva`: `canal_pago_esperado` agregado al IF de obligatorios → rebota `payload_invalido` para ausente/vacío/whitespace. Resuelve el hallazgo de `canal_pago_esperado`.
+3. `vista_disponibilidad` y `vista_calendario`: horizonte configurable vía `configuracion_general.horizonte_disponibilidad_dias` con fallback 120 (antes hardcoded 60). Forma persistida adoptada.
+4. Seed del Bloque 21: clave `horizonte_disponibilidad_dias` agregada (conteo `configuracion_general` 9 → 10).
+
+**Lo que documentó el bump previo v1.7.2 (Etapa 6D):**
 
 1. Patrón defensivo `NULLIF(TRIM(...), '')` en los extracts de payload de las 5 funciones write críticas (`registrar_pago`, `confirmar_reserva`, `crear_prereserva`, `cancelar_prereserva`, `crear_bloqueo`).
 2. Fix de rango en `vista_ocupacion` (24 meses exactos).
 3. Fix cosmético de `TRIM` en concatenación nombre + apellido en `vista_calendario`, `vista_limpieza_semana` y `vista_prereservas_activas`.
-4. Correcciones documentales de alineación con DEV real: `registrar_pago` log explícito con `COALESCE(v_validado_por, 'registrar_pago')` y cast `::nivel_log_enum`; `confirmar_reserva` retorna `error='estado_invalido'` con campo `estado_actual`; `crear_prereserva` declara `v_ninos BOOLEAN`.
+4. Correcciones documentales de alineación con DEV real.
 5. Forma persistida de las vistas adoptada (`pg_get_viewdef()`) para garantizar match byte-exacto contra DEV.
 
-**Hallazgos no resueltos documentados en el changelog v1.7.2** (gestionados como pendientes livianos pre-TEST/PROD, ver `Pendiente_pre_produccion.md`):
+**Hallazgos del changelog v1.7.2 — todos resueltos en v1.7.3 (Etapa 7A):**
 
-- Alineación de tipo `ninos` entre función (BOOLEAN) y columnas (TEXT).
-- Contrato de `canal_pago_esperado`: el extract aplica el patrón canónico, pero la columna `pre_reservas.canal_pago_esperado` continúa siendo `TEXT NOT NULL`.
+- ✅ Alineación de tipo `ninos`: resuelto (D-7A-02).
+- ✅ Contrato de `canal_pago_esperado`: resuelto (D-7A-01).
 
-**El canónico v1.7.2 no crea schema paralelo. Es la única fuente de verdad documental del schema.**
+**Observación liviana abierta (no bloqueante):** `tipo_valor` sin poblar en las 10 claves de `configuracion_general`. Ver `Pendiente_pre_produccion.md` sección 1.4. A evaluar antes del dashboard OPS.
+
+**El canónico v1.7.3 no crea schema paralelo. Es la única fuente de verdad documental del schema.**
+
+**TEST también está alineado funcionalmente con v1.7.3** — su schema se reconstruyó desde el canónico en Etapa 7B, con paridad estructural 10/10 demostrada vs DEV (ver `7B_CIERRE.md` sección 5).
 
 ---
 
-## Próxima etapa inmediata — Cerrar Etapa 6D
+## Próxima etapa — opciones disponibles
 
-1. **H8** — Actualización documental y cierre formal. Sesión separada (no requiere SQL).
+Con 6D, 7A y 7B cerradas, las siguientes son **opciones disponibles** a priorizar por Franco (no orden obligatorio, no comprometidas en este documento):
 
-### Después de cerrar 6D — Opción B (recomendada por `6C_CIERRE.md`)
+- **Validación funcional ampliada sobre TEST:** ejecutar la batería de casos de error listados en `7B_CIERRE.md` sección 14 (cabaña inexistente, solapamientos, doble pre-reserva, re-confirmación, cancelación de estados no cancelables, payloads inválidos, campos vacíos/whitespace, motivos inválidos, normalización defensiva, pagos tardíos). TEST es el ambiente seguro para ejercitarlos. Ver `Pendiente_pre_produccion.md` 6.4.
+- **Endurecimiento de permisos en DEV:** aplicar a DEV un modelo equivalente al de TEST (REVOKE EXECUTE a `PUBLIC` sobre las funciones del proyecto, etc.). No diseñado ni planificado todavía. Ver `Pendiente_pre_produccion.md` 1.5.
+- **Diseño del entorno OPS:** operación interna real (Vicky, Franco, Rodrigo, Jennifer), sin consumidores externos automáticos.
+- **Webhook MercadoPago / bot / frontend:** integración con consumidores reales, **siempre sobre TEST primero** antes de cualquier consideración productiva.
 
-Replicar DEV en un proyecto Supabase separado para integrar consumidores reales sin riesgo a datos reales.
-
-**Ventaja:** habilita pruebas con webhook MP, frontend, etc.
-**Costo:** sesión media (2-3 horas) — duplicar schema, seeds, credenciales, parametrizar ambiente en workflows n8n.
-
-### Posteriores — Opciones C y D (orden por decidir)
-
-**C — Webhook MercadoPago:** workflow operativo real que invoca W3 tras webhook de MP, con deduplicación por `payment_id`.
-
-**D — Bot conversacional (Etapa 4B implementación):** implementar el bot diseñado en Etapa 4B usando Claude API + Meta API.
+No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión explícita.
 
 ---
 
@@ -291,14 +346,36 @@ Replicar DEV en un proyecto Supabase separado para integrar consumidores reales 
 | Tests de concurrencia C-1 a C-6 | ✅ Cerrado | H7 |
 | Bump documental del schema canónico a v1.7.2 | ✅ Cerrado | H8 Frente A |
 
+**Items cerrados en Etapa 7A:**
+
+| Item | Estado | Bloque que lo cerró |
+|---|---|---|
+| Horizonte de `vista_disponibilidad`/`vista_calendario` configurable (60→120) | ✅ Cerrado | PreOPS-A6 (D-7A-03) |
+| Alineación de tipo `ninos` (función vs columnas) | ✅ Cerrado | Patch `crear_prereserva` v1.7.3 (D-7A-02) |
+| Contrato de `canal_pago_esperado` (validación manual) | ✅ Cerrado | Patch `crear_prereserva` v1.7.3 (D-7A-01) |
+
+**Items cerrados en Etapa 7B:**
+
+| Item | Estado | Bloque que lo cerró |
+|---|---|---|
+| Levantamiento del entorno TEST (proyecto Supabase independiente) | ✅ Cerrado | 7B-1 (D-7B-01) |
+| Paridad estructural TEST vs DEV (schema v1.7.3) | ✅ Cerrado | 7B-2 (paridad 10/10) |
+| Seeds mínimos en TEST | ✅ Cerrado | 7B-3 |
+| `pg_cron` activo en TEST con ejecuciones reales | ✅ Cerrado | 7B-3-cron |
+| Permisos Data API normalizados en TEST (REVOKE EXECUTE) | ✅ Cerrado | 7B-GRANTS (D-7B-03, D-7B-05) |
+| Workflows `__TEST` importados y validados (happy path 8/8) | ✅ Cerrado | 7B-4 (D-7B-04) |
+| Cadena transaccional end-to-end W2→W3→W4 en TEST | ✅ Cerrado | 7B-4 |
+
 **Items pendientes:**
 
-1. **Horizonte de `vista_disponibilidad` y `vista_calendario` a 120 días** — pendiente histórico. Hoy hardcoded en 60 días; mover a `configuracion_general` cuando se considere oportuno.
+1. **`tipo_valor` sin poblar en `configuracion_general`** — observación de 7A (PreOPS-A6). Las 10 claves tienen `tipo_valor=NULL`. No bloqueante; evaluar antes del dashboard OPS si se usa para render de inputs. Ver `Pendiente_pre_produccion.md` 1.4.
 2. **Validación de tipos inválidos no vacíos** — surgido durante hardening. Casos como `id_cabana="abc"` o `fecha_in="no-es-fecha"` siguen rompiendo con error crudo. Fuera del alcance del hardening por strings/whitespace.
 3. **Cobertura empírica de ramas `pre_lock` y `unique_violation` de idempotencia** — opcional, no bloqueante. H7 observó empíricamente la rama `post_lock` en C-6. Las otras dos ramas están vigentes en el cuerpo de `crear_prereserva` y son alcanzables por diseño, pero no fueron gatilladas en H7 por timing del test. Queda como cobertura opcional pre-PROD si se considera necesario.
 4. **RLS configurado** — pendiente histórico, decisión postergada hasta tener frontend público.
 5. **Tarifas reales cargadas** — pendiente histórico.
 6. **Feriados productivos cargados** — pendiente histórico.
+7. **Endurecimiento de permisos en DEV** — aplicar a DEV el modelo equivalente al de TEST (REVOKE EXECUTE a `PUBLIC` sobre las 13 funciones del proyecto). No diseñado todavía. Ver `Pendiente_pre_produccion.md` 1.5.
+8. **Validación funcional ampliada sobre TEST** — batería de casos de error documentada en `7B_CIERRE.md` sección 14. Ver `Pendiente_pre_produccion.md` 6.4.
 
 ---
 
@@ -310,17 +387,18 @@ Replicar DEV en un proyecto Supabase separado para integrar consumidores reales 
 - **No tiene tarifas reales cargadas.** El seed solo tiene una temporada baseline DEV con multiplicador neutro.
 - **No tiene feriados productivos cargados.**
 - **No tiene cobertura exhaustiva de todos los caminos internos posibles.** H7 validó los escenarios críticos de concurrencia (6 tests aprobados); algunas ramas internas defensivas quedan como cobertura opcional no bloqueante.
-- **No tiene entorno TEST levantado.** DEV es el único ambiente operativo.
-- **No tiene consumidores reales conectados.** Webhook MP, bot conversacional y frontend son etapas futuras.
+- **Tiene entorno TEST levantado y operativo (7B cerrada),** pero sigue sin entornos OPS o PROD, y sin consumidores externos reales conectados (webhook MP, bot, frontend siguen siendo etapas futuras).
 
 ---
 
 ## Documentación viva del proyecto
 
-- `6B_SCHEMA_SQL.md v1.7.2` — schema canónico SQL vigente. Backup histórico en `Docs/Implementacion/Archivados/6B_SCHEMA_SQL_v1.7.1_PRE_HARDENING.md`.
+- `6B_SCHEMA_SQL.md v1.7.3` — schema canónico SQL vigente. Backups históricos archivados.
 - `6B_PLAN_FASES.md` — plan ejecutado, conservado como referencia. Sección 6.8 es fuente para H7.
 - `ARQUITECTURA_ETAPA_6B_MIGRACION_SUPABASE.md` — arquitectura consolidada de migración.
 - `6C_CIERRE.md` — documento formal de cierre de etapa 6C.
+- `7A_CIERRE.md` — documento formal de cierre de Etapa 7A (correcciones pre-TEST/pre-OPS).
+- `7B_CIERRE.md` — documento formal de cierre de Etapa 7B (levantamiento del entorno TEST).
 - `Docs/Bitacora/6B_EJECUCION_DEV.md` — bitácora bloque por bloque de 6B.
 - `Docs/Bitacora/6C_EJECUCION.md` — bitácora workflow por workflow de 6C.
 - `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` — bitácora bloque por bloque de Etapa 6D (H1-H7 cerrados; H8 en curso).

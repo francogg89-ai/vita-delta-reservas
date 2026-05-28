@@ -4,15 +4,18 @@
 
 Antes de trabajar, leer en este orden:
 
-1. ESTADO_ACTUAL_VITA_DELTA.md
-2. DECISIONES_NO_REABRIR.md
-3. 6B_SCHEMA_SQL.md (schema canónico actual: v1.7.1)
-4. 6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
-5. 6B_PLAN_FASES.md
-6. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
-7. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
-8. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
-9. Docs/Operacional/Pendientes_Pre_Produccion.md (items para deploy a prod)
+1. Docs/Operacional/ESTADO_ACTUAL_VITA_DELTA.md
+2. Docs/Operacional/DECISIONES_NO_REABRIR.md
+3. Docs/Implementacion/6B_SCHEMA_SQL.md (schema canónico actual: **v1.7.3**)
+4. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
+5. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
+6. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
+7. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
+8. Docs/Implementacion/6B_PLAN_FASES.md
+9. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a TEST/OPS/PROD)
+10. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
+11. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
+12. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
 
 No cargar contexto histórico largo salvo pedido explícito del usuario.
 
@@ -108,17 +111,43 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - Patrón de trabajo establecido y reutilizable.
 - Documento de cierre formal: `6C_CIERRE.md`.
 
-**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.1`. **DEV está 100% alineado.**
+**Etapa 6D — Hardening pre-producción ✅ Cerrada (2026-05-27):**
 
-**Próxima etapa — Por decidir entre 4 opciones:**
+- Hardening estructural de validación SQL en las 5 funciones write (patrón `NULLIF(TRIM(...), '')`).
+- Fix de rango en `vista_ocupacion`; fix de `TRIM` en concatenación nombre + apellido.
+- Tests de concurrencia real validados (H7).
+- Bump documental del schema a v1.7.2.
+- Decisiones D-HARD-01 a D-HARD-11. Documento de cierre: `6D_CIERRE.md`.
 
-- **A — Hardening pre-producción:** ejecutar items de `Pendiente_pre_produccion.md` (NULLIF/TRIM en funciones write, fix de `vista_ocupacion`, etc.). Recomendado como primer paso.
-- **B — Entorno TEST:** replicar DEV en proyecto Supabase separado.
-- **C — Webhook MercadoPago:** primer consumidor productivo de W3 + W4.
-- **D — Bot conversacional (Etapa 4B implementación):** habilita canal Instagram + WhatsApp.
+**Etapa 7A — Correcciones pre-TEST / pre-OPS ✅ Cerrada (2026-05-28):**
 
-Recomendación documentada en `6C_CIERRE.md`: **A primero, después B**. Cerrar deudas técnicas conocidas antes de complicar el sistema con nuevos consumidores.
-No avanzar a MercadoPago real, bot conversacional, frontend público o producción sin decisión explícita del usuario y sin revisar primero `Pendientes_Pre_Produccion.md`.
+- Patch `crear_prereserva`: `v_ninos` a TEXT; `canal_pago_esperado` requerido en validación manual.
+- Limpieza puntual de datos legacy `ninos='false'` (3 registros → NULL).
+- Horizonte de `vista_disponibilidad`/`vista_calendario` configurable vía `configuracion_general.horizonte_disponibilidad_dias` (fallback 120).
+- Bump documental del schema a v1.7.3. Decisiones D-7A-01, D-7A-02, D-7A-03.
+- 9 tests funcionales + 4 de horizonte aprobados. Documento de cierre: `7A_CIERRE.md`.
+
+**Etapa 7B — Levantamiento del entorno TEST ✅ Cerrada (2026-05-28):**
+
+- TEST creado como proyecto Supabase independiente (`vita-delta-test`); schema reconstruido desde el canónico v1.7.3 (no clon de DEV).
+- Paridad estructural demostrada 10/10 vs DEV; seeds mínimos cargados; `pg_cron` activo con ejecuciones reales.
+- Permisos Data API normalizados (REVOKE EXECUTE sobre las 13 funciones a `PUBLIC`/`anon`/`authenticated`/`service_role`).
+- 8 workflows `__TEST` importados con credencial propia; happy path 8/8 + **cadena transaccional end-to-end W2→W3→W4 validada en TEST**.
+- **IDs de cabaña no portables:** DEV 17-21, TEST 1-5. Cada workflow usa los IDs del ambiente al que apunta.
+- DEV intacto durante toda la etapa. Decisiones D-7B-01 a D-7B-05; lecciones L-7B-01 a L-7B-03. Documento de cierre: `7B_CIERRE.md`.
+
+**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV y TEST están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B; paridad estructural 10/10).
+
+**Próxima etapa — opciones disponibles (no orden obligatorio):**
+
+Con DEV, TEST, 6D, 7A y 7B cerradas, las opciones a priorizar por Franco son:
+
+- Validación funcional ampliada sobre TEST (batería de casos de error documentada en `7B_CIERRE.md` sección 14 y `Pendiente_pre_produccion.md` 6.4).
+- Endurecimiento de permisos en DEV (paridad con TEST — `Pendiente_pre_produccion.md` 1.5).
+- Diseño del entorno OPS (operación interna real sin consumidores externos automáticos).
+- Integraciones con consumidores reales sobre TEST: webhook MercadoPago, bot conversacional, frontend público — siempre sobre TEST primero.
+
+No avanzar a OPS, dashboard, MercadoPago real, bot o frontend público sin decisión explícita del usuario y sin revisar primero `Pendiente_pre_produccion.md`.
 
 ## Forma de trabajo
 
