@@ -446,6 +446,24 @@ Esta regla **no se aplica retroactivamente a DEV** (DEV queda como pendiente fut
 
 **No reabrir.** Es una regla operativa de creación, no una decisión arquitectónica negociable.
 
+### D-7C-01 — Política de no-limpieza de fixtures de 7C
+
+La validación funcional ampliada (Etapa 7C, cerrada 2026-05-28) generó datos vivos en TEST que se **conservan como evidencia**, no se limpian:
+
+- Pre-reserva id 3 (Madre Selva, 1-4 ago, `pago_en_revision`).
+- Pre-reserva id 4 (Tokio, 10-13 sep, `pendiente_pago`).
+- Pago id 2 (sobre pre-reserva 2 convertida, `en_revision`) y pago id 3 (sobre pre-reserva 3, `en_revision`).
+- Bloqueo id 2 (Bamboo, 2-3 ago, activo) — mutación no planificada pero válida, generada durante A-W6-06 con `id_cabana:1`; el sistema actuó correctamente ante un payload válido.
+- Huéspedes id 3 e id 5.
+
+Todos quedan trazables por `source_event` / `id_evento_test` / `idempotency_key` con marcador de ambiente TEST.
+
+**Regla:** cualquier reset/limpieza de TEST debe ser un **bloque separado, con SQL explícito y aprobación previa**. No se improvisa caso por caso ni en medio de una validación. El diseño de ese bloque queda como pendiente (ver `Pendiente_pre_produccion.md` 6.5).
+
+Las lecciones operativas de 7C (L-7C-01 a L-7C-06) quedaron consolidadas en `Lecciones_Aprendidas.md`; no se duplican aquí.
+
+**No reabrir.**
+
 ## Decisiones aprobadas con código de referencia
 
 - **D3** — Mantener solo `hora_checkin` y `hora_checkout` en tablas (sin "hora base" vs "hora real").
@@ -487,6 +505,10 @@ Reglas firmes derivadas de la ejecución de la Etapa 7B (levantamiento del entor
 - **L-7B-01:** `current_database()` no discrimina ambiente en Supabase. Todos los proyectos Supabase tienen la base llamada `postgres`, por lo que un chequeo de ambiente basado en `db` es inválido. Para discriminar usar `current_user` (que trae `postgres.<project_ref>` cuando se entra por pooler), `inet_server_addr()` o, mejor, leer datos del seed específicos del ambiente (ej. IDs de cabaña).
 - **L-7B-02:** "Nacer cerrado" solo aplica al snapshot pre-objetos. Los defaults de PostgreSQL/Supabase aplican `Dxtm` (TRUNCATE/REFERENCES/TRIGGER) sobre tablas/vistas y `EXECUTE` para `PUBLIC` sobre funciones al *crear* cada objeto. Cada función nueva en `public` requiere `REVOKE EXECUTE` explícito (ver D-7B-05).
 - **L-7B-03:** Para contar triggers usar `pg_trigger` con filtro `NOT tgisinternal`, no `information_schema.triggers`. Esta última vista multiplica filas por evento (INSERT/UPDATE/DELETE) y genera falsos positivos de conteo: 12 triggers reales pueden aparecer como 18-24 según los eventos definidos. Ejemplo: `SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgrelid::regclass::text NOT LIKE 'pg_%';`
+
+## Lecciones operativas de validación funcional consolidadas (L-7C-XX)
+
+Reglas firmes derivadas de la ejecución de la Etapa 7C (validación funcional ampliada sobre TEST). **Detalle completo en `Lecciones_Aprendidas.md` (L-7C-01 a L-7C-06); no se duplican aquí** para evitar divergencia documental.
 
 ## Prototipos legacy
 

@@ -2,11 +2,11 @@
 
 ## Resumen ejecutivo
 
-El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.3 con hardening estructural y de concurrencia aplicados) + workflows n8n operativos (6C) + Etapa 6D cerrada (2026-05-27) + Etapa 7A de correcciones pre-TEST/pre-OPS cerrada (2026-05-28) + entorno TEST levantado, paritario y operativo (7B, cerrada 2026-05-28)**. Los workflows n8n fueron validados contra DEV en Etapa 6C (40 tests funcionales + verificaciones cruzadas) y contra TEST en Etapa 7B (smokes happy path 8/8); en TEST se validó además la cadena transaccional completa W2→W3→W4 end-to-end. Hardening estructural y de concurrencia validados en DEV: 101 tests de hardening + 6 tests de concurrencia real + 9 tests funcionales y 4 estructurales de 7A.
+El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.3 con hardening estructural y de concurrencia aplicados) + workflows n8n operativos (6C) + Etapa 6D cerrada (2026-05-27) + Etapa 7A de correcciones pre-TEST/pre-OPS cerrada (2026-05-28) + entorno TEST levantado, paritario y operativo (7B, cerrada 2026-05-28) + validación funcional ampliada sobre TEST (7C, cerrada 2026-05-28)**. Los workflows n8n fueron validados contra DEV en Etapa 6C (40 tests funcionales + verificaciones cruzadas) y contra TEST en Etapa 7B (smokes happy path 8/8) y 7C (validación funcional ampliada de caminos no-felices); en TEST se validó además la cadena transaccional completa W2→W3→W4 end-to-end. Hardening estructural y de concurrencia validados en DEV: 101 tests de hardening + 6 tests de concurrencia real + 9 tests funcionales y 4 estructurales de 7A.
 
-**Etapa actual:** 7B — Levantamiento del entorno TEST. Cerrada (2026-05-28). TEST creado como proyecto Supabase independiente, schema reconstruido desde el canónico v1.7.3 (paridad estructural 10/10 vs DEV), seeds cargados, `pg_cron` activo con ejecuciones reales verificadas, permisos Data API normalizados, 8 workflows `__TEST` importados y validados con cadena end-to-end W2→W3→W4. DEV no se tocó durante 7B salvo consultas read-only aprobadas.
+**Etapa actual:** 7C — Validación funcional ampliada sobre TEST. Cerrada (2026-05-28). Se ejecutaron sistemáticamente los caminos no-felices de los 8 workflows `__TEST` (errores controlados, edge cases, validaciones defensivas, condiciones de borde) que 7B dejó fuera de alcance. Resultado: **54 verificaciones conformes (48 casos funcionales del Grupo A + 6 verificaciones transversales TR-01/TR-02), 0 fallos inesperados, 1 mutación no planificada pero válida y comprendida (bloqueo id 2)**. Idempotencia: ramas `post_lock` (H7) y `pre_lock` (7C) cubiertas empíricamente; `unique_violation` queda como opcional no bloqueante. DEV no se tocó durante 7C; el schema canónico v1.7.3 no se modificó.
 
-**No es producción.** DEV y TEST son entornos funcionales separados. Falta integración con consumidores reales (webhook MP, bot, frontend), endurecimiento de DEV equivalente al de TEST y validación funcional ampliada (casos de error) sobre TEST.
+**No es producción.** DEV y TEST son entornos funcionales separados. Falta integración con consumidores reales (webhook MP, bot, frontend) y endurecimiento de DEV equivalente al de TEST. La validación funcional ampliada sobre TEST quedó cubierta en 7C.
 
 ---
 
@@ -323,9 +323,9 @@ Datos de prueba conservados como evidencia/fixtures, no limpiados. Reseteo event
 
 ## Próxima etapa — opciones disponibles
 
-Con 6D, 7A y 7B cerradas, las siguientes son **opciones disponibles** a priorizar por Franco (no orden obligatorio, no comprometidas en este documento):
+Con 6D, 7A, 7B y 7C cerradas, las siguientes son **opciones disponibles** a priorizar por Franco (orden sugerido, no comprometidas en este documento):
 
-- **Validación funcional ampliada sobre TEST:** ejecutar la batería de casos de error listados en `7B_CIERRE.md` sección 14 (cabaña inexistente, solapamientos, doble pre-reserva, re-confirmación, cancelación de estados no cancelables, payloads inválidos, campos vacíos/whitespace, motivos inválidos, normalización defensiva, pagos tardíos). TEST es el ambiente seguro para ejercitarlos. Ver `Pendiente_pre_produccion.md` 6.4.
+- **Diseño del bloque de limpieza/reset de TEST:** dado D-7C-01 (no-limpieza durante 7C) y la acumulación de fixtures de 7C, diseñar un bloque específico de reset con SQL explícito y aprobado antes de avanzar a otras etapas. Ver `Pendiente_pre_produccion.md` 6.5.
 - **Endurecimiento de permisos en DEV:** aplicar a DEV un modelo equivalente al de TEST (REVOKE EXECUTE a `PUBLIC` sobre las funciones del proyecto, etc.). No diseñado ni planificado todavía. Ver `Pendiente_pre_produccion.md` 1.5.
 - **Diseño del entorno OPS:** operación interna real (Vicky, Franco, Rodrigo, Jennifer), sin consumidores externos automáticos.
 - **Webhook MercadoPago / bot / frontend:** integración con consumidores reales, **siempre sobre TEST primero** antes de cualquier consideración productiva.
@@ -366,16 +366,24 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 | Workflows `__TEST` importados y validados (happy path 8/8) | ✅ Cerrado | 7B-4 (D-7B-04) |
 | Cadena transaccional end-to-end W2→W3→W4 en TEST | ✅ Cerrado | 7B-4 |
 
+**Items cerrados en Etapa 7C:**
+
+| Item | Estado | Bloque que lo cerró |
+|---|---|---|
+| Validación funcional ampliada sobre TEST (casos no-felices) | ✅ Cerrado | 7C-1 a 7C-6 (48 funcionales + 6 transversales) |
+| Cobertura empírica de rama `pre_lock` de idempotencia | ✅ Cerrado | 7C-5 (A-W2-15) |
+
 **Items pendientes:**
 
 1. **`tipo_valor` sin poblar en `configuracion_general`** — observación de 7A (PreOPS-A6). Las 10 claves tienen `tipo_valor=NULL`. No bloqueante; evaluar antes del dashboard OPS si se usa para render de inputs. Ver `Pendiente_pre_produccion.md` 1.4.
 2. **Validación de tipos inválidos no vacíos** — surgido durante hardening. Casos como `id_cabana="abc"` o `fecha_in="no-es-fecha"` siguen rompiendo con error crudo. Fuera del alcance del hardening por strings/whitespace.
-3. **Cobertura empírica de ramas `pre_lock` y `unique_violation` de idempotencia** — opcional, no bloqueante. H7 observó empíricamente la rama `post_lock` en C-6. Las otras dos ramas están vigentes en el cuerpo de `crear_prereserva` y son alcanzables por diseño, pero no fueron gatilladas en H7 por timing del test. Queda como cobertura opcional pre-PROD si se considera necesario.
+3. **Cobertura empírica de rama `unique_violation` de idempotencia** — opcional, no bloqueante. H7 observó la rama `post_lock` (C-6) y 7C observó la rama `pre_lock` (A-W2-15). Resta solo `unique_violation`, que requiere un cruce concurrente en ventana estrechísima, no reproducible de forma simple. Queda como cobertura opcional pre-PROD si se considera necesario. Ver `Pendiente_pre_produccion.md` 6.3.
 4. **RLS configurado** — pendiente histórico, decisión postergada hasta tener frontend público.
 5. **Tarifas reales cargadas** — pendiente histórico.
 6. **Feriados productivos cargados** — pendiente histórico.
 7. **Endurecimiento de permisos en DEV** — aplicar a DEV el modelo equivalente al de TEST (REVOKE EXECUTE a `PUBLIC` sobre las 13 funciones del proyecto). No diseñado todavía. Ver `Pendiente_pre_produccion.md` 1.5.
-8. **Validación funcional ampliada sobre TEST** — batería de casos de error documentada en `7B_CIERRE.md` sección 14. Ver `Pendiente_pre_produccion.md` 6.4.
+8. **Validación funcional ampliada sobre TEST** — ✅ **Cerrada en Etapa 7C** (2026-05-28). Batería de casos no-felices ejecutada: 48 casos funcionales + 6 verificaciones transversales, 0 fallos inesperados. Ver `7C_CIERRE.md`.
+9. **Diseño del bloque de limpieza/reset de TEST** — pendiente nuevo derivado de D-7C-01. La acumulación de fixtures de 7C (pre-reservas id 3/4, pagos id 2/3, bloqueo id 2, huéspedes id 3/5) se conserva como evidencia; un eventual reset debe diseñarse como bloque separado con SQL explícito y aprobado. Ver `Pendiente_pre_produccion.md` 6.5.
 
 ---
 
@@ -399,6 +407,7 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 - `6C_CIERRE.md` — documento formal de cierre de etapa 6C.
 - `7A_CIERRE.md` — documento formal de cierre de Etapa 7A (correcciones pre-TEST/pre-OPS).
 - `7B_CIERRE.md` — documento formal de cierre de Etapa 7B (levantamiento del entorno TEST).
+- `7C_CIERRE.md` — documento formal de cierre de Etapa 7C (validación funcional ampliada sobre TEST).
 - `Docs/Bitacora/6B_EJECUCION_DEV.md` — bitácora bloque por bloque de 6B.
 - `Docs/Bitacora/6C_EJECUCION.md` — bitácora workflow por workflow de 6C.
 - `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` — bitácora bloque por bloque de Etapa 6D (H1-H7 cerrados; H8 en curso).

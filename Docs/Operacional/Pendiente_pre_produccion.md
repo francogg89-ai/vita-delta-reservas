@@ -228,9 +228,30 @@ No diseñar ni ejecutar ahora — queda como pendiente futuro registrado.
 **Origen:** decisión explícita de 7B de no tocar DEV; D-7B-03; `7B_CIERRE.md`
 sección 14.
 
----
+### 1.6 Contrato SQL de `registrar_pago` frente a entradas no-vacías mal tipadas
 
-## 2. Programación de jobs automáticos
+**Estado actual:** ⏳ Pendiente liviano, no bloqueante.
+
+Revisión futura del contrato SQL de `registrar_pago` frente a entradas no-vacías
+mal tipadas; hoy mitigado en workflows por `nv()` defensivo para
+vacíos/undefined.
+
+**Contexto:** el patrón canónico `NULLIF(TRIM(payload->>'campo'), '')` aplicado en
+6D (item A.1, cerrado) cubre vacíos y whitespace en los campos obligatorios. Lo
+que queda fuera de esa defensa son las entradas **no-vacías pero mal tipadas**
+(ej. un `monto_esperado:"abc"` que no es vacío pero tampoco casteable a NUMERIC),
+que siguen rompiendo con error crudo de PostgreSQL en lugar de un JSONB
+controlado. En 7C esto se confirmó como comportamiento conocido (L-7C-03 para el
+caso análogo de fecha en W1) y no se ejercitó como caso propio sobre W3 (fuera de
+alcance del hardening por strings/whitespace).
+
+**Por qué no es urgente:** los workflows reales aplican `nv()` defensivo para
+vacíos/undefined, y los consumidores actuales (n8n manual) no generan entradas
+mal tipadas. El endurecimiento conviene antes de conectar consumidores reales que
+puedan enviar payloads arbitrarios (webhook MP, bot, frontend).
+
+**Origen:** `7B_CIERRE.md` sección 14 (hardening SQL de `registrar_pago`);
+reformulado tras 7C.
 
 ### 2.1 Schedule pg_cron — expirar_prereservas_vencidas
 
@@ -453,21 +474,27 @@ Estos no reemplazan H7. H7 validó concurrencia controlada con SQL y locks; 6.2 
 
 ### 6.3 Cobertura empírica de ramas `pre_lock` y `unique_violation` de idempotencia
 
-**Estado:** ⏳ Pendiente opcional, no bloqueante.
+**Estado:** ⏳ Pendiente opcional, no bloqueante. **`pre_lock` cubierto en 7C; resta solo `unique_violation`.**
 
-**Contexto:** C-6 de H7 observó empíricamente la rama `post_lock` del detector de idempotencia de `crear_prereserva`. Las otras dos ramas (`pre_lock` y `unique_violation`) están vigentes en el cuerpo de la función y son alcanzables por diseño, pero no fueron gatilladas en H7 por el timing del test (B llegó al pre-check antes del COMMIT de A).
-
-**Para gatillar `pre_lock`:** lanzar B después del COMMIT de A (sin `pg_sleep` en A o con timing distinto).
+**Contexto:** C-6 de H7 observó empíricamente la rama `post_lock` del detector de idempotencia de `crear_prereserva`. La rama `pre_lock` quedó **cubierta empíricamente en Etapa 7C** (caso A-W2-15): re-ejecución secuencial de W2 con la misma `idempotency_key` que la fixture ya existente devolvió `idempotent_match:true, recovery_path:'pre_lock'`, con el estado actual de la pre-reserva, sin crear duplicado. Resta solo `unique_violation`.
 
 **Para gatillar `unique_violation`:** escenario más difícil de reproducir manualmente — requeriría que B pase el pre-check y el double-check post-lock pero choque con la constraint unique en el INSERT. Solo gatillable si ambas transacciones se cruzan dentro de una ventana muy estrecha entre el double-check y el INSERT.
 
-**Decisión:** queda como cobertura opcional pre-PROD si se considera necesario. No bloqueante para avanzar a TEST o a integraciones reales.
+**Decisión:** `unique_violation` queda como cobertura opcional pre-PROD si se considera necesario. No bloqueante para avanzar a TEST o a integraciones reales. No se intentó en 7C por requerir concurrencia pesada, que está fuera del alcance de esa etapa (H7 ya cubrió la concurrencia crítica).
 
-**Origen:** observación empírica en C-6 de H7.
+**Origen:** observación empírica en C-6 de H7; `pre_lock` cerrado en A-W2-15 de 7C (`7C_CIERRE.md` sección 4).
 
 ### 6.4 Validación funcional ampliada sobre TEST (casos de error)
 
-**Estado:** ⏳ Pendiente. No diseñado todavía.
+> **✅ CERRADO en Etapa 7C (2026-05-28).** La batería de caminos no-felices de
+> los 8 workflows `__TEST` se ejecutó sistemáticamente sobre TEST: **48 casos
+> funcionales (Grupo A) + 6 verificaciones transversales (TR-01/TR-02) = 54
+> verificaciones conformes, 0 fallos inesperados, 1 mutación no planificada pero
+> válida y comprendida (bloqueo id 2).** Idempotencia: rama `pre_lock` cubierta
+> (resta `unique_violation`, ver 6.3). Ver `7C_CIERRE.md`. El contenido original
+> se conserva abajo como referencia histórica del alcance planificado.
+
+**Estado original (pre-7C):** ⏳ Pendiente. No diseñado todavía.
 
 **Contexto:** Etapa 7B cerró con happy paths como evidencia suficiente para
 validar el levantamiento del entorno TEST. Los casos de error de los 8
@@ -511,6 +538,42 @@ bloqueo activo).
 
 **Origen:** `7B_CIERRE.md` sección 14; cierre de 7B con scope acotado a happy
 paths.
+
+### 6.5 Diseño del bloque de limpieza/reset de TEST
+
+**Estado:** ⏳ Pendiente nuevo (derivado de D-7C-01). No diseñado todavía.
+
+**Contexto:** las Etapas 7B y 7C dejaron datos vivos en TEST que se conservan
+como evidencia (decisión D-7C-01, no-limpieza). Al cierre de 7C, TEST acumula:
+
+- Pre-reserva id 1 (cancelada), id 2 (convertida), id 3 (`pago_en_revision`),
+  id 4 (`pendiente_pago`).
+- Reserva id 1 (confirmada).
+- Pagos id 1 (confirmado), id 2 e id 3 (`en_revision`).
+- Bloqueo id 1 (Arrebol) e id 2 (Bamboo, mutación no planificada de A-W6-06).
+- Huéspedes id 1, 3, 5.
+
+**Por qué es pendiente:** si en algún momento se quiere un TEST reseteado (para
+re-ejecutar una batería desde cero, o para preparar el entorno antes de conectar
+consumidores reales), hace falta un bloque de limpieza con SQL explícito. Por
+D-7C-01 no se improvisa caso por caso ni en medio de una validación.
+
+**Alcance esperado (a diseñar en su propia etapa/bloque):**
+
+1. Definir el orden de borrado respetando las foreign keys (pagos →
+   pre_reservas/reservas → huespedes; bloqueos independientes).
+2. Decidir si el reset es total (TRUNCATE de tablas transaccionales + reseteo de
+   secuencias) o selectivo (solo datos con marcador de ambiente
+   `manual_test_*` / `n8n_test_*`).
+3. Preservar seeds estructurales (cabañas, socios, configuración, temporadas,
+   plantillas) — el reset es de datos transaccionales, no del seed base.
+4. SQL explícito, revisado y aprobado antes de ejecutar. Sin `DROP ... CASCADE`.
+5. Verificación posterior (conteos en cero de las tablas transaccionales,
+   secuencias reseteadas si aplica).
+
+No diseñar ni ejecutar ahora — queda como pendiente registrado.
+
+**Origen:** D-7C-01 (`DECISIONES_NO_REABRIR.md`); `7C_CIERRE.md` secciones 8 y 9.
 
 ---
 

@@ -860,3 +860,81 @@ generando 2 filas en `information_schema.triggers`). Al revisar con
 `pg_trigger WHERE NOT tgisinternal`, el conteo real fue 1. Aplicado en
 todas las verificaciones posteriores de 7B-2 (Tandas 4B y 5) y en el cierre
 de paridad 10/10 vs DEV.
+## Lecciones de la validación funcional ampliada — Etapa 7C
+
+Reglas firmes derivadas de la ejecución de la Etapa 7C (validación funcional
+ampliada de los 8 workflows `__TEST` sobre TEST, cerrada 2026-05-28). Todas
+verificadas empíricamente caso por caso contra el cuerpo SQL real de las
+funciones (`6B_SCHEMA_SQL.md v1.7.3`).
+
+### L-7C-01 — Rango invertido en `obtener_disponibilidad_rango` devuelve set vacío, no error
+
+`obtener_disponibilidad_rango` invocada con `fecha_desde > fecha_hasta` (ej.
+15-jul → 10-jul) devuelve un set vacío. A través de W1, el wrapper resultante es
+`ok:true, total_dias:0, dias:[]` — no es error ni falla el Postgres node. El
+workflow degrada con gracia ante rango invertido. Implicación: un consumidor no
+puede asumir que un rango inválido rebota con error; debe interpretar
+`total_dias:0` como "sin disponibilidad en ese rango", que es el mismo resultado
+que un rango válido totalmente ocupado.
+
+**Verificado:** 2026-05-28, caso A-W1-02.
+
+### L-7C-02 — El horizonte de disponibilidad vive en las vistas, no en la función
+
+`obtener_disponibilidad_rango` NO recorta por horizonte: entrega cualquier rango
+futuro solicitado (verificado con jun-2027, más de 120 días adelante, `ok:true`
+con días normales). El horizonte de 120 días configurable
+(`horizonte_disponibilidad_dias`) aplica únicamente a las **vistas**
+(`vista_disponibilidad`, `vista_calendario`). Implicación: W1 (vía función) y W7
+sobre `vista_disponibilidad` tienen alcances temporales distintos por diseño; no
+es inconsistencia.
+
+**Verificado:** 2026-05-28, casos A-W1-03 (función, sin recorte) vs A-W7-03
+(vista, 600 filas = 5 cabañas × 120 días).
+
+### L-7C-03 — Fecha mal formada genera error crudo del Postgres node, sin wrapper
+
+Una fecha mal formada (ej. `fecha_in:"no-es-fecha"`) hace fallar el cast
+`$1::DATE` en el nodo Postgres de W1 con `invalid input syntax for type date`,
+antes de llegar a Build Response. No produce wrapper controlado. Confirma el
+pendiente histórico de validación de tipos inválidos no-vacíos: la defensa por
+`NULLIF(TRIM())` cubre vacíos/whitespace, no valores no-vacíos mal tipados.
+
+**Verificado:** 2026-05-28, caso A-W1-06.
+
+### L-7C-04 — Pago sobre pre-reserva `convertida` no dispara `prereserva_no_activa`
+
+`registrar_pago` solo marca `warning:'prereserva_no_activa'` cuando la pre-reserva
+está en uno de los estados terminales listados explícitamente en la función:
+`vencida`, `cancelada_por_cliente`, `cancelada_por_bloqueo`, `conflicto_pendiente`.
+El estado `convertida` **no está en esa lista**, por lo que un pago sobre una
+pre-reserva convertida se inserta como `en_revision`, `ok:true`, **sin warning** y
+sin promover la pre-reserva (el UPDATE de promoción solo aplica a
+`pendiente_pago`). La guía operativa de asociar pagos tardíos a `id_reserva` en
+ese caso es documental, no enforzada por la función.
+
+**Verificado:** 2026-05-28, caso A-W3-05 (sin transición de estado confirmada en
+TR-02, query 5-bis).
+
+### L-7C-05 — `id_cabana:0` en W6 no es bloqueo total; el patrón `0=todas` es exclusivo de W1
+
+En `crear_bloqueo`/W6, el bloqueo total se solicita con `id_cabana:null`. Un
+`id_cabana:0` NO se interpreta como total: la función busca la cabaña 0, que no
+existe, y rebota con `cabana_no_existe`. El patrón `0=todas` (workaround del
+límite de Query Parameters de n8n, ver L-6C-03) aplica **solo a W1**
+(`NULLIF($3::BIGINT, 0)`), no a W6. El Build Payload de W6 ya documenta esto y usa
+`nv()` para mandar `null` explícito ante vacío/undefined.
+
+**Verificado:** 2026-05-28, caso A-W6-04.
+
+### L-7C-06 — `log_cambios` usa `fecha_hora`; las tablas transaccionales usan `created_at`
+
+Divergencia de naming de columna de timestamp: `log_cambios.fecha_hora`
+(`TIMESTAMPTZ NOT NULL DEFAULT NOW()`) vs `pre_reservas.created_at`,
+`pagos.created_at`, `bloqueos.created_at`. Una query de auditoría que filtre
+`log_cambios` por `created_at` falla con `column "created_at" does not exist`. A
+tener presente al escribir queries de auditoría que cruzan logs y tablas
+transaccionales.
+
+**Verificado:** 2026-05-28, durante TR-01 (la query 1 falló inicialmente por usar
+`created_at` sobre `log_cambios`; corregida a `fecha_hora`).
