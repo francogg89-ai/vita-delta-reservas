@@ -2,13 +2,15 @@
 
 ## Resumen ejecutivo
 
-El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.3 con hardening estructural y de concurrencia aplicados) + workflows n8n operativos (6C) + Etapa 6D cerrada (2026-05-27) + Etapa 7A de correcciones pre-TEST/pre-OPS cerrada (2026-05-28) + entorno TEST levantado, paritario y operativo (7B, cerrada 2026-05-28) + validación funcional ampliada sobre TEST (7C, cerrada 2026-05-28)**. Los workflows n8n fueron validados contra DEV en Etapa 6C (40 tests funcionales + verificaciones cruzadas) y contra TEST en Etapa 7B (smokes happy path 8/8) y 7C (validación funcional ampliada de caminos no-felices); en TEST se validó además la cadena transaccional completa W2→W3→W4 end-to-end. Hardening estructural y de concurrencia validados en DEV: 101 tests de hardening + 6 tests de concurrencia real + 9 tests funcionales y 4 estructurales de 7A.
+El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.3 con hardening estructural y de concurrencia aplicados) + workflows n8n operativos (6C) + Etapa 6D cerrada (2026-05-27) + Etapa 7A de correcciones pre-TEST/pre-OPS cerrada (2026-05-28) + entorno TEST levantado, paritario y operativo (7B, cerrada 2026-05-28) + validación funcional ampliada sobre TEST (7C, cerrada 2026-05-28) + limpieza/reset de TEST (7D, cerrada 2026-05-28) + endurecimiento de permisos Data API en DEV (7E, cerrada 2026-05-28)**. Los workflows n8n fueron validados contra DEV en Etapa 6C (40 tests funcionales + verificaciones cruzadas) y contra TEST en Etapa 7B (smokes happy path 8/8) y 7C (validación funcional ampliada de caminos no-felices); en TEST se validó además la cadena transaccional completa W2→W3→W4 end-to-end. Hardening estructural y de concurrencia validados en DEV: 101 tests de hardening + 6 tests de concurrencia real + 9 tests funcionales y 4 estructurales de 7A.
 
-**Etapa actual:** 7D — Limpieza/reset del entorno TEST. Cerrada (2026-05-28). Se diseñó y ejecutó un bloque dedicado de reset con SQL explícito y aprobado, en tres partes separadas (snapshot read-only → limpieza transaccional atómica → verificación posterior), con doble gate anti-error-de-entorno por identidad exacta de las 5 cabañas TEST. Se vaciaron las 6 tablas transaccionales con datos (`pagos`, `reservas`, `pre_reservas`, `bloqueos`, `huespedes`, `log_cambios`) vía `DELETE` en orden seguro por FKs, sin `DROP/TRUNCATE ... CASCADE`, y se resetearon sus secuencias a 1. El seed estructural (11 tablas), el cron, las funciones/vistas/triggers, los grants y los workflows `__TEST` quedaron intactos. **TEST quedó como entorno limpio.** Decisiones D-7D-01 (reset de secuencias) y D-7D-02 (vaciado de `log_cambios` con evidencia documentada). DEV/OPS/PROD no se tocaron; schema canónico v1.7.3 sin modificar. Documento de cierre: `7D_CIERRE.md`.
+**Etapa actual:** 7E — Endurecimiento de permisos Data API en DEV. Cerrada (2026-05-28). Se aplicó a DEV el `REVOKE EXECUTE` sobre las 13 funciones del proyecto a `PUBLIC`/`anon`/`authenticated`/`service_role`, en paridad con el modelo de TEST (7B-GRANTS), por el método de cuatro bloques separados (snapshot read-only → cambio transaccional `BEGIN/COMMIT` con re-gate anti-error-de-entorno por identidad exacta de cabañas DEV 17-21 → verificación posterior → cierre documental). Owner `postgres` intacto y ejecutando por ownership (n8n no afectado); 0 fugas de EXECUTE verificadas; schema v1.7.3 sin cambios (201 funciones / 6 vistas / 19 triggers). De las 201 funciones de `public`, solo 13 son del proyecto (las otras 188 son de `btree_gist`, owner `supabase_admin`, no se tocaron). El hallazgo A5 (residual amplio de permisos de tabla a roles Data API en DEV: SELECT/escritura completos, más amplio que el `Dxtm` de TEST) quedó **fuera de alcance por decisión** (Opción 1 — 7E estricta) y se registró como pendiente nuevo `Pendiente_pre_produccion.md` 1.7. Decisiones D-7E-01, D-7E-02. DEV es el único entorno tocado; TEST/OPS/PROD intactos. Documento de cierre: `7E_CIERRE.md`.
+
+**Etapa previa:** 7D — Limpieza/reset del entorno TEST. Cerrada (2026-05-28). Se diseñó y ejecutó un bloque dedicado de reset con SQL explícito y aprobado, en tres partes separadas (snapshot read-only → limpieza transaccional atómica → verificación posterior), con doble gate anti-error-de-entorno por identidad exacta de las 5 cabañas TEST. Se vaciaron las 6 tablas transaccionales con datos (`pagos`, `reservas`, `pre_reservas`, `bloqueos`, `huespedes`, `log_cambios`) vía `DELETE` en orden seguro por FKs, sin `DROP/TRUNCATE ... CASCADE`, y se resetearon sus secuencias a 1. El seed estructural (11 tablas), el cron, las funciones/vistas/triggers, los grants y los workflows `__TEST` quedaron intactos. **TEST quedó como entorno limpio.** Decisiones D-7D-01 (reset de secuencias) y D-7D-02 (vaciado de `log_cambios` con evidencia documentada). DEV/OPS/PROD no se tocaron; schema canónico v1.7.3 sin modificar. Documento de cierre: `7D_CIERRE.md`.
 
 **Etapa previa:** 7C — Validación funcional ampliada sobre TEST. Cerrada (2026-05-28). Se ejecutaron sistemáticamente los caminos no-felices de los 8 workflows `__TEST` (errores controlados, edge cases, validaciones defensivas, condiciones de borde) que 7B dejó fuera de alcance. Resultado: **54 verificaciones conformes (48 casos funcionales del Grupo A + 6 verificaciones transversales TR-01/TR-02), 0 fallos inesperados, 1 mutación no planificada pero válida y comprendida (bloqueo id 2)**. Idempotencia: ramas `post_lock` (H7) y `pre_lock` (7C) cubiertas empíricamente; `unique_violation` queda como opcional no bloqueante. DEV no se tocó durante 7C; el schema canónico v1.7.3 no se modificó.
 
-**No es producción.** DEV y TEST son entornos funcionales separados. Falta integración con consumidores reales (webhook MP, bot, frontend) y endurecimiento de DEV equivalente al de TEST. La validación funcional ampliada sobre TEST quedó cubierta en 7C.
+**No es producción.** DEV y TEST son entornos funcionales separados. Falta integración con consumidores reales (webhook MP, bot, frontend). El endurecimiento de DEV en EXECUTE sobre funciones quedó en paridad con TEST en 7E; resta solo el residual amplio de permisos de tabla a roles Data API (hallazgo A5, pendiente 1.7), fuera de alcance por decisión. La validación funcional ampliada sobre TEST quedó cubierta en 7C.
 
 ---
 
@@ -325,9 +327,9 @@ Datos de prueba conservados como evidencia/fixtures, no limpiados. Reseteo event
 
 ## Próxima etapa — opciones disponibles
 
-Con 6D, 7A, 7B, 7C y 7D cerradas, las siguientes son **opciones disponibles** a priorizar por Franco (orden sugerido, no comprometidas en este documento):
+Con 6D, 7A, 7B, 7C, 7D y 7E cerradas, las siguientes son **opciones disponibles** a priorizar por Franco (orden sugerido, no comprometidas en este documento):
 
-- **Endurecimiento de permisos en DEV:** aplicar a DEV un modelo equivalente al de TEST (REVOKE EXECUTE a `PUBLIC` sobre las funciones del proyecto, etc.). No diseñado ni planificado todavía. Ver `Pendiente_pre_produccion.md` 1.5.
+- **Residual de permisos de tabla en DEV (hallazgo A5 / pendiente 1.7):** decidir si se revoca el set amplio de SELECT/escritura sobre tablas/vistas/secuencias a roles Data API para alinear DEV con el modelo mínimo de TEST, o se acepta y documenta como definitivo. Conviene antes de exponer Data API en DEV y antes de OPS/PROD. Ver `Pendiente_pre_produccion.md` 1.7.
 - **Diseño del entorno OPS:** operación interna real (Vicky, Franco, Rodrigo, Jennifer), sin consumidores externos automáticos.
 - **Webhook MercadoPago / bot / frontend:** integración con consumidores reales, **siempre sobre TEST primero** antes de cualquier consideración productiva.
 
@@ -382,6 +384,13 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 | Reset de secuencias a 1 en tablas vaciadas de TEST | ✅ Cerrado | 7D Bloque B (D-7D-01) |
 | Vaciado de `log_cambios` en TEST con evidencia documentada | ✅ Cerrado | 7D Bloque B (D-7D-02) |
 
+**Items cerrados en Etapa 7E:**
+
+| Item | Estado | Bloque que lo cerró |
+|---|---|---|
+| Endurecimiento de permisos Data API en DEV (REVOKE EXECUTE sobre 13 funciones) | ✅ Cerrado | 7E Bloques A/B/C (D-7E-01, D-7E-02) |
+| Paridad DEV↔TEST en EXECUTE sobre funciones del proyecto | ✅ Cerrado | 7E Bloque C (0 fugas, owner intacto) |
+
 **Items pendientes:**
 
 1. **`tipo_valor` sin poblar en `configuracion_general`** — observación de 7A (PreOPS-A6). Las 10 claves tienen `tipo_valor=NULL`. No bloqueante; evaluar antes del dashboard OPS si se usa para render de inputs. Ver `Pendiente_pre_produccion.md` 1.4.
@@ -390,9 +399,10 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 4. **RLS configurado** — pendiente histórico, decisión postergada hasta tener frontend público.
 5. **Tarifas reales cargadas** — pendiente histórico.
 6. **Feriados productivos cargados** — pendiente histórico.
-7. **Endurecimiento de permisos en DEV** — aplicar a DEV el modelo equivalente al de TEST (REVOKE EXECUTE a `PUBLIC` sobre las 13 funciones del proyecto). No diseñado todavía. Ver `Pendiente_pre_produccion.md` 1.5.
+7. **Endurecimiento de permisos en DEV (EXECUTE sobre funciones)** — ✅ **Cerrado en Etapa 7E** (2026-05-28). Se aplicó a DEV el REVOKE EXECUTE sobre las 13 funciones del proyecto a PUBLIC/anon/authenticated/service_role, en paridad con TEST. Owner `postgres` intacto, n8n no afectado, 0 fugas verificadas. Decisiones D-7E-01, D-7E-02. Ver `7E_CIERRE.md`. **Queda abierto el residual asociado:** permisos amplios de tabla a roles Data API en DEV (hallazgo A5), fuera de alcance de 7E por decisión, registrado como pendiente `Pendiente_pre_produccion.md` 1.7.
 8. **Validación funcional ampliada sobre TEST** — ✅ **Cerrada en Etapa 7C** (2026-05-28). Batería de casos no-felices ejecutada: 48 casos funcionales + 6 verificaciones transversales, 0 fallos inesperados. Ver `7C_CIERRE.md`.
 9. **Diseño del bloque de limpieza/reset de TEST** — ✅ **Cerrado en Etapa 7D** (2026-05-28). Se diseñó y ejecutó el bloque dedicado de reset (snapshot → limpieza atómica → verificación), dejando TEST como entorno limpio: schema v1.7.3 + seed estructural + cron + grants + workflows `__TEST`, sin datos transaccionales. Decisiones D-7D-01 y D-7D-02. Ver `7D_CIERRE.md` y `Pendiente_pre_produccion.md` 6.5.
+10. **Residual amplio de permisos de tabla a roles Data API en DEV** — pendiente activo abierto en Etapa 7E. Los roles `anon`/`authenticated`/`service_role` tienen SELECT/escritura completos sobre todas las tablas/vistas de DEV (hallazgo A5, 480 grants), más amplio que el `Dxtm` de TEST. Fuera de alcance de 7E por decisión (Opción 1). A decidir en etapa futura: revocar para alinear con TEST o aceptar y documentar como definitivo. No urgente (sin consumidores Data API activos en DEV). Ver `Pendiente_pre_produccion.md` 1.7 y `7E_CIERRE.md` sección 8.
 
 ---
 
@@ -417,6 +427,8 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 - `7A_CIERRE.md` — documento formal de cierre de Etapa 7A (correcciones pre-TEST/pre-OPS).
 - `7B_CIERRE.md` — documento formal de cierre de Etapa 7B (levantamiento del entorno TEST).
 - `7C_CIERRE.md` — documento formal de cierre de Etapa 7C (validación funcional ampliada sobre TEST).
+- `7D_CIERRE.md` — documento formal de cierre de Etapa 7D (limpieza/reset del entorno TEST).
+- `7E_CIERRE.md` — documento formal de cierre de Etapa 7E (endurecimiento de permisos Data API en DEV).
 - `Docs/Bitacora/6B_EJECUCION_DEV.md` — bitácora bloque por bloque de 6B.
 - `Docs/Bitacora/6C_EJECUCION.md` — bitácora workflow por workflow de 6C.
 - `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` — bitácora bloque por bloque de Etapa 6D (H1-H7 cerrados; H8 en curso).

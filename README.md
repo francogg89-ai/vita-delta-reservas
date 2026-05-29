@@ -43,6 +43,7 @@ Todas las etapas de diseño están cerradas. No se reabren.
 | 7B | Levantamiento del entorno TEST | Cerrada (2026-05-28) |
 | 7C | Validación funcional ampliada sobre TEST | Cerrada (2026-05-28) |
 | 7D | Limpieza/reset del entorno TEST | Cerrada (2026-05-28) |
+| 7E | Endurecimiento de permisos Data API en DEV (paridad con TEST) | Cerrada (2026-05-28) |
 
 **Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. DEV y TEST están alineados funcionalmente: TEST se reconstruyó desde el canónico en 7B con paridad estructural 10/10 vs DEV.
 
@@ -88,7 +89,7 @@ La pre-reserva bloquea disponibilidad temporalmente y expira si no se confirma. 
 
 | Entorno | Proyecto Supabase | Estado |
 |---|---|---|
-| DEV | `vita-delta-dev` | Backend completo v1.7.3 + hardening + 8 workflows validados. IDs de cabaña 17-21. |
+| DEV | `vita-delta-dev` | Backend completo v1.7.3 + hardening + 8 workflows validados + permisos EXECUTE endurecidos (7E). IDs de cabaña 17-21. |
 | TEST | `vita-delta-test` | Schema reconstruido desde canónico, paritario, validado y reseteado a estado limpio (7D). IDs de cabaña 1-5. |
 | OPS | — | No creado. Etapa futura (operación interna real). |
 | PROD | — | No creado. |
@@ -128,9 +129,9 @@ Decisiones que **no deben reabrirse** salvo contradicción crítica explícita:
 
 ## Pendientes activos pre-PROD
 
-Pendientes documentados al cierre de 7D:
+Pendientes documentados al cierre de 7E:
 
-- **Endurecimiento de permisos en DEV** (paridad con TEST: REVOKE EXECUTE a `PUBLIC` sobre las funciones del proyecto). `Pendiente_pre_produccion.md` 1.5.
+- **Residual amplio de permisos de tabla a roles Data API en DEV** — hallazgo de 7E (snapshot A5): `anon`/`authenticated`/`service_role` tienen SELECT/escritura completos sobre todas las tablas/vistas de DEV, más amplio que el `Dxtm` de TEST. Fuera de alcance de 7E por decisión (Opción 1). A decidir: revocar para alinear con TEST o aceptar como definitivo. `Pendiente_pre_produccion.md` 1.7.
 - **Contrato SQL de `registrar_pago` frente a entradas no-vacías mal tipadas** (hoy mitigado por `nv()` en n8n). `Pendiente_pre_produccion.md` 1.6.
 - `tipo_valor` sin poblar en `configuracion_general` (1.4).
 - Validaciones para tipos inválidos no vacíos (heredado de 6D).
@@ -138,15 +139,17 @@ Pendientes documentados al cierre de 7D:
 - RLS final para frontend público (pendiente histórico).
 - Tarifas reales productivas y feriados productivos (pendientes históricos).
 
+> **Cerrado en 7E:** el endurecimiento de permisos EXECUTE en DEV (REVOKE EXECUTE sobre las 13 funciones del proyecto a `PUBLIC`/`anon`/`authenticated`/`service_role`, paridad con TEST). Ver `Pendiente_pre_produccion.md` 1.5 y `7E_CIERRE.md`.
+
 **Documento de referencia:** `Docs/Operacional/Pendiente_pre_produccion.md`.
 
 ---
 
 ## Próximas etapas — opciones disponibles
 
-Con DEV, TEST, 6C, 6D, 7A, 7B, 7C y 7D cerradas, las opciones a priorizar (orden sugerido, no comprometidas):
+Con DEV, TEST, 6C, 6D, 7A, 7B, 7C, 7D y 7E cerradas, las opciones a priorizar (orden sugerido, no comprometidas):
 
-- **Endurecimiento de permisos en DEV** (paridad con TEST).
+- **Residual de permisos de tabla en DEV** (hallazgo A5 / pendiente 1.7): revocar el set amplio de SELECT/escritura a roles Data API para alinear con TEST, o aceptarlo y documentarlo como definitivo. El endurecimiento de EXECUTE sobre funciones ya quedó cerrado en 7E.
 - **Diseño del entorno OPS:** operación interna real (Vicky, Franco, Rodrigo, Jennifer), sin consumidores externos automáticos.
 - **Integraciones con consumidores reales sobre TEST:** webhook MercadoPago, bot conversacional, frontend público — siempre sobre TEST primero.
 
@@ -186,7 +189,7 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 - `Docs/Implementacion/6B_SCHEMA_SQL.md` — schema canónico SQL vigente (v1.7.3).
 - `Docs/Implementacion/6B_PLAN_FASES.md` — plan de ejecución, conservado como referencia.
 - `Docs/Arquitectura/` — documentos de arquitectura de Etapas 1-6B.
-- `Docs/Bitacora/` — cierres formales (`6C_CIERRE`, `6D_CIERRE`, `7A_CIERRE`, `7B_CIERRE`, `7C_CIERRE`, `7D_CIERRE`) y bitácoras de ejecución (`6B_EJECUCION_DEV`, `6C_EJECUCION`, `HARDENING_PRE_PRODUCCION_EJECUCION`).
+- `Docs/Bitacora/` — cierres formales (`6C_CIERRE`, `6D_CIERRE`, `7A_CIERRE`, `7B_CIERRE`, `7C_CIERRE`, `7D_CIERRE`, `7E_CIERRE`) y bitácoras de ejecución (`6B_EJECUCION_DEV`, `6C_EJECUCION`, `HARDENING_PRE_PRODUCCION_EJECUCION`).
 - `Workflows/n8n/supabase/*.template.json` — 8 templates sanitizados de los workflows contra Supabase.
 - `CLAUDE.md` — reglas de trabajo y orden de lectura para Claude.
 

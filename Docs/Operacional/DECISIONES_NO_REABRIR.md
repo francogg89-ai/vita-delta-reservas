@@ -412,7 +412,7 @@ TEST adopta un **modelo cerrado de permisos Data API**, distinto al de DEV:
 - `Dxtm` residual (TRUNCATE/REFERENCES/TRIGGER) sobre tablas/vistas se documenta como **aceptado, no removido**. No incluye SELECT ni escritura; no habilita lectura/escritura vía Data API; es default de Supabase post-cambio del 30/05/2026; revocarlo agrega complejidad sin cerrar riesgo real.
 - `sequences` sin grants Data API (estado de fábrica respetado).
 
-**DEV queda más abierto que TEST a propósito.** No se aplicó endurecimiento equivalente a DEV durante 7B (decisión explícita: 7B no toca DEV). El endurecimiento de DEV es pendiente futuro separado (ver `Pendiente_pre_produccion.md` 1.5).
+**DEV queda más abierto que TEST a propósito.** No se aplicó endurecimiento equivalente a DEV durante 7B (decisión explícita: 7B no toca DEV). El endurecimiento de DEV era pendiente futuro separado (ver `Pendiente_pre_produccion.md` 1.5). _(Actualización: ese pendiente quedó cerrado en la Etapa 7E para el EXECUTE sobre funciones — ver D-7E-01 y `7E_CIERRE.md`. Resta solo el residual de permisos de tabla en DEV, registrado como pendiente 1.7.)_
 
 **No reabrir.** Ningún workflow ni consumidor en TEST debe asumir grants Data API que no estén explícitos. Si un consumidor futuro requiere acceso vía PostgREST/Data API en TEST (ej. dashboard, frontend), se diseña un perfil de grants específico para ese consumidor — no se reabre el modelo mínimo general.
 
@@ -442,7 +442,7 @@ REVOKE EXECUTE ON FUNCTION <nombre>(<firma>) FROM PUBLIC, anon, authenticated, s
 
 como paso explícito de su creación, no asumir que "nace cerrada". El owner (`postgres`) conserva su capacidad de ejecutar por ownership, independientemente del REVOKE.
 
-Esta regla **no se aplica retroactivamente a DEV** (DEV queda como pendiente futuro de endurecimiento; ver `Pendiente_pre_produccion.md` 1.5).
+Esta regla se aplicó retroactivamente a DEV en la Etapa 7E (cerrada 2026-05-28): las 13 funciones existentes de DEV quedaron con `REVOKE EXECUTE` a PUBLIC/anon/authenticated/service_role, en paridad con TEST. Ver D-7E-01 y `7E_CIERRE.md`. _(Nota: la redacción original de D-7B-05 dejaba DEV como pendiente futuro; ese pendiente — `Pendiente_pre_produccion.md` 1.5 — quedó cerrado por 7E.)_
 
 **No reabrir.** Es una regla operativa de creación, no una decisión arquitectónica negociable.
 
@@ -491,6 +491,20 @@ El método validado y a reutilizar para cualquier reset de entorno de prueba:
 
 **No reabrir** salvo contradicción crítica.
 
+### D-7E-01 — Endurecimiento de permisos Data API en DEV (7E estricta)
+
+En la Etapa 7E (cerrada 2026-05-28) se aplicó a DEV el `REVOKE EXECUTE` sobre las 13 funciones del proyecto a `PUBLIC`, `anon`, `authenticated` y `service_role`, dejando el owner `postgres` intacto. Cierra el pendiente explícito 1.5 (`Pendiente_pre_produccion.md`) y deja DEV en paridad con TEST en cuanto a ejecución de funciones vía Data API.
+
+Verificado (Bloque C): 0 fugas de `EXECUTE` para los 4 grantees, owner `postgres` intacto en las 13, `postgres` sigue ejecutando por ownership (n8n no afectado), schema sin cambios (201 funciones / 6 vistas / 19 triggers), residual de tablas intacto (480 grants).
+
+El alcance fue **estricto**: solo `EXECUTE` sobre funciones. El residual amplio de permisos sobre tablas/vistas/secuencias a roles Data API (hallazgo A5: `SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/MAINTAIN` sobre todas las tablas, mucho más amplio que el `Dxtm` de TEST) **NO se tocó** y queda como asimetría documentada (ver `Pendiente_pre_produccion.md` 1.7).
+
+La regla operativa heredada de TEST (D-7B-05) ahora aplica también a DEV: toda función nueva en `public` de DEV debe revisarse con `REVOKE EXECUTE ... FROM PUBLIC, anon, authenticated, service_role` como paso de su creación. Documento de cierre: `7E_CIERRE.md`. **No reabrir.**
+
+### D-7E-02 — Funciones de trigger incluidas en el REVOKE por paridad
+
+Las 3 funciones de trigger (`log_cambio_estado`, `set_telefono_normalizado`, `set_updated_at`) se incluyeron en el `REVOKE EXECUTE` de 7E. Es inocuo —los triggers se disparan por el motor, no por `EXECUTE` de un rol— y mantiene paridad total con el endurecimiento de TEST. **No reabrir.**
+
 ## Decisiones aprobadas con código de referencia
 
 - **D3** — Mantener solo `hora_checkin` y `hora_checkout` en tablas (sin "hora base" vs "hora real").
@@ -536,6 +550,12 @@ Reglas firmes derivadas de la ejecución de la Etapa 7B (levantamiento del entor
 ## Lecciones operativas de validación funcional consolidadas (L-7C-XX)
 
 Reglas firmes derivadas de la ejecución de la Etapa 7C (validación funcional ampliada sobre TEST). **Detalle completo en `Lecciones_Aprendidas.md` (L-7C-01 a L-7C-06); no se duplican aquí** para evitar divergencia documental.
+
+## Lecciones operativas de endurecimiento DEV consolidadas (L-7E-XX)
+
+Regla firme derivada de la ejecución de la Etapa 7E (endurecimiento de permisos Data API en DEV).
+
+- **L-7E-01:** En Supabase, el SQL Editor del Dashboard conecta como `postgres` directo (no por pooler), por lo que `current_user` allí devuelve `postgres` y NO el patrón `postgres.<project_ref>`. En ese contexto el discriminador fuerte de ambiente debe ser la identidad del seed (IDs exactos de cabaña), no `current_user` (consistente con L-7B-01). El veredicto de entorno por `(id_cabana, nombre)` cumplió ese rol como gate inequívoco en el snapshot, en el re-gate transaccional del cambio y en la verificación posterior.
 
 ## Prototipos legacy
 

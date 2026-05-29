@@ -7,17 +7,18 @@ Antes de trabajar, leer en este orden:
 1. Docs/Operacional/ESTADO_ACTUAL_VITA_DELTA.md
 2. Docs/Operacional/DECISIONES_NO_REABRIR.md
 3. Docs/Implementacion/6B_SCHEMA_SQL.md (schema canónico actual: **v1.7.3**)
-4. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
-5. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
-6. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
-7. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
-8. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
-9. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
-10. Docs/Implementacion/6B_PLAN_FASES.md
-11. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a TEST/OPS/PROD)
-12. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
-13. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
-14. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
+4. Docs/Bitacora/7E_CIERRE.md (cierre formal Etapa 7E — endurecimiento de permisos Data API en DEV)
+5. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
+6. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
+7. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
+8. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
+9. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
+10. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
+11. Docs/Implementacion/6B_PLAN_FASES.md
+12. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a TEST/OPS/PROD)
+13. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
+14. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
+15. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
 
 No cargar contexto histórico largo salvo pedido explícito del usuario.
 
@@ -155,13 +156,21 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - **TEST quedó como entorno limpio.** Verificación post-reset conforme (transaccionales en 0, seed idéntico, secuencias en próximo id = 1, cron y vistas operativas OK). Workflows `__TEST` confirmados sobre credencial `vita_supabase_test`.
 - Decisiones D-7D-01 (reset de secuencias en tablas vaciadas) y D-7D-02 (vaciado de `log_cambios` con evidencia documentada). Documento de cierre: `7D_CIERRE.md`.
 
+**Etapa 7E — Endurecimiento de permisos Data API en DEV ✅ Cerrada (2026-05-28):**
+
+- Aplicado a DEV el `REVOKE EXECUTE` sobre las 13 funciones del proyecto a `PUBLIC`/`anon`/`authenticated`/`service_role`, en paridad con TEST (7B-GRANTS). Cierra el pendiente explícito 1.5. Owner `postgres` intacto → n8n sigue ejecutando por ownership (conecta por pooler como `postgres.<DEV_REF>`, no vía Data API).
+- Método de cuatro bloques separados: snapshot read-only (A) → cambio transaccional `BEGIN/COMMIT` con re-gate anti-error-de-entorno por identidad de cabañas DEV 17-21 (B) → verificación posterior (C) → cierre documental (D). Sin `DROP/TRUNCATE ... CASCADE`, sin tocar schema.
+- Verificación conforme: 0 fugas de EXECUTE para los 4 grantees; owner `postgres` en las 13; schema sin cambios (201 funciones / 6 vistas / 19 triggers — de las 201, solo 13 son del proyecto, las otras 188 son de `btree_gist`/`supabase_admin`); residual de tablas intacto (480 grants).
+- **Hallazgo A5 (fuera de alcance por decisión — Opción 1):** en DEV los roles `anon`/`authenticated`/`service_role` tienen SELECT/escritura completos sobre todas las tablas/vistas, más amplio que el `Dxtm` de TEST. No se tocó; registrado como pendiente nuevo `Pendiente_pre_produccion.md` 1.7.
+- DEV es el único entorno tocado; TEST/OPS/PROD intactos. Decisiones D-7E-01, D-7E-02; lección L-7E-01. Documento de cierre: `7E_CIERRE.md`.
+
 **Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV y TEST están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B; paridad estructural 10/10).
 
 **Próxima etapa — opciones disponibles (orden sugerido):**
 
-Con DEV, TEST, 6D, 7A, 7B, 7C y 7D cerradas, las opciones a priorizar por Franco son:
+Con DEV, TEST, 6D, 7A, 7B, 7C, 7D y 7E cerradas, las opciones a priorizar por Franco son:
 
-- Endurecimiento de permisos en DEV (paridad con TEST — `Pendiente_pre_produccion.md` 1.5).
+- Residual de permisos de tabla en DEV (hallazgo A5 / pendiente 1.7): revocar el set amplio de SELECT/escritura a roles Data API para alinear con TEST, o aceptarlo y documentarlo como definitivo. El endurecimiento de EXECUTE sobre funciones ya quedó cerrado en 7E.
 - Diseño del entorno OPS (operación interna real sin consumidores externos automáticos).
 - Integraciones con consumidores reales sobre TEST: webhook MercadoPago, bot conversacional, frontend público — siempre sobre TEST primero.
 

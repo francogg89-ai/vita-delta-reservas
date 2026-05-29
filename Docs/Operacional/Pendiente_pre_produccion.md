@@ -3,7 +3,7 @@
 Lista de cambios y configuraciones a aplicar antes del despliegue de
 producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
 
-**Estado del archivo:** actualizado al cierre de Etapa 7B (sesión 2026-05-28).
+**Estado del archivo:** actualizado al cierre de Etapa 7E (sesión 2026-05-28).
 Items cerrados durante Etapas 6D, 7A y 7B listados en los resúmenes de abajo;
 detalle histórico de los items 6D en el Apéndice al final del documento.
 
@@ -193,6 +193,16 @@ alcance del horizonte configurable.
 
 ### 1.5 Endurecimiento de permisos Data API en DEV (paridad con TEST)
 
+> **✅ CERRADO en Etapa 7E (2026-05-28).** Se aplicó a DEV el `REVOKE EXECUTE`
+> sobre las 13 funciones del proyecto a `PUBLIC`/`anon`/`authenticated`/
+> `service_role`, dejando owner `postgres` intacto. Verificado: 0 fugas de
+> EXECUTE, owner intacto, `postgres` ejecuta por ownership (n8n no afectado),
+> schema sin cambios (201/6/19), residual de tablas intacto (480 grants).
+> Decisiones D-7E-01, D-7E-02. Ver `7E_CIERRE.md`. El hallazgo A5 (residual
+> amplio de permisos de tabla a roles Data API) quedó fuera de alcance por
+> decisión (Opción 1 — 7E estricta) y se registró como pendiente nuevo 1.7. El
+> contenido original se conserva abajo como referencia histórica del diseño.
+
 **Estado actual (DEV):** ⏳ Pendiente. No diseñado ni planificado todavía.
 
 **Contexto:** durante Etapa 7B se aplicó en TEST un modelo de grants mínimo
@@ -252,6 +262,40 @@ puedan enviar payloads arbitrarios (webhook MP, bot, frontend).
 
 **Origen:** `7B_CIERRE.md` sección 14 (hardening SQL de `registrar_pago`);
 reformulado tras 7C.
+
+### 1.7 Residual amplio de permisos de tabla a roles Data API en DEV
+
+**Estado actual (DEV):** ⏳ Pendiente. Hallazgo de Etapa 7E (snapshot A5), no
+tratado por decisión de alcance.
+
+**Contexto:** durante el snapshot read-only de 7E (Bloque A, query A5) se detectó
+que en DEV los roles `anon`/`authenticated`/`service_role` tienen sobre **todas
+las tablas y vistas** el set **completo** de privilegios
+(`SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN`) y
+sobre las secuencias `SELECT, UPDATE, USAGE`. El conteo de referencia (C5) fue
+**480** grants de tabla a roles Data API. Esto es mucho más amplio que el `Dxtm`
+residual de TEST (solo `TRUNCATE/REFERENCES/TRIGGER`, sin SELECT ni escritura —
+ver D-7B-03). Es el default histórico de Supabase para proyectos creados antes
+del cambio del 30/05/2026, no un bug introducido.
+
+**Por qué 7E no lo tocó:** 7E se ejecutó en alcance estricto (Opción 1 — solo
+`REVOKE EXECUTE` sobre funciones, que era el pendiente explícito 1.5). Revocar
+los permisos de tabla habría excedido el alcance acordado, por lo que se decidió
+documentarlo aquí y no tocarlo. Ver D-7E-01 y `7E_CIERRE.md` sección 8.
+
+**Por qué no es urgencia:** no hay consumidores Data API/PostgREST activos en DEV
+(sin frontend público, bot real, MercadoPago real, dashboard externo); n8n entra
+como `postgres` owner por pooler y no usa estos grants; RLS sigue postergado
+hasta tener frontend público.
+
+**A decidir en etapa futura separada:** o se revoca el set de escritura/lectura
+sobre tablas/vistas y los grants de secuencias a los roles Data API para alinear
+DEV con el modelo mínimo de TEST, o se acepta y documenta como definitivo. En
+cualquier caso, conviene resolverlo **antes de cualquier integración que exponga
+Data API en DEV** y **antes del diseño de OPS/PROD** (para no propagar la
+asimetría).
+
+**Origen:** hallazgo A5 del snapshot de Etapa 7E; `7E_CIERRE.md` sección 8.
 
 ### 2.1 Schedule pg_cron — expirar_prereservas_vencidas
 

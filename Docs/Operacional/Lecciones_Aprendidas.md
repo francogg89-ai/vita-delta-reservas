@@ -938,3 +938,29 @@ transaccionales.
 
 **Verificado:** 2026-05-28, durante TR-01 (la query 1 falló inicialmente por usar
 `created_at` sobre `log_cambios`; corregida a `fecha_hora`).
+
+## Lección del endurecimiento de permisos en DEV — Etapa 7E
+
+### L-7E-01 — El SQL Editor del Dashboard conecta como `postgres`, no por pooler; usar el seed como discriminador de ambiente
+
+Cuando se ejecuta SQL desde el SQL Editor del Dashboard de Supabase, la conexión
+entra como `postgres` directo (no por el pooler), por lo que `current_user`
+devuelve `postgres` y **no** el patrón `postgres.<project_ref>` que sí aparece
+cuando se entra por el pooler (como hace n8n). En consecuencia, `current_user`
+no sirve como discriminador de ambiente en ese contexto — es la misma raíz que
+L-7B-01 (`current_database()` siempre es `postgres`).
+
+El discriminador fuerte y confiable es la **identidad del seed**: los IDs y
+nombres exactos de las 5 cabañas (DEV 17-21, TEST 1-5). En 7E ese veredicto por
+`(id_cabana, nombre)` se usó como gate inequívoco en los tres momentos críticos:
+el snapshot (A0), el re-gate dentro de la transacción del cambio (Bloque B, con
+`RAISE EXCEPTION` que revierte todo si no coincide) y la verificación posterior
+(C1).
+
+Corolario operativo: cualquier bloque de cambio en un entorno Supabase debe
+gatear por identidad de seed, no por `current_user`/`current_database`, y —si es
+destructivo o de endurecimiento— envolver el cambio en `BEGIN/COMMIT` con el
+re-gate adentro para que un error de ambiente revierta sin efecto parcial.
+
+**Verificado:** 2026-05-28, Etapa 7E (snapshot A0 con `current_user=postgres`
+pese a ser DEV; gate por cabañas 17-21 → `ENTORNO_DEV_OK`).
