@@ -7,16 +7,17 @@ Antes de trabajar, leer en este orden:
 1. Docs/Operacional/ESTADO_ACTUAL_VITA_DELTA.md
 2. Docs/Operacional/DECISIONES_NO_REABRIR.md
 3. Docs/Implementacion/6B_SCHEMA_SQL.md (schema canónico actual: **v1.7.3**)
-4. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
-5. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
-6. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
-7. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
-8. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
-9. Docs/Implementacion/6B_PLAN_FASES.md
-10. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a TEST/OPS/PROD)
-11. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
-12. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
-13. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
+4. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
+5. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
+6. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
+7. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
+8. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
+9. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
+10. Docs/Implementacion/6B_PLAN_FASES.md
+11. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a TEST/OPS/PROD)
+12. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
+13. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
+14. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
 
 No cargar contexto histórico largo salvo pedido explícito del usuario.
 
@@ -145,13 +146,21 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - Idempotencia: rama `pre_lock` cubierta empíricamente (A-W2-15), sumada a `post_lock` (H7); resta solo `unique_violation` como opcional no bloqueante.
 - DEV intacto; schema canónico v1.7.3 sin modificar; fixtures de TEST conservados como evidencia (D-7C-01, no-limpieza). Lecciones L-7C-01 a L-7C-06. Documento de cierre: `7C_CIERRE.md`.
 
+**Etapa 7D — Limpieza/reset del entorno TEST ✅ Cerrada (2026-05-28):**
+
+- Bloque dedicado de reset con SQL explícito y aprobado, en tres partes separadas: snapshot read-only (A) → limpieza transaccional atómica (B) → verificación posterior (C).
+- **Doble gate anti-error-de-entorno** por identidad exacta de las 5 cabañas TEST (IDs 1-5, nombres Bamboo/Madre Selva/Arrebol/Guatemala/Tokio): preflight read-only previo + re-gate dentro de la transacción (`RAISE EXCEPTION` si no coincide).
+- **6 tablas transaccionales vaciadas** (`pagos`, `reservas`, `pre_reservas`, `bloqueos`, `huespedes`, `log_cambios`) vía `DELETE` en orden seguro por FKs (`pagos` → `reservas` → `pre_reservas` → `bloqueos` → `huespedes` → `log_cambios`), en transacción única atómica, sin `DROP/TRUNCATE ... CASCADE`. Secuencias reseteadas a 1.
+- Las 3 condicionales (`consultas`, `overrides_operativos`, `gastos`) estaban en 0 y no entraron al borrado. Seed estructural (11 tablas), cron, funciones/vistas/triggers, grants y workflows `__TEST` intactos.
+- **TEST quedó como entorno limpio.** Verificación post-reset conforme (transaccionales en 0, seed idéntico, secuencias en próximo id = 1, cron y vistas operativas OK). Workflows `__TEST` confirmados sobre credencial `vita_supabase_test`.
+- Decisiones D-7D-01 (reset de secuencias en tablas vaciadas) y D-7D-02 (vaciado de `log_cambios` con evidencia documentada). Documento de cierre: `7D_CIERRE.md`.
+
 **Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV y TEST están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B; paridad estructural 10/10).
 
 **Próxima etapa — opciones disponibles (orden sugerido):**
 
-Con DEV, TEST, 6D, 7A, 7B y 7C cerradas, las opciones a priorizar por Franco son:
+Con DEV, TEST, 6D, 7A, 7B, 7C y 7D cerradas, las opciones a priorizar por Franco son:
 
-- Diseño del bloque de limpieza/reset de TEST (derivado de D-7C-01, por la acumulación de fixtures de 7C — `Pendiente_pre_produccion.md` 6.5).
 - Endurecimiento de permisos en DEV (paridad con TEST — `Pendiente_pre_produccion.md` 1.5).
 - Diseño del entorno OPS (operación interna real sin consumidores externos automáticos).
 - Integraciones con consumidores reales sobre TEST: webhook MercadoPago, bot conversacional, frontend público — siempre sobre TEST primero.
@@ -188,7 +197,7 @@ No avanzar a OPS, dashboard, MercadoPago real, bot o frontend público sin decis
 - **NO usar `DROP ... CASCADE`** — siempre revisar dependencias primero. Las vistas (`vista_disponibilidad`, etc.) dependen de funciones; un DROP CASCADE las elimina silenciosamente.
 - **Para modificar funciones existentes, intentar primero `CREATE OR REPLACE FUNCTION`.**
 - **Si Supabase Dashboard interfiere agregando `ALTER TABLE ENABLE RLS` sobre variables locales con prefijo `v_`** (bug conocido), usar workaround DROP + CREATE en runs separados, **pero validando antes que no haya vistas dependientes**. Documentado en `Docs/Operacional/Lecciones_Aprendidas.md`.
-- **Tests funcionales primero, limpieza después.** Validar el comportamiento esperado antes de borrar la evidencia.
+- **Tests funcionales primero, limpieza después.** Validar el comportamiento esperado antes de borrar la evidencia. **La limpieza de un entorno de prueba no se improvisa:** es un bloque dedicado con SQL explícito y aprobado (snapshot → limpieza atómica → verificación), con `DELETE` en orden por FKs, sin `DROP/TRUNCATE ... CASCADE`, y doble gate anti-error-de-entorno. Patrón validado en Etapa 7D (D-7C-01, D-7D-01, D-7D-02).
 - **`NOW()` en PostgreSQL retorna timestamp de transacción**, no de statement. Para validar triggers de `updated_at`, ejecutar INSERT y UPDATE en runs separados.
 - **Supabase SQL Editor muestra solo el resultado del último SELECT.** Para ver múltiples resultados, usar UNION ALL con columna identificadora.
 

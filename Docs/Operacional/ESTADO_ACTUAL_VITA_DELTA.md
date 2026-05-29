@@ -4,7 +4,9 @@
 
 El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.3 con hardening estructural y de concurrencia aplicados) + workflows n8n operativos (6C) + Etapa 6D cerrada (2026-05-27) + Etapa 7A de correcciones pre-TEST/pre-OPS cerrada (2026-05-28) + entorno TEST levantado, paritario y operativo (7B, cerrada 2026-05-28) + validación funcional ampliada sobre TEST (7C, cerrada 2026-05-28)**. Los workflows n8n fueron validados contra DEV en Etapa 6C (40 tests funcionales + verificaciones cruzadas) y contra TEST en Etapa 7B (smokes happy path 8/8) y 7C (validación funcional ampliada de caminos no-felices); en TEST se validó además la cadena transaccional completa W2→W3→W4 end-to-end. Hardening estructural y de concurrencia validados en DEV: 101 tests de hardening + 6 tests de concurrencia real + 9 tests funcionales y 4 estructurales de 7A.
 
-**Etapa actual:** 7C — Validación funcional ampliada sobre TEST. Cerrada (2026-05-28). Se ejecutaron sistemáticamente los caminos no-felices de los 8 workflows `__TEST` (errores controlados, edge cases, validaciones defensivas, condiciones de borde) que 7B dejó fuera de alcance. Resultado: **54 verificaciones conformes (48 casos funcionales del Grupo A + 6 verificaciones transversales TR-01/TR-02), 0 fallos inesperados, 1 mutación no planificada pero válida y comprendida (bloqueo id 2)**. Idempotencia: ramas `post_lock` (H7) y `pre_lock` (7C) cubiertas empíricamente; `unique_violation` queda como opcional no bloqueante. DEV no se tocó durante 7C; el schema canónico v1.7.3 no se modificó.
+**Etapa actual:** 7D — Limpieza/reset del entorno TEST. Cerrada (2026-05-28). Se diseñó y ejecutó un bloque dedicado de reset con SQL explícito y aprobado, en tres partes separadas (snapshot read-only → limpieza transaccional atómica → verificación posterior), con doble gate anti-error-de-entorno por identidad exacta de las 5 cabañas TEST. Se vaciaron las 6 tablas transaccionales con datos (`pagos`, `reservas`, `pre_reservas`, `bloqueos`, `huespedes`, `log_cambios`) vía `DELETE` en orden seguro por FKs, sin `DROP/TRUNCATE ... CASCADE`, y se resetearon sus secuencias a 1. El seed estructural (11 tablas), el cron, las funciones/vistas/triggers, los grants y los workflows `__TEST` quedaron intactos. **TEST quedó como entorno limpio.** Decisiones D-7D-01 (reset de secuencias) y D-7D-02 (vaciado de `log_cambios` con evidencia documentada). DEV/OPS/PROD no se tocaron; schema canónico v1.7.3 sin modificar. Documento de cierre: `7D_CIERRE.md`.
+
+**Etapa previa:** 7C — Validación funcional ampliada sobre TEST. Cerrada (2026-05-28). Se ejecutaron sistemáticamente los caminos no-felices de los 8 workflows `__TEST` (errores controlados, edge cases, validaciones defensivas, condiciones de borde) que 7B dejó fuera de alcance. Resultado: **54 verificaciones conformes (48 casos funcionales del Grupo A + 6 verificaciones transversales TR-01/TR-02), 0 fallos inesperados, 1 mutación no planificada pero válida y comprendida (bloqueo id 2)**. Idempotencia: ramas `post_lock` (H7) y `pre_lock` (7C) cubiertas empíricamente; `unique_violation` queda como opcional no bloqueante. DEV no se tocó durante 7C; el schema canónico v1.7.3 no se modificó.
 
 **No es producción.** DEV y TEST son entornos funcionales separados. Falta integración con consumidores reales (webhook MP, bot, frontend) y endurecimiento de DEV equivalente al de TEST. La validación funcional ampliada sobre TEST quedó cubierta en 7C.
 
@@ -323,9 +325,8 @@ Datos de prueba conservados como evidencia/fixtures, no limpiados. Reseteo event
 
 ## Próxima etapa — opciones disponibles
 
-Con 6D, 7A, 7B y 7C cerradas, las siguientes son **opciones disponibles** a priorizar por Franco (orden sugerido, no comprometidas en este documento):
+Con 6D, 7A, 7B, 7C y 7D cerradas, las siguientes son **opciones disponibles** a priorizar por Franco (orden sugerido, no comprometidas en este documento):
 
-- **Diseño del bloque de limpieza/reset de TEST:** dado D-7C-01 (no-limpieza durante 7C) y la acumulación de fixtures de 7C, diseñar un bloque específico de reset con SQL explícito y aprobado antes de avanzar a otras etapas. Ver `Pendiente_pre_produccion.md` 6.5.
 - **Endurecimiento de permisos en DEV:** aplicar a DEV un modelo equivalente al de TEST (REVOKE EXECUTE a `PUBLIC` sobre las funciones del proyecto, etc.). No diseñado ni planificado todavía. Ver `Pendiente_pre_produccion.md` 1.5.
 - **Diseño del entorno OPS:** operación interna real (Vicky, Franco, Rodrigo, Jennifer), sin consumidores externos automáticos.
 - **Webhook MercadoPago / bot / frontend:** integración con consumidores reales, **siempre sobre TEST primero** antes de cualquier consideración productiva.
@@ -373,6 +374,14 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 | Validación funcional ampliada sobre TEST (casos no-felices) | ✅ Cerrado | 7C-1 a 7C-6 (48 funcionales + 6 transversales) |
 | Cobertura empírica de rama `pre_lock` de idempotencia | ✅ Cerrado | 7C-5 (A-W2-15) |
 
+**Items cerrados en Etapa 7D:**
+
+| Item | Estado | Bloque que lo cerró |
+|---|---|---|
+| Diseño y ejecución del bloque de limpieza/reset de TEST | ✅ Cerrado | 7D Bloques A/B/C (D-7D-01, D-7D-02) |
+| Reset de secuencias a 1 en tablas vaciadas de TEST | ✅ Cerrado | 7D Bloque B (D-7D-01) |
+| Vaciado de `log_cambios` en TEST con evidencia documentada | ✅ Cerrado | 7D Bloque B (D-7D-02) |
+
 **Items pendientes:**
 
 1. **`tipo_valor` sin poblar en `configuracion_general`** — observación de 7A (PreOPS-A6). Las 10 claves tienen `tipo_valor=NULL`. No bloqueante; evaluar antes del dashboard OPS si se usa para render de inputs. Ver `Pendiente_pre_produccion.md` 1.4.
@@ -383,7 +392,7 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 6. **Feriados productivos cargados** — pendiente histórico.
 7. **Endurecimiento de permisos en DEV** — aplicar a DEV el modelo equivalente al de TEST (REVOKE EXECUTE a `PUBLIC` sobre las 13 funciones del proyecto). No diseñado todavía. Ver `Pendiente_pre_produccion.md` 1.5.
 8. **Validación funcional ampliada sobre TEST** — ✅ **Cerrada en Etapa 7C** (2026-05-28). Batería de casos no-felices ejecutada: 48 casos funcionales + 6 verificaciones transversales, 0 fallos inesperados. Ver `7C_CIERRE.md`.
-9. **Diseño del bloque de limpieza/reset de TEST** — pendiente nuevo derivado de D-7C-01. La acumulación de fixtures de 7C (pre-reservas id 3/4, pagos id 2/3, bloqueo id 2, huéspedes id 3/5) se conserva como evidencia; un eventual reset debe diseñarse como bloque separado con SQL explícito y aprobado. Ver `Pendiente_pre_produccion.md` 6.5.
+9. **Diseño del bloque de limpieza/reset de TEST** — ✅ **Cerrado en Etapa 7D** (2026-05-28). Se diseñó y ejecutó el bloque dedicado de reset (snapshot → limpieza atómica → verificación), dejando TEST como entorno limpio: schema v1.7.3 + seed estructural + cron + grants + workflows `__TEST`, sin datos transaccionales. Decisiones D-7D-01 y D-7D-02. Ver `7D_CIERRE.md` y `Pendiente_pre_produccion.md` 6.5.
 
 ---
 

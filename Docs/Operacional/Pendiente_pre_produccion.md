@@ -541,39 +541,39 @@ paths.
 
 ### 6.5 Diseño del bloque de limpieza/reset de TEST
 
-**Estado:** ⏳ Pendiente nuevo (derivado de D-7C-01). No diseñado todavía.
+**Estado:** ✅ Cerrado en Etapa 7D (2026-05-28). Ver `7D_CIERRE.md`.
 
-**Contexto:** las Etapas 7B y 7C dejaron datos vivos en TEST que se conservan
-como evidencia (decisión D-7C-01, no-limpieza). Al cierre de 7C, TEST acumula:
+**Contexto:** las Etapas 7B y 7C dejaron datos vivos en TEST que se conservaron
+como evidencia (decisión D-7C-01, no-limpieza). 7D diseñó y ejecutó el bloque
+dedicado de reset con SQL explícito y aprobado.
 
-- Pre-reserva id 1 (cancelada), id 2 (convertida), id 3 (`pago_en_revision`),
-  id 4 (`pendiente_pago`).
-- Reserva id 1 (confirmada).
-- Pagos id 1 (confirmado), id 2 e id 3 (`en_revision`).
-- Bloqueo id 1 (Arrebol) e id 2 (Bamboo, mutación no planificada de A-W6-06).
-- Huéspedes id 1, 3, 5.
+**Qué se ejecutó:**
 
-**Por qué es pendiente:** si en algún momento se quiere un TEST reseteado (para
-re-ejecutar una batería desde cero, o para preparar el entorno antes de conectar
-consumidores reales), hace falta un bloque de limpieza con SQL explícito. Por
-D-7C-01 no se improvisa caso por caso ni en medio de una validación.
+1. Snapshot read-only pre-reset (Bloque A), con preflight anti-error-de-entorno
+   por identidad exacta de las 5 cabañas TEST.
+2. Limpieza transaccional atómica (Bloque B): `DELETE` explícito en orden seguro
+   por FKs (`pagos` → `reservas` → `pre_reservas` → `bloqueos` → `huespedes` →
+   `log_cambios`), sin `DROP/TRUNCATE ... CASCADE`, con re-gate dentro de la
+   transacción.
+3. Reset de secuencias a 1 (`ALTER SEQUENCE ... RESTART WITH 1`) solo en las 6
+   tablas vaciadas con datos (D-7D-01).
+4. Vaciado de `log_cambios` con evidencia documentada en el cierre (D-7D-02).
+5. Verificación posterior (Bloque C): transaccionales en 0, seed intacto,
+   secuencias reseteadas, cron intacto, vistas operativas ejecutando.
 
-**Alcance esperado (a diseñar en su propia etapa/bloque):**
+**Resultado:** TEST quedó como entorno limpio (schema v1.7.3 + seed estructural +
+cron + grants + funciones/vistas/triggers + workflows `__TEST`, sin datos
+transaccionales). Las 3 condicionales (`consultas`, `overrides_operativos`,
+`gastos`) estaban en 0 y no entraron al borrado.
 
-1. Definir el orden de borrado respetando las foreign keys (pagos →
-   pre_reservas/reservas → huespedes; bloqueos independientes).
-2. Decidir si el reset es total (TRUNCATE de tablas transaccionales + reseteo de
-   secuencias) o selectivo (solo datos con marcador de ambiente
-   `manual_test_*` / `n8n_test_*`).
-3. Preservar seeds estructurales (cabañas, socios, configuración, temporadas,
-   plantillas) — el reset es de datos transaccionales, no del seed base.
-4. SQL explícito, revisado y aprobado antes de ejecutar. Sin `DROP ... CASCADE`.
-5. Verificación posterior (conteos en cero de las tablas transaccionales,
-   secuencias reseteadas si aplica).
+**Decisiones generadas:** D-7D-01 (reset de secuencias), D-7D-02 (vaciado de
+`log_cambios` con evidencia documentada) — ver `DECISIONES_NO_REABRIR.md`.
 
-No diseñar ni ejecutar ahora — queda como pendiente registrado.
+**Verificación n8n (cerrada):** confirmado que los 8 workflows `__TEST` siguen
+con la credencial `vita_supabase_test` apuntando a TEST (Franco, 2026-05-28).
 
 **Origen:** D-7C-01 (`DECISIONES_NO_REABRIR.md`); `7C_CIERRE.md` secciones 8 y 9.
+**Cierre:** `7D_CIERRE.md`.
 
 ---
 

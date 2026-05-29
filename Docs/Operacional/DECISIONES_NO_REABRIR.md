@@ -464,6 +464,33 @@ Las lecciones operativas de 7C (L-7C-01 a L-7C-06) quedaron consolidadas en `Lec
 
 **No reabrir.**
 
+### D-7D-01 — Reset de secuencias a 1 en las tablas vaciadas de TEST
+
+En la limpieza/reset de TEST (Etapa 7D, cerrada 2026-05-28), se reseteó a 1 la secuencia de cada tabla efectivamente vaciada con datos: `pagos`, `reservas`, `pre_reservas`, `bloqueos`, `huespedes`, `log_cambios`, vía `ALTER SEQUENCE ... RESTART WITH 1`.
+
+- Las secuencias del **seed estructural** (`cabanas`, `socios`, `temporadas`, `plantillas_mensajes`, `cuentas_cobro`) **no se tocaron**.
+- Las secuencias de las **condicionales sin uso** (`consultas`, `overrides_operativos`, `gastos`) **no se tocaron** (estaban en `null`, nunca usadas).
+- Los nombres de secuencia **no se hardcodearon**: se obtuvieron de `pg_get_serial_sequence` en el snapshot pre-reset y se usaron textualmente.
+
+**Regla operativa:** cualquier reset futuro de un entorno de prueba debe resetear únicamente las secuencias de las tablas que vacía, nunca las del seed estructural, y obtener los nombres de secuencia del catálogo, no de memoria. **No reabrir.**
+
+### D-7D-02 — Vaciado de `log_cambios` en TEST con evidencia documentada
+
+En la Etapa 7D se vació `log_cambios` en TEST (18 filas, todas de prueba 7B/7C). La evidencia de auditoría **no se archivó en una tabla dentro de TEST**; quedó documentada en `7D_CIERRE.md` (snapshot mínimo: total, conteo por `tabla_afectada`, conteo por `source_event`, rango temporal).
+
+**Regla:** la traza de auditoría de pruebas vive en los documentos de cierre, no en tablas archivo dentro del entorno. **No reabrir.**
+
+### Método de limpieza/reset de TEST (regla derivada de 7D)
+
+El método validado y a reutilizar para cualquier reset de entorno de prueba:
+
+- **`DELETE` explícito** en orden seguro por foreign keys (`pagos` → `reservas` → `pre_reservas` → `bloqueos` → `huespedes` → `log_cambios`). **Sin `DROP ... CASCADE`, sin `TRUNCATE`, sin `TRUNCATE ... CASCADE`.**
+- **Transacción única atómica** (`BEGIN`/`COMMIT`).
+- **Doble gate anti-error-de-entorno:** preflight read-only previo + re-gate dentro de la transacción (`RAISE EXCEPTION` si la identidad de las 5 cabañas no coincide con el entorno objetivo).
+- **Snapshot read-only previo** + **verificación posterior** como bloques separados del destructivo (nunca un único bloque opaco).
+
+**No reabrir** salvo contradicción crítica.
+
 ## Decisiones aprobadas con código de referencia
 
 - **D3** — Mantener solo `hora_checkin` y `hora_checkout` en tablas (sin "hora base" vs "hora real").
