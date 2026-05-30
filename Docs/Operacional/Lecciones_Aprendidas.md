@@ -964,3 +964,96 @@ re-gate adentro para que un error de ambiente revierta sin efecto parcial.
 
 **Verificado:** 2026-05-28, Etapa 7E (snapshot A0 con `current_user=postgres`
 pese a ser DEV; gate por cabañas 17-21 → `ENTORNO_DEV_OK`).
+
+## Lecciones del levantamiento del entorno OPS — Etapa 8A
+
+### L-8A-01 — El SQL Editor de Supabase ejecuta solo lo seleccionado
+
+Si hay texto resaltado en el panel del SQL Editor, el botón "Run" ejecuta
+**únicamente esa porción**, no el script completo. Esto causó varios falsos
+"0 filas" / "no rows returned" al inicio del Bloque 4, cuando en realidad la
+consulta entera no se había corrido. Regla operativa: para ejecutar un bloque
+completo, correr con **nada seleccionado**. Si se quiere correr solo una parte,
+seleccionarla a propósito y ser consciente de que el resto no corre.
+
+**Verificado:** 2026-05-29, Bloque 4 (tandas de schema).
+
+### L-8A-02 — El conteo de funciones debe excluir las de extensiones
+
+`btree_gist` instala **188 funciones** en el schema `public`. Un conteo ingenuo
+de funciones de `public` da 201 (188 + 13 del proyecto) en vez de las 13 reales.
+Para contar solo las funciones propias, excluir las que dependen de una extensión:
+
+```sql
+SELECT count(*) FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname='public' AND p.prokind='f'
+  AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid=p.oid AND d.deptype='e');
+```
+
+`pg_cron`, en cambio, instala sus funciones en el schema `cron` (no en `public`),
+por lo que no contamina el conteo de `public`. El único que mete ruido en `public`
+es `btree_gist`.
+
+**Verificado:** 2026-05-29, Tanda 4.5d / P05. El conteo sin filtro daba 201;
+con el filtro `deptype='e'`, daba 13 (confirmado también por `funciones_propias`).
+
+### L-8A-03 — Conteo de enums por catálogo, no por sufijo de nombre
+
+Contar enums con `typname LIKE '%_enum'` es frágil (puede colisionar o perder
+casos). El conteo correcto filtra por namespace y tipo de catálogo:
+
+```sql
+SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
+WHERE n.nspname='public' AND t.typtype='e';
+```
+
+**Verificado:** 2026-05-29, Tanda 4.1 / P02 (4 enums).
+
+### L-8A-04 — "Run without RLS" es esperado y correcto al crear objetos con RLS automático OFF
+
+Al crear tablas/triggers en un proyecto con "Enable automatic RLS" en OFF, el SQL
+Editor puede mostrar un aviso tipo "Run without RLS". Es **esperado y correcto** en
+este modelo (Opción A, RLS postergado). Aceptar y continuar; no es un error ni una
+señal de mala configuración.
+
+**Verificado:** 2026-05-29, Bloque 4.
+
+### L-8A-05 — Verificaciones grandes: evitar `UNION ALL` con comentarios intercalados entre ramas
+
+Una verificación armada como muchas ramas de `SELECT ... UNION ALL SELECT ...` con
+comentarios `--` intercalados **entre** las ramas es frágil y puede romper con
+`syntax error at or near ")"` según cómo se procesen los saltos de línea. El
+patrón robusto es **una sola consulta con subqueries escalares por columna**
+(`SELECT (SELECT count(*) ...) AS a, (SELECT count(*) ...) AS b, ...`), que
+devuelve una sola fila, es más legible y no depende de la posición de comentarios.
+
+**Verificado:** 2026-05-29, Bloque 9 (la v1 con UNION ALL falló en la línea del
+primer comentario intercalado; la v2 con subqueries escalares corrió limpia).
+
+### L-8A-06 — `current_database()` no distingue ambiente; usar datos del seed (consistente con L-7B-01)
+
+Igual que en TEST, `current_database()` devuelve `postgres` en OPS. Para confirmar
+que una conexión (ej. la credencial n8n `vita_supabase_ops`) apunta realmente a OPS
+y no a DEV/TEST, el discriminador confiable es la **identidad del seed**: leer las
+5 cabañas y verificar sus nombres reales (Bamboo, Madre Selva, Arrebol, Guatemala,
+Tokio). La verificación de identidad del Bloque 10 se hizo así (convergencia de
+datos), no por `current_database()`.
+
+**Verificado:** 2026-05-29, Bloque 10 (query de identidad por la credencial n8n).
+
+### L-8A-07 — OPS nació más cerrado que TEST gracias al switch correcto desde el día cero
+
+A diferencia de TEST/DEV —donde el default de PostgreSQL concedía EXECUTE-PUBLIC y
+hubo que revocarlo (D-7B-05, D-7E-01)—, OPS se creó con "Automatically expose new
+tables = OFF" desde el inicio. Resultado: las 13 funciones nacieron con `proacl`
+NULL (solo owner) y las tablas con solo `Dxtm` inocuo para roles Data API, sin
+necesidad de remediación. El REVOKE EXECUTE se aplicó igual como barrera explícita
+(Opción B), pero fue idempotente (no había nada que quitar).
+
+**Corolario para PROD:** crear el proyecto con los mismos switches (Data API ON,
+exponer tablas nuevas OFF, RLS automático OFF) para nacer cerrado desde el día cero,
+en vez de endurecer después.
+
+**Verificado:** 2026-05-29, Bloque 6 (diagnóstico: 0 EXECUTE a Data API, 0 grants
+RW a roles Data API antes de cualquier REVOKE).

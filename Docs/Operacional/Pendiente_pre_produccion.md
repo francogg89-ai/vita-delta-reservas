@@ -3,8 +3,8 @@
 Lista de cambios y configuraciones a aplicar antes del despliegue de
 producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
 
-**Estado del archivo:** actualizado al cierre de Etapa 7E (sesión 2026-05-28).
-Items cerrados durante Etapas 6D, 7A y 7B listados en los resúmenes de abajo;
+**Estado del archivo:** actualizado al cierre de Etapa 8A (sesión 2026-05-29).
+Items cerrados durante Etapas 6D, 7A, 7B y 8A listados en los resúmenes de abajo;
 detalle histórico de los items 6D en el Apéndice al final del documento.
 
 ---
@@ -37,6 +37,18 @@ detalle histórico de los items 6D en el Apéndice al final del documento.
 | Permisos Data API normalizados en TEST (REVOKE EXECUTE) | ✅ Cerrado | 7B-GRANTS | D-7B-03, D-7B-05 |
 | Workflows `__TEST` importados y validados (happy path 8/8) | ✅ Cerrado | 7B-4 | D-7B-04, `7B_CIERRE.md` sección 9 |
 | Cadena transaccional end-to-end W2→W3→W4 en TEST | ✅ Cerrado | 7B-4 | `7B_CIERRE.md` sección 10 |
+
+## Items cerrados en Etapa 8A — resumen
+
+| Item | Estado | Bloque que lo cerró | Referencia |
+|---|---|---|---|
+| Creación del entorno OPS (proyecto Supabase independiente) | ✅ Cerrado | 8A Bloques 1-2 | `8A_CIERRE.md` |
+| Replicación del schema desde canónico v1.7.3 (paridad P01-P10 10/10) | ✅ Cerrado | 8A Bloque 4 | `8A_CIERRE.md` sección 3.1 |
+| Seeds reales mínimos en OPS (item 4.1 — cabañas reales con IDs propios) | ✅ Cerrado | 8A Bloque 5 | `8A_CIERRE.md` sección 3.2 |
+| Grants mínimos en OPS (OPS nació cerrado; REVOKE idempotente Opción B) | ✅ Cerrado | 8A Bloque 6 | confirmación D-8-03 |
+| Default privileges de OPS (objetos futuros nacen cerrados) | ✅ Cerrado | 8A Bloque 7 | D-8-13, `8A_CIERRE.md` |
+| `pg_cron` activo en OPS con corrida real verificada | ✅ Cerrado | 8A Bloque 8 | `8A_CIERRE.md` |
+| Credencial n8n `vita_supabase_ops` verificada por identidad | ✅ Cerrado | 8A Bloques 10-11 | `8A_CIERRE.md` |
 
 **Items pendientes activos:** ver secciones 1 a 8 abajo. **Nota:** las secciones 1.1, 1.2 y 1.3 quedaron cerradas en Etapa 7A (detalle conservado abajo con marca de cierre). Los items cerrados en 7B (entorno TEST levantado) se registran en el resumen de arriba; detalle completo en `7B_CIERRE.md`, no se duplica aquí.
 
@@ -297,6 +309,17 @@ asimetría).
 
 **Origen:** hallazgo A5 del snapshot de Etapa 7E; `7E_CIERRE.md` sección 8.
 
+> **Actualización (Etapa 8A, 2026-05-29):** OPS **nació sin este problema**. Al
+> crear `vita-delta-ops` con el switch "Automatically expose new tables = OFF"
+> desde el día cero, el diagnóstico del Bloque 6 confirmó **0 grants
+> SELECT/INSERT/UPDATE/DELETE a roles Data API sobre tablas** (solo el `Dxtm`
+> inocuo, igual que TEST). Es decir, la asimetría A5 quedó **acotada a DEV** y no
+> se propagó a OPS. La regla derivada para PROD (ver `8A_CIERRE.md` y
+> `DECISIONES_NO_REABRIR.md` sección 8A) es crear el proyecto con los mismos
+> switches que OPS para nacer cerrado. El item 1.7 sigue abierto **solo para DEV**:
+> decidir si se revoca el residual amplio de DEV o se acepta como definitivo. No
+> urgente (sin consumidores Data API activos en DEV).
+
 ### 2.1 Schedule pg_cron — expirar_prereservas_vencidas
 
 **Estado actual (DEV):** ✅ Cerrado / activo. El job `expirar_prereservas`
@@ -305,7 +328,8 @@ está programado en pg_cron con schedule `*/5 * * * *` y validado end-to-end
 en una hora, una pre-reserva real procesada durante 6C).
 
 **Pendiente pre-producción:** replicar y verificar el schedule cuando se
-creen los ambientes TEST y PROD.
+cree el ambiente PROD. _(TEST y OPS ya tienen los 2 jobs activos: TEST verificado
+en 7B; OPS verificado en 8A Bloque 8 con una corrida real `succeeded`.)_
 
 **Query a aplicar en TEST/PROD:**
 
@@ -394,18 +418,21 @@ Crear un endpoint backend —inicialmente en n8n o Supabase Edge Function— que
 
 ### 4.1 Cabañas reales
 
-**Estado actual (DEV):** ✅ Parcialmente cerrado. Las 5 cabañas reales de
-Vita Delta están cargadas en DEV con IDs 17-21:
-- Bamboo (id=17, grande, capacidad 3-5)
-- Madre Selva (id=18, grande, capacidad 3-5)
-- Arrebol (id=19, grande, capacidad 3-5)
-- Guatemala (id=20, chica, capacidad 2-4)
-- Tokio (id=21, chica, capacidad 2-4)
+**Estado actual:** ✅ Cerrado en DEV, TEST y OPS. Las 5 cabañas reales de
+Vita Delta están cargadas en los tres entornos, con IDs propios de cada uno:
+- **DEV (IDs 17-21):** Bamboo=17, Madre Selva=18, Arrebol=19, Guatemala=20, Tokio=21.
+- **TEST (IDs 1-5):** Bamboo=1, Madre Selva=2, Arrebol=3, Guatemala=4, Tokio=5.
+- **OPS (IDs 1-5):** Bamboo=1, Madre Selva=2, Arrebol=3, Guatemala=4, Tokio=5 (sembradas en Etapa 8A, Bloque 5).
 
-**Pendiente pre-producción:** replicar el mismo seed en TEST y PROD cuando
-se creen esos ambientes. Decidir si mantener los IDs actuales o re-crear
-desde 1.
-Si se decide conservar referencias o migrar datos desde DEV/TEST, no asumir IDs secuenciales desde 1. Preferir seeds explícitos o mapeos controlados.
+Capacidades en los tres: grandes (Bamboo, Madre Selva, Arrebol) 3-5; chicas (Guatemala, Tokio) 2-4.
+
+**Aprendizaje consolidado (D-7B-02):** los IDs **no son portables** entre
+entornos. Cada workflow usa los IDs reales del ambiente al que apunta. En el form
+de carga de 8B la cabaña se elige **por nombre**, no por ID (D-8-10), lo que hace
+irrelevante el valor concreto del ID para el operador.
+
+**Pendiente pre-producción:** replicar el mismo seed en PROD cuando se cree ese
+ambiente, con IDs propios (no asumir secuencia desde 1 ni copiar de otro entorno).
 
 ### 4.2 Tarifas reales por temporada
 

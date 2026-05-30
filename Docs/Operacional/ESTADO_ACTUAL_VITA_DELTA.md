@@ -2,15 +2,17 @@
 
 ## Resumen ejecutivo
 
-El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.3 con hardening estructural y de concurrencia aplicados) + workflows n8n operativos (6C) + Etapa 6D cerrada (2026-05-27) + Etapa 7A de correcciones pre-TEST/pre-OPS cerrada (2026-05-28) + entorno TEST levantado, paritario y operativo (7B, cerrada 2026-05-28) + validación funcional ampliada sobre TEST (7C, cerrada 2026-05-28) + limpieza/reset de TEST (7D, cerrada 2026-05-28) + endurecimiento de permisos Data API en DEV (7E, cerrada 2026-05-28)**. Los workflows n8n fueron validados contra DEV en Etapa 6C (40 tests funcionales + verificaciones cruzadas) y contra TEST en Etapa 7B (smokes happy path 8/8) y 7C (validación funcional ampliada de caminos no-felices); en TEST se validó además la cadena transaccional completa W2→W3→W4 end-to-end. Hardening estructural y de concurrencia validados en DEV: 101 tests de hardening + 6 tests de concurrencia real + 9 tests funcionales y 4 estructurales de 7A.
+El sistema de reservas de Complejo Vita Delta tiene **backend Supabase DEV completo (6B v1.7.3 con hardening estructural y de concurrencia aplicados) + workflows n8n operativos (6C) + Etapa 6D cerrada (2026-05-27) + Etapa 7A de correcciones pre-TEST/pre-OPS cerrada (2026-05-28) + entorno TEST levantado, paritario y operativo (7B, cerrada 2026-05-28) + validación funcional ampliada sobre TEST (7C, cerrada 2026-05-28) + limpieza/reset de TEST (7D, cerrada 2026-05-28) + endurecimiento de permisos Data API en DEV (7E, cerrada 2026-05-28) + entorno OPS de operación real interna levantado, paritario, seguro y conectado a n8n (8A, cerrada 2026-05-29)**. Los workflows n8n fueron validados contra DEV en Etapa 6C (40 tests funcionales + verificaciones cruzadas) y contra TEST en Etapa 7B (smokes happy path 8/8) y 7C (validación funcional ampliada de caminos no-felices); en TEST se validó además la cadena transaccional completa W2→W3→W4 end-to-end. Hardening estructural y de concurrencia validados en DEV: 101 tests de hardening + 6 tests de concurrencia real + 9 tests funcionales y 4 estructurales de 7A.
 
-**Etapa actual:** 7E — Endurecimiento de permisos Data API en DEV. Cerrada (2026-05-28). Se aplicó a DEV el `REVOKE EXECUTE` sobre las 13 funciones del proyecto a `PUBLIC`/`anon`/`authenticated`/`service_role`, en paridad con el modelo de TEST (7B-GRANTS), por el método de cuatro bloques separados (snapshot read-only → cambio transaccional `BEGIN/COMMIT` con re-gate anti-error-de-entorno por identidad exacta de cabañas DEV 17-21 → verificación posterior → cierre documental). Owner `postgres` intacto y ejecutando por ownership (n8n no afectado); 0 fugas de EXECUTE verificadas; schema v1.7.3 sin cambios (201 funciones / 6 vistas / 19 triggers). De las 201 funciones de `public`, solo 13 son del proyecto (las otras 188 son de `btree_gist`, owner `supabase_admin`, no se tocaron). El hallazgo A5 (residual amplio de permisos de tabla a roles Data API en DEV: SELECT/escritura completos, más amplio que el `Dxtm` de TEST) quedó **fuera de alcance por decisión** (Opción 1 — 7E estricta) y se registró como pendiente nuevo `Pendiente_pre_produccion.md` 1.7. Decisiones D-7E-01, D-7E-02. DEV es el único entorno tocado; TEST/OPS/PROD intactos. Documento de cierre: `7E_CIERRE.md`.
+**Etapa actual:** 8A — Levantamiento del entorno OPS (operación real interna). Cerrada (2026-05-29). Se creó `vita-delta-ops` (`OPS_REF=lpiatqztudxiwdlcoasv`, sa-east-1, Free tier, PostgreSQL 17.6) como tercer entorno de la estrategia DEV → TEST → OPS → PROD y **primer entorno de operación real interna** (D-8-09). Schema reconstruido desde el canónico `6B_SCHEMA_SQL.md v1.7.3` en 7 tandas (4.1-4.7), con **paridad estructural P01-P10 10/10** (2 extensiones, 4 enums, 20 tablas, 6 vistas, 13 funciones, 13 triggers, 2 EXCLUDE, 38 CHECK, 15 FK, 27 índices). Seeds reales sembrados: 5 cabañas (IDs **1-5**), 3 socios (Franco 33.33 / Rodrigo 33.34 / Remo 33.33), 10 claves de `configuracion_general` (horizonte 120), 1 cuenta de cobro real y activa (alias playario), 1 temporada baseline, 1 plantilla. Seguridad: **OPS nació más cerrado que TEST** gracias al switch "Automatically expose new tables = OFF" desde la creación — 0 funciones con EXECUTE a Data API y 0 grants RW a roles Data API sobre tablas; el `REVOKE EXECUTE` idempotente se aplicó igual como barrera explícita (Opción B). Default privileges cerrado sin ejecución (D-8-13): los defaults del rol `postgres` conceden solo `Dxtm` inocuo; los 21 defaults amplios son del rol de plataforma `supabase_admin` y no se tocan. `pg_cron` activo con 2 jobs y una corrida real `succeeded` verificada. Credencial n8n `vita_supabase_ops` creada, probada y verificada por identidad (lee las 5 cabañas reales de OPS). Verificación consolidada 17/17. Smoke de cierre solo lectura (D-8-12): el primer write real será una reserva real por 8B. Decisiones D-8-09, D-8-13 (+ confirmación de cumplimiento de D-8-03). DEV/TEST/PROD no se tocaron. Documento de cierre: `8A_CIERRE.md`.
+
+**Etapa previa:** 7E — Endurecimiento de permisos Data API en DEV. Cerrada (2026-05-28). Se aplicó a DEV el `REVOKE EXECUTE` sobre las 13 funciones del proyecto a `PUBLIC`/`anon`/`authenticated`/`service_role`, en paridad con el modelo de TEST (7B-GRANTS), por el método de cuatro bloques separados (snapshot read-only → cambio transaccional `BEGIN/COMMIT` con re-gate anti-error-de-entorno por identidad exacta de cabañas DEV 17-21 → verificación posterior → cierre documental). Owner `postgres` intacto y ejecutando por ownership (n8n no afectado); 0 fugas de EXECUTE verificadas; schema v1.7.3 sin cambios (201 funciones / 6 vistas / 19 triggers). De las 201 funciones de `public`, solo 13 son del proyecto (las otras 188 son de `btree_gist`, owner `supabase_admin`, no se tocaron). El hallazgo A5 (residual amplio de permisos de tabla a roles Data API en DEV: SELECT/escritura completos, más amplio que el `Dxtm` de TEST) quedó **fuera de alcance por decisión** (Opción 1 — 7E estricta) y se registró como pendiente nuevo `Pendiente_pre_produccion.md` 1.7. Decisiones D-7E-01, D-7E-02. DEV es el único entorno tocado; TEST/OPS/PROD intactos. Documento de cierre: `7E_CIERRE.md`.
 
 **Etapa previa:** 7D — Limpieza/reset del entorno TEST. Cerrada (2026-05-28). Se diseñó y ejecutó un bloque dedicado de reset con SQL explícito y aprobado, en tres partes separadas (snapshot read-only → limpieza transaccional atómica → verificación posterior), con doble gate anti-error-de-entorno por identidad exacta de las 5 cabañas TEST. Se vaciaron las 6 tablas transaccionales con datos (`pagos`, `reservas`, `pre_reservas`, `bloqueos`, `huespedes`, `log_cambios`) vía `DELETE` en orden seguro por FKs, sin `DROP/TRUNCATE ... CASCADE`, y se resetearon sus secuencias a 1. El seed estructural (11 tablas), el cron, las funciones/vistas/triggers, los grants y los workflows `__TEST` quedaron intactos. **TEST quedó como entorno limpio.** Decisiones D-7D-01 (reset de secuencias) y D-7D-02 (vaciado de `log_cambios` con evidencia documentada). DEV/OPS/PROD no se tocaron; schema canónico v1.7.3 sin modificar. Documento de cierre: `7D_CIERRE.md`.
 
 **Etapa previa:** 7C — Validación funcional ampliada sobre TEST. Cerrada (2026-05-28). Se ejecutaron sistemáticamente los caminos no-felices de los 8 workflows `__TEST` (errores controlados, edge cases, validaciones defensivas, condiciones de borde) que 7B dejó fuera de alcance. Resultado: **54 verificaciones conformes (48 casos funcionales del Grupo A + 6 verificaciones transversales TR-01/TR-02), 0 fallos inesperados, 1 mutación no planificada pero válida y comprendida (bloqueo id 2)**. Idempotencia: ramas `post_lock` (H7) y `pre_lock` (7C) cubiertas empíricamente; `unique_violation` queda como opcional no bloqueante. DEV no se tocó durante 7C; el schema canónico v1.7.3 no se modificó.
 
-**No es producción.** DEV y TEST son entornos funcionales separados. Falta integración con consumidores reales (webhook MP, bot, frontend). El endurecimiento de DEV en EXECUTE sobre funciones quedó en paridad con TEST en 7E; resta solo el residual amplio de permisos de tabla a roles Data API (hallazgo A5, pendiente 1.7), fuera de alcance por decisión. La validación funcional ampliada sobre TEST quedó cubierta en 7C.
+**No es producción pública.** DEV, TEST y OPS son entornos separados: DEV (desarrollo), TEST (pruebas funcionales completas) y OPS (operación real interna, recién levantado en 8A — datos reales, sin consumidores externos automáticos todavía). Falta integración con consumidores reales (webhook MP, bot, frontend) y el entorno PROD público. El endurecimiento de DEV en EXECUTE sobre funciones quedó en paridad con TEST en 7E; resta solo el residual amplio de permisos de tabla a roles Data API en DEV (hallazgo A5, pendiente 1.7), fuera de alcance por decisión — OPS nació sin ese problema. La validación funcional ampliada sobre TEST quedó cubierta en 7C.
 
 ---
 
@@ -273,6 +275,34 @@ Datos de prueba conservados como evidencia/fixtures, no limpiados. Reseteo event
 
 ---
 
+## Estado actual de OPS al cierre de Etapa 8A
+
+**Entorno OPS (`vita-delta-ops`): proyecto Supabase independiente, primer entorno de operación real interna, paritario con el canónico v1.7.3, seguro y conectado a n8n.**
+
+**Ficha:** `OPS_REF=lpiatqztudxiwdlcoasv` · sa-east-1 (São Paulo) · Free tier · PostgreSQL 17.6 · pooler `aws-1-sa-east-1.pooler.supabase.com:6543` · credencial n8n `vita_supabase_ops` · modelo Opción A (n8n como `postgres` por pooler, sin consumidores Data API, RLS postergado).
+
+**Estructura (paridad P01-P10 10/10 vs canónico):** 2 extensiones (btree_gist, pg_cron), 4 enums, 20 tablas, 6 vistas, 13 funciones propias, 13 triggers, 2 EXCLUDE, 38 CHECK, 15 FK, 27 índices.
+
+| Recurso | Conteo | Detalle |
+|---|---|---|
+| Cabañas | 5 | IDs **1-5**: Bamboo=1, Madre Selva=2, Arrebol=3, Guatemala=4, Tokio=5 (grandes 3/5, chicas 2/4) |
+| Socios | 3 | Franco 33.33, Rodrigo 33.34, Remo 33.33 (suma 100.00) |
+| `configuracion_general` | 10 | incluye `horizonte_disponibilidad_dias=120` |
+| Cuentas de cobro | 1 | real y **activa**: alias playario, transferencia_mp, titular Franco Guaglianone |
+| Temporadas | 1 | baseline "Baseline OPS 2026-2028" (neutra, no productiva) |
+| Plantillas | 1 | `prereserva_creada` |
+| Reservas / pre-reservas / pagos / bloqueos / huéspedes | 0 | sin datos transaccionales (smoke de cierre solo lectura; primer write real por 8B) |
+| Jobs `pg_cron` | 2 | `expirar_prereservas` (cada 5 min, 1 corrida real `succeeded` verificada), `cleanup_cron_history` (mensual) |
+| Horizonte de vistas | 120 | con 5 cabañas: `vista_disponibilidad`=600 filas, `vista_ocupacion`=120, `vista_calendario_semanal`=35; vistas de reservas en 0 (sin reservas) |
+
+**IDs de cabaña en OPS:** `1-5`. Coinciden con TEST por casualidad (ambos nacieron limpios con secuencia desde 1), pero son entornos separados — los workflows `__OPS` usan los IDs reales de OPS. En el form de carga de 8B la cabaña se elige por **nombre**, no por ID (D-8-10).
+
+**Seguridad:** 0 funciones con EXECUTE a roles Data API, 0 grants SELECT/INSERT/UPDATE/DELETE a roles Data API sobre tablas, residual solo `Dxtm` inocuo. OPS nació más cerrado que TEST (switch correcto desde el día cero); el REVOKE EXECUTE se aplicó igual como barrera explícita (Opción B). Default privileges del rol `postgres` conceden solo `Dxtm` inocuo → objetos futuros nacen cerrados (D-8-13).
+
+**Verificación consolidada (Bloque 9):** 17/17 checks OK.
+
+---
+
 ## Estado histórico de DEV al cierre de 6C
 
 **Este estado es histórico. No refleja el estado actual post-limpieza y post-hardening.** La fuente vigente es la sección anterior ("Estado actual de DEV al cierre de H7").
@@ -327,13 +357,15 @@ Datos de prueba conservados como evidencia/fixtures, no limpiados. Reseteo event
 
 ## Próxima etapa — opciones disponibles
 
-Con 6D, 7A, 7B, 7C, 7D y 7E cerradas, las siguientes son **opciones disponibles** a priorizar por Franco (orden sugerido, no comprometidas en este documento):
+Con 6D, 7A, 7B, 7C, 7D, 7E y **8A** cerradas, el entorno OPS ya está levantado y listo. Las siguientes son **opciones disponibles** a priorizar por Franco (orden sugerido, no comprometidas en este documento):
 
-- **Residual de permisos de tabla en DEV (hallazgo A5 / pendiente 1.7):** decidir si se revoca el set amplio de SELECT/escritura sobre tablas/vistas/secuencias a roles Data API para alinear DEV con el modelo mínimo de TEST, o se acepta y documenta como definitivo. Conviene antes de exponer Data API en DEV y antes de OPS/PROD. Ver `Pendiente_pre_produccion.md` 1.7.
-- **Diseño del entorno OPS:** operación interna real (Vicky, Franco, Rodrigo, Jennifer), sin consumidores externos automáticos.
+- **8B — Capa de carga de Vicky (siguiente natural):** Form Trigger n8n (usable desde celular) que encadena `crear_prereserva` → `registrar_pago` → `confirmar_reserva` en una acción, con monto total + seña editable (50% pre-rellenado pero editable, D-8-04) y elección de cabaña **por nombre** (D-8-10). Recordar: verificar el contrato real de las funciones con `pg_get_functiondef` antes de mapear el campo `operador`/`cargado_por` (D-8-06); IDs reales de cabaña en OPS son 1-5.
+- **8C — Calendarios visuales por evento** (nuestro + el de Jenny, `vista_limpieza_semana`). Formato (Sheet repintado vs HTML servido) aún por decidir al diseñar 8C.
+- **8D — Bloqueos operativos + cierre de Etapa 8.**
+- **Residual de permisos de tabla en DEV (hallazgo A5 / pendiente 1.7):** decidir si se revoca el set amplio sobre tablas/vistas/secuencias a roles Data API en DEV, o se acepta y documenta como definitivo. No urgente (sin consumidores Data API activos). OPS ya nació sin ese problema. Ver `Pendiente_pre_produccion.md` 1.7.
 - **Webhook MercadoPago / bot / frontend:** integración con consumidores reales, **siempre sobre TEST primero** antes de cualquier consideración productiva.
 
-No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión explícita.
+No avanzar a PROD público, MercadoPago real, bot o frontend público sin decisión explícita.
 
 ---
 
@@ -391,6 +423,19 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 | Endurecimiento de permisos Data API en DEV (REVOKE EXECUTE sobre 13 funciones) | ✅ Cerrado | 7E Bloques A/B/C (D-7E-01, D-7E-02) |
 | Paridad DEV↔TEST en EXECUTE sobre funciones del proyecto | ✅ Cerrado | 7E Bloque C (0 fugas, owner intacto) |
 
+**Items cerrados en Etapa 8A:**
+
+| Item | Estado | Bloque que lo cerró |
+|---|---|---|
+| Creación del entorno OPS (proyecto Supabase independiente) | ✅ Cerrado | 8A Bloques 1-2 |
+| Replicación del schema desde canónico v1.7.3 (paridad P01-P10 10/10) | ✅ Cerrado | 8A Bloque 4 (tandas 4.1-4.7) |
+| Seeds reales mínimos en OPS (5 cabañas, 3 socios, cuenta de cobro, config) | ✅ Cerrado | 8A Bloque 5 |
+| Grants mínimos en OPS (REVOKE EXECUTE idempotente; OPS nació cerrado) | ✅ Cerrado | 8A Bloque 6 (confirmación D-8-03) |
+| Default privileges de OPS (objetos futuros nacen cerrados, sin ejecución) | ✅ Cerrado | 8A Bloque 7 (D-8-13) |
+| `pg_cron` activo en OPS con corrida real verificada | ✅ Cerrado | 8A Bloque 8 |
+| Verificación consolidada del entorno OPS (17/17) | ✅ Cerrado | 8A Bloque 9 |
+| Credencial n8n `vita_supabase_ops` creada y verificada por identidad | ✅ Cerrado | 8A Bloques 10-11 |
+
 **Items pendientes:**
 
 1. **`tipo_valor` sin poblar en `configuracion_general`** — observación de 7A (PreOPS-A6). Las 10 claves tienen `tipo_valor=NULL`. No bloqueante; evaluar antes del dashboard OPS si se usa para render de inputs. Ver `Pendiente_pre_produccion.md` 1.4.
@@ -429,6 +474,8 @@ No avanzar a OPS/PROD, MercadoPago real, bot o frontend público sin decisión e
 - `7C_CIERRE.md` — documento formal de cierre de Etapa 7C (validación funcional ampliada sobre TEST).
 - `7D_CIERRE.md` — documento formal de cierre de Etapa 7D (limpieza/reset del entorno TEST).
 - `7E_CIERRE.md` — documento formal de cierre de Etapa 7E (endurecimiento de permisos Data API en DEV).
+- `ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md` — documento de diseño de la Etapa 8 (arranque OPS operativo desde cero; subetapas 8A entorno, 8B carga, 8C calendarios, 8D bloqueos).
+- `8A_CIERRE.md` — documento formal de cierre de Etapa 8A (levantamiento del entorno OPS de operación real interna).
 - `Docs/Bitacora/6B_EJECUCION_DEV.md` — bitácora bloque por bloque de 6B.
 - `Docs/Bitacora/6C_EJECUCION.md` — bitácora workflow por workflow de 6C.
 - `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` — bitácora bloque por bloque de Etapa 6D (H1-H7 cerrados; H8 en curso).

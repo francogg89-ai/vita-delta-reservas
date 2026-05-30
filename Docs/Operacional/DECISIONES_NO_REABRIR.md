@@ -505,6 +505,42 @@ La regla operativa heredada de TEST (D-7B-05) ahora aplica también a DEV: toda 
 
 Las 3 funciones de trigger (`log_cambio_estado`, `set_telefono_normalizado`, `set_updated_at`) se incluyeron en el `REVOKE EXECUTE` de 7E. Es inocuo —los triggers se disparan por el motor, no por `EXECUTE` de un rol— y mantiene paridad total con el endurecimiento de TEST. **No reabrir.**
 
+## Levantamiento del entorno OPS (Etapa 8A — cerrada 2026-05-29)
+
+Decisiones firmes derivadas de la Etapa 8A — creación de `vita-delta-ops`, el tercer entorno (DEV → TEST → OPS → PROD) y el **primer entorno de operación real interna**. Reconstruido desde el canónico `6B_SCHEMA_SQL.md v1.7.3`, paritario, seguro, con pg_cron activo y conectado a n8n. **NO REABRIR sin justificación crítica.**
+
+Bitácora de la etapa: `8A_CIERRE.md`. Paridad estructural P01-P10 10/10 vs canónico. DEV no se tocó en toda la etapa (criterio: DEV en pausa hasta abordar su pendiente 1.7). El smoke de cierre fue solo lectura (ver D-8-12); el primer write real será una reserva real por 8B.
+
+### Ficha del entorno OPS (referencia firme)
+
+- **Proyecto:** `vita-delta-ops` · **OPS_REF:** `lpiatqztudxiwdlcoasv`
+- **Región:** sa-east-1 (São Paulo) · **Tier:** Free · **PostgreSQL:** 17.6
+- **Switches de creación:** Data API ON · "Automatically expose new tables" **OFF** · "Enable automatic RLS" **OFF**
+- **Pooler:** host `aws-1-sa-east-1.pooler.supabase.com`, puerto `6543`, db `postgres`, user `postgres.lpiatqztudxiwdlcoasv`
+- **Credencial n8n:** `vita_supabase_ops` (Postgres, Ignore SSL Issues ON — L-6C-01)
+- **Modelo de acceso:** Opción A (n8n entra como `postgres` por pooler; sin consumidores Data API; RLS postergado)
+- **IDs reales de cabaña en OPS:** Bamboo=1, Madre Selva=2, Arrebol=3, Guatemala=4, Tokio=5 (secuencia natural; en el form de 8B se eligen por nombre, ver D-8-10).
+
+### D-8-09 — OPS es operación real interna desde el inicio
+
+OPS **no es un entorno de prueba más**: es el entorno real interno donde viven los datos reales de reservas. Jerarquía firme: DEV (desarrollo) → TEST (pruebas funcionales completas, antes de pasar a OPS) → OPS (operación real interna; sin pruebas destructivas ni experimentos; solo smoke mínimo controlado) → PROD (futuro, público). OPS todavía no es PROD público, pero sí operación real interna. **No reabrir.**
+
+### D-8-13 — Default privileges de OPS: cerrado sin ejecución
+
+El diagnóstico del Bloque 7 (snapshot `pg_default_acl`) mostró que los defaults del rol `postgres` —los únicos que rigen los objetos que crea el proyecto— conceden a los roles Data API solo el residual inocuo `Dxtm` (TRUNCATE/REFERENCES/TRIGGER/MAINTAIN), sin SELECT/INSERT/UPDATE/DELETE/EXECUTE. Por lo tanto, **todo objeto futuro creado por el proyecto nace cerrado** y D-8-03 (OPS nace con grants mínimos) queda cumplida **sin necesidad de `ALTER DEFAULT PRIVILEGES`**.
+
+Los 21 defaults "amplios" detectados pertenecen al rol de plataforma `supabase_admin`, **no aplican a objetos creados por el proyecto** y **no se modifican**. Se mantiene la línea de 7B: cerrar lo propio, no reconfigurar la plataforma. Tocar los defaults de `supabase_admin` sería riesgo sin beneficio de seguridad real mientras OPS sea Opción A (Data API no en uso). **No reabrir.**
+
+### Confirmación de cumplimiento de D-8-03 (OPS nació más cerrado que TEST)
+
+A diferencia de TEST —donde el default de PostgreSQL concedía EXECUTE-PUBLIC y hubo que revocarlo (D-7B-05)—, en OPS las 13 funciones nacieron con `proacl` NULL (solo owner) y las tablas con solo `Dxtm` inocuo para roles Data API, gracias al switch "Automatically expose new tables = OFF" desde la creación. El diagnóstico del Bloque 6 confirmó 0 funciones con EXECUTE a Data API y 0 grants de lectura/escritura a roles Data API sobre tablas.
+
+El `REVOKE EXECUTE` sobre las 13 funciones a PUBLIC/anon/authenticated/service_role **se aplicó igual** (Opción B elegida por Franco) como barrera explícita e intencional y para paridad de procedimiento con 7B/7E, no porque hubiera EXECUTE que quitar. Es idempotente y no afecta al owner `postgres`. La regla operativa D-7B-05 aplica a OPS para funciones futuras. **No reabrir.**
+
+### Regla heredada para PROD (derivada de 8A)
+
+Futuros entornos (PROD) deben crearse con los **mismos switches** que OPS — Data API ON, "Automatically expose new tables" OFF, "Enable automatic RLS" OFF — para nacer cerrados desde el día cero, en vez de remediar después (como hubo que hacer en TEST/DEV). Reconstrucción desde el canónico vigente, nunca clonación física (consistente con D-7B-01). **No reabrir.**
+
 ## Decisiones aprobadas con código de referencia
 
 - **D3** — Mantener solo `hora_checkin` y `hora_checkout` en tablas (sin "hora base" vs "hora real").

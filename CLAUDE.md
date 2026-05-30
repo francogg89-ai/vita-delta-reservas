@@ -7,18 +7,20 @@ Antes de trabajar, leer en este orden:
 1. Docs/Operacional/ESTADO_ACTUAL_VITA_DELTA.md
 2. Docs/Operacional/DECISIONES_NO_REABRIR.md
 3. Docs/Implementacion/6B_SCHEMA_SQL.md (schema canónico actual: **v1.7.3**)
-4. Docs/Bitacora/7E_CIERRE.md (cierre formal Etapa 7E — endurecimiento de permisos Data API en DEV)
-5. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
-6. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
-7. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
-8. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
-9. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
-10. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
-11. Docs/Implementacion/6B_PLAN_FASES.md
-12. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a TEST/OPS/PROD)
-13. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
-14. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
-15. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
+4. Docs/Arquitectura/ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md (diseño Etapa 8 — arranque OPS; subetapas 8A-8D)
+5. Docs/Bitacora/8A_CIERRE.md (cierre formal Etapa 8A — levantamiento del entorno OPS)
+6. Docs/Bitacora/7E_CIERRE.md (cierre formal Etapa 7E — endurecimiento de permisos Data API en DEV)
+7. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
+8. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
+9. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
+10. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
+11. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
+12. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
+13. Docs/Implementacion/6B_PLAN_FASES.md
+14. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a PROD)
+15. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
+16. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
+17. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
 
 No cargar contexto histórico largo salvo pedido explícito del usuario.
 
@@ -164,17 +166,30 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - **Hallazgo A5 (fuera de alcance por decisión — Opción 1):** en DEV los roles `anon`/`authenticated`/`service_role` tienen SELECT/escritura completos sobre todas las tablas/vistas, más amplio que el `Dxtm` de TEST. No se tocó; registrado como pendiente nuevo `Pendiente_pre_produccion.md` 1.7.
 - DEV es el único entorno tocado; TEST/OPS/PROD intactos. Decisiones D-7E-01, D-7E-02; lección L-7E-01. Documento de cierre: `7E_CIERRE.md`.
 
-**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV y TEST están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B; paridad estructural 10/10).
+**Etapa 8A — Levantamiento del entorno OPS ✅ Cerrada (2026-05-29):**
+
+- OPS creado como proyecto Supabase independiente (`vita-delta-ops`, `OPS_REF=lpiatqztudxiwdlcoasv`, sa-east-1, Free tier, PostgreSQL 17.6). **Tercer entorno** de la estrategia DEV → TEST → OPS → PROD y **primer entorno de operación real interna** (D-8-09).
+- Schema reconstruido desde el canónico v1.7.3 en 7 tandas (4.1-4.7), con **paridad estructural P01-P10 10/10**: 2 extensiones, 4 enums, 20 tablas, 6 vistas, 13 funciones, 13 triggers, 2 EXCLUDE, 38 CHECK, 15 FK, 27 índices.
+- **Seeds reales** sembrados: 5 cabañas (IDs **1-5**: Bamboo=1, Madre Selva=2, Arrebol=3, Guatemala=4, Tokio=5), 3 socios (Franco 33.33 / Rodrigo 33.34 / Remo 33.33), 10 claves de `configuracion_general` (horizonte 120), 1 cuenta de cobro real y activa (alias playario), 1 temporada baseline, 1 plantilla. Sin tarifas reales (monto manual en 8B, D-8-04).
+- **OPS nació más cerrado que TEST:** con el switch "Automatically expose new tables = OFF" desde el día cero, 0 funciones con EXECUTE a Data API y 0 grants RW a roles Data API sobre tablas, sin remediar nada. El `REVOKE EXECUTE` idempotente se aplicó igual como barrera explícita (Opción B).
+- Default privileges cerrado sin ejecución (D-8-13): los defaults del rol `postgres` conceden solo `Dxtm` inocuo → objetos futuros nacen cerrados; los 21 defaults amplios son del rol de plataforma `supabase_admin` y no se tocan.
+- `pg_cron` activo (2 jobs) con una corrida real `succeeded` verificada. Credencial n8n `vita_supabase_ops` creada, probada y **verificada por identidad** (lee las 5 cabañas reales de OPS). Verificación consolidada 17/17.
+- **Smoke de cierre solo lectura** (D-8-12): OPS sin datos transaccionales; el primer write real será una reserva real por 8B. DEV/TEST/PROD no se tocaron.
+- Decisiones D-8-09, D-8-13 (+ confirmación de cumplimiento de D-8-03). Lecciones L-8A-01 a L-8A-07. Documento de cierre: `8A_CIERRE.md`. Diseño de la Etapa 8: `ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md`.
+
+**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV, TEST y OPS están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B con paridad 10/10; OPS reconstruido en 8A con paridad P01-P10 10/10).
 
 **Próxima etapa — opciones disponibles (orden sugerido):**
 
-Con DEV, TEST, 6D, 7A, 7B, 7C, 7D y 7E cerradas, las opciones a priorizar por Franco son:
+Con DEV, TEST, OPS, 6D, 7A, 7B, 7C, 7D, 7E y 8A cerradas, el entorno OPS ya está levantado. Las opciones a priorizar por Franco son:
 
-- Residual de permisos de tabla en DEV (hallazgo A5 / pendiente 1.7): revocar el set amplio de SELECT/escritura a roles Data API para alinear con TEST, o aceptarlo y documentarlo como definitivo. El endurecimiento de EXECUTE sobre funciones ya quedó cerrado en 7E.
-- Diseño del entorno OPS (operación interna real sin consumidores externos automáticos).
-- Integraciones con consumidores reales sobre TEST: webhook MercadoPago, bot conversacional, frontend público — siempre sobre TEST primero.
+- **8B — Capa de carga de Vicky (siguiente natural):** Form Trigger n8n que encadena `crear_prereserva` → `registrar_pago` → `confirmar_reserva`, con monto total + seña editable (D-8-04) y elección de cabaña **por nombre** (D-8-10). Verificar el contrato real de las funciones con `pg_get_functiondef` antes de mapear `operador`/`cargado_por` (D-8-06); IDs reales de cabaña en OPS = 1-5.
+- **8C — Calendarios visuales por evento** (nuestro + el de Jenny). Formato (Sheet repintado vs HTML) por decidir.
+- **8D — Bloqueos operativos + cierre de Etapa 8.**
+- Residual de permisos de tabla en DEV (hallazgo A5 / pendiente 1.7): revocar o aceptar como definitivo. No urgente; OPS ya nació sin ese problema.
+- Integraciones con consumidores reales sobre TEST: webhook MercadoPago, bot, frontend — siempre sobre TEST primero.
 
-No avanzar a OPS, dashboard, MercadoPago real, bot o frontend público sin decisión explícita del usuario y sin revisar primero `Pendiente_pre_produccion.md`.
+No avanzar a PROD público, dashboard, MercadoPago real, bot o frontend público sin decisión explícita del usuario y sin revisar primero `Pendiente_pre_produccion.md`.
 
 ## Forma de trabajo
 
