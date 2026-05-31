@@ -1,9 +1,9 @@
 # ARQUITECTURA ETAPA 8B — CAPA DE CARGA INTERNA DE RESERVAS
 
-**Estado:** Diseño aprobado — contratos verificados contra OPS (read-only) y checklist de n8n completado. Sin pendientes previos; listo para el plan de implementación por bloques.
+**Estado:** ✅ Etapa cerrada. Diseño implementado, validado en TEST (batería de la sección 7.1 completa) y con **smoke OPS exitoso** (primera reserva real, id 1). Cierre formal en `8B_CIERRE.md`.
 **Tipo:** Documento de diseño. **No contiene SQL ni configuración de workflows (JSON de n8n).**
 **Fecha de redacción:** 2026-05-30.
-**Versión:** v3.2 (checklist manual de n8n completado y registrado sobre v3.1; sin pendientes previos a implementación).
+**Versión:** v3.5 (smoke OPS exitoso con la primera reserva real; etapa 100% cerrada. Cierre formal en `8B_CIERRE.md`. Sobre v3.4).
 **Schema canónico de referencia:** `6B_SCHEMA_SQL.md v1.7.3`.
 **Entorno objetivo de operación:** OPS (`vita-delta-ops`, operación real interna, 8A cerrada).
 **Entorno de validación funcional:** TEST (`vita-delta-test`).
@@ -159,7 +159,7 @@ El mapa nombre→id del workflow (sección 4.4) se construye con estos valores. 
 | cabaña (nombre) → id | `id_cabana` (mapeado, 1-5) | — | — (heredado) |
 | fecha_in / fecha_out | `fecha_in` / `fecha_out` | — | — |
 | personas | `personas` | — | — |
-| nombre / apellido / teléfono / email | `huesped.{nombre,apellido,telefono,email}` | — | — |
+| nombre y apellido (campo único) / teléfono / email | `huesped.{nombre (completo), telefono, email}` (apellido vacío) | — | — |
 | canal_origen | `canal_origen` (TEXT) | — | — |
 | canal_pago_esperado | `canal_pago_esperado` (TEXT) | — | — |
 | medio_pago | — | `medio_pago` (TEXT), `tipo='sena'` | — |
@@ -193,8 +193,7 @@ Principio de diseño (🔒): **uso operativo real desde celular, minimizando tex
 | **Fecha de entrada** | Date picker | sí | hoy o futura (flujo normal); fechas pasadas → fuera de flujo normal (ver nota) |
 | **Fecha de salida** | Date picker | sí | `> fecha_in` |
 | **Personas** | Numérico restringido o desplegable | sí | entero ≥ 1; UX: acotar a capacidad (sección 3.2) |
-| **Nombre** | Texto corto | sí | dato variable |
-| **Apellido** | Texto corto | **sí** | obligatorio en el form por calidad de datos (la función SQL no lo exige, pero lo acepta) |
+| **Nombre y apellido** | Texto corto | sí | campo único; se persiste completo en `huesped.nombre` (apellido vacío). Dato variable |
 | **Teléfono** | Texto corto | sí (al menos teléfono o email) | dato variable; la función normaliza al persistir |
 | **Email** | Texto corto | condicional | si no hay teléfono, exigir email |
 | **Canal de origen** | Desplegable | sí | opciones del proyecto (sección 3.6 — TEXT libre, no enum) |
@@ -206,7 +205,7 @@ Principio de diseño (🔒): **uso operativo real desde celular, minimizando tex
 | **Niños** | Texto corto | no | campo `ninos` es TEXT |
 | **Notas** | Texto largo | no | → `notas` / `notas_reserva` |
 
-**El operador nunca ve ni escribe:** IDs de cabaña, estados internos, `idempotency_key`, `source_event`. Todo eso lo arma n8n. Nombre **y apellido** son ambos obligatorios en el formulario (decisión operativa), aunque `crear_prereserva` solo exija `nombre` no vacío + un contacto.
+**El operador nunca ve ni escribe:** IDs de cabaña, estados internos, `idempotency_key`, `source_event`. Todo eso lo arma n8n. El nombre del huésped se carga en **un único campo "Nombre y apellido"** (obligatorio), que se persiste completo en `huesped.nombre` con `apellido` vacío; `crear_prereserva` solo exige `nombre` no vacío + un contacto, así que esto es válido (decisión de v3.3, reemplaza el apellido separado de D-8B-12).
 
 **Nota sobre fechas (🔒):** `fecha_in >= hoy` es la regla del **flujo normal** (hoy o futura, `fecha_out > fecha_in`), no una regla rígida absoluta. **Reservas ya iniciadas o con fechas pasadas quedan FUERA del flujo normal** y requieren decisión explícita / carga manual, no por este formulario (consistente con D-8-01: arranque sin backfill).
 
@@ -302,7 +301,7 @@ Convenciones heredadas: `Always Output Data: ON` + filtro defensivo downstream (
 
 ### 4.2 Construcción de payloads paso a paso
 
-- **P1 (`crear_prereserva`):** `huesped` (objeto anidado nombre/apellido/teléfono/email), `id_cabana` mapeado, fechas, personas, `monto_total`, `monto_sena`, `canal_origen`, `canal_pago_esperado`, `source_event`, `idempotency_key` (4.3), opcionales (`notas`, `ninos`). Vacíos van como `""` y la función los normaliza.
+- **P1 (`crear_prereserva`):** `huesped` (objeto anidado: `nombre` completo del campo único, `telefono`, `email`; `apellido` vacío), `id_cabana` mapeado, fechas, personas, `monto_total`, `monto_sena`, `canal_origen`, `canal_pago_esperado`, `source_event`, `idempotency_key` (4.3), opcionales (`notas`, `ninos`). Vacíos van como `""` y la función los normaliza.
 - **P2 (`registrar_pago`):** `id_pre_reserva` de P1; `tipo='sena'`, `monto_esperado=monto_recibido=seña`, `estado_inicial='confirmado'`, `medio_pago`, `referencia_externa` (si vino), **`validado_por=<operador>` explícito**, `source_event`.
 - **P3 (`confirmar_reserva`):** `id_pre_reserva`; `permitir_pago_en_revision=FALSE` (estricto), `created_by=<operador>`, **`encargado_semana` vacío en 8B** (🔒, ver 2.7), `source_event`.
 
@@ -422,7 +421,7 @@ En **TEST** con workflows `__TEST` y credencial `vita_supabase_test`, antes de t
 **Happy path:** carga válida → pre-reserva creada → pago `sena` confirmado → reserva `confirmada`. Verificar `monto_saldo = total − seña`, `created_by`, `validado_por`, `source_event`, transición de disponibilidad (cruzada con W1).
 
 **Caminos no-felices (estilo 7C):**
-- Obligatorios faltantes (cabaña, fechas, personas, montos, contacto, nombre, apellido) → mensajes claros.
+- Obligatorios faltantes (cabaña, fechas, personas, montos, contacto, nombre y apellido) → mensajes claros.
 - `fecha_out <= fecha_in` → claro; `fecha_in` pasada → "fuera de flujo normal, decisión manual".
 - `personas > capacidad_max` → `excede_capacidad` (del motor) + mensaje UX.
 - `cabana_inactiva` (si se fuerza en TEST) → mensaje claro.
@@ -454,7 +453,7 @@ Solo tras TEST verde: cargar **una reserva real futura válida** (no inventada) 
 ### 9.1 Decisiones cerradas (a formalizar como D-8B-XX en el cierre)
 
 - **D-8B-01** — Capa = Form Trigger n8n que encadena `crear_prereserva → registrar_pago → confirmar_reserva` en una acción, camino estricto.
-- **D-8B-02** — Formulario para celular, mínimo texto libre: desplegables/date/numérico; texto libre solo para nombre/apellido/teléfono/email/notas/niños.
+- **D-8B-02** — Formulario para celular, mínimo texto libre: desplegables/date/numérico; texto libre solo para nombre y apellido (campo único)/teléfono/email/notas/niños.
 - **D-8B-03** — `operador`/`cargado_por` = desplegable obligatorio (Franco/Vicky/Rodrigo/Remo), autodeclarado, sin login en el MVP.
 - **D-8B-04** — Trazabilidad por contrato real (✅): operador en `source_event` (`n8n_ops_w8b_carga_<operador>_manual`) + **`validado_por` explícito** en `registrar_pago` (NULL → `'sistema_auto'`) + `created_by` en `confirmar_reserva`.
 - **D-8B-05** — Pago = seña: `tipo='sena'`, `monto_esperado=monto_recibido=seña`, `estado_inicial='confirmado'`. Saldo derivado por `confirmar_reserva` (`total − seña`). ✅ verificado.
@@ -464,7 +463,7 @@ Solo tras TEST verde: cargar **una reserva real futura válida** (no inventada) 
 - **D-8B-09** — En 8B solo se marca el punto de extensión del repintado (post-`confirmar_reserva` ok). No se construye repintado.
 - **D-8B-10** — Form Trigger protegido: preferencia Basic Auth o equivalente; si no, link interno + no publicar + rotación si se filtra.
 - **D-8B-11** — Fechas: flujo normal hoy/futuro y `fecha_out > fecha_in`; pasadas o ya iniciadas → fuera del flujo normal, decisión manual (consistente con D-8-01).
-- **D-8B-12** — Apellido obligatorio en el formulario (calidad de datos).
+- **D-8B-12** — (Revisada en v3.3) Nombre del huésped en **un único campo "Nombre y apellido"** obligatorio, persistido completo en `huesped.nombre` con `apellido` vacío. Reemplaza la decisión previa de apellido obligatorio separado (la función no lo usa estructuralmente y el campo único es más simple y robusto para el operador). Motivada por validación en TEST.
 - **D-8B-13** — Seña Variante A: vacía → 50% automático; escrita → se respeta. Texto de ayuda "dejá vacío para 50% automático".
 - **D-8B-14** — Validación funcional completa en TEST; smoke mínimo controlado en OPS con reserva real futura (primer write real).
 - **D-8B-15** — Verificación del resultado por paso (✅ Hallazgo 2): tras `registrar_pago`, exigir `ok===true && estado==='confirmado' && sin warning`; no basta `ok:true`.
@@ -505,7 +504,7 @@ Verificado en la instancia (`federicosecchi.app.n8n.cloud`). Sin bloqueos para i
 
 **3. Tipos de campo disponibles (confirmados)**
 Text Input · Email · Number · Password · Radio Buttons · Textarea · Checkboxes · Custom HTML · Date · Dropdown · Hidden Field · File.
-Para 8B **alcanzan**: Dropdown (operador, cabaña, canales, medio de pago), Date (fechas), Number (montos, personas), Email, Text Input (nombre, apellido, teléfono, referencia, niños), Textarea (notas).
+Para 8B **alcanzan**: Dropdown (operador, cabaña, canales, medio de pago), Date (fechas), Number (montos, personas), Email, Text Input (nombre y apellido como campo único, teléfono, referencia, niños), Textarea (notas).
 
 **4. Atributos / validaciones confirmados**
 `Custom Field Name` · `Placeholder` · `Default Value` · `Required Field`.
@@ -534,7 +533,7 @@ Visible y seleccionable en n8n (vista en un nodo Postgres / Postgres Trigger). *
 | Form Trigger n8n, una acción, encadena las 3 funciones, camino estricto | 🔒 Cerrado |
 | Formulario para celular, mínimo texto libre | 🔒 Cerrado |
 | Operador = desplegable obligatorio, autodeclarado | 🔒 Cerrado |
-| Apellido obligatorio | 🔒 Cerrado |
+| Nombre y apellido en campo único (persiste en huesped.nombre) | 🔒 Cerrado (v3.3) |
 | Fechas: flujo normal hoy/futuro; pasadas → decisión manual | 🔒 Cerrado |
 | Seña Variante A (vacía → 50%; escrita → respeta) | 🔒 Cerrado |
 | Pago = seña; saldo derivado por la función | 🔒 Cerrado · ✅ verificado |
@@ -553,4 +552,4 @@ Visible y seleccionable en n8n (vista en un nodo Postgres / Postgres Trigger). *
 
 ---
 
-*Fin del documento de diseño de la Etapa 8B (v3.2). Contratos verificados contra OPS (read-only), pendientes menores cerrados (D-8B-18 a D-8B-21) y checklist manual de n8n completado (9.4). No se ha generado SQL ni configuración de workflows. Sin pendientes previos: el siguiente paso es el plan de implementación por bloques del Form Trigger.*
+*Fin del documento de diseño de la Etapa 8B (v3.4). Diseño implementado y validado en TEST (batería de la sección 7.1 completa): happy path en ambos caminos de seña, colisión, idempotencia, validaciones de capa y compensación con pago. Workflows `__TEST`, `__OPS` y `__TEMPLATE` generados. El smoke en OPS queda pendiente de la primera reserva real. El cierre formal de la etapa, con todas las decisiones y resultados, está en `8B_CIERRE.md`.*

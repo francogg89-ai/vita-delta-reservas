@@ -541,7 +541,73 @@ El `REVOKE EXECUTE` sobre las 13 funciones a PUBLIC/anon/authenticated/service_r
 
 Futuros entornos (PROD) deben crearse con los **mismos switches** que OPS — Data API ON, "Automatically expose new tables" OFF, "Enable automatic RLS" OFF — para nacer cerrados desde el día cero, en vez de remediar después (como hubo que hacer en TEST/DEV). Reconstrucción desde el canónico vigente, nunca clonación física (consistente con D-7B-01). **No reabrir.**
 
-## Decisiones aprobadas con código de referencia
+## Capa de carga interna de reservas (Etapa 8B — cerrada 2026-05-30)
+
+Decisiones firmes de la Etapa 8B — capa de carga interna vía Form Trigger n8n que encadena `crear_prereserva` → `registrar_pago` → `confirmar_reserva` en una acción. Diseño verificado contra los contratos reales de OPS (read-only), validado funcionalmente en TEST y con smoke OPS exitoso (primera reserva real: id 1, Tokio, Paula Lugo). Documento de diseño: `ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md v3.5`. Cierre: `8B_CIERRE.md`. **NO REABRIR sin justificación crítica.**
+
+### D-8B-01 — Capa = Form Trigger que encadena las 3 funciones en una acción
+El encadenado vive en n8n; el motor mantiene sus 3 funciones separadas (locks, idempotencia, revalidación intactos). Camino estricto (pago confirmado). Sin INSERT directo a tablas transaccionales.
+
+### D-8B-02 — Formulario para celular, mínimo texto libre
+Desplegables para todo lo enumerable, date pickers, numéricos; texto libre solo para nombre+apellido (campo único), teléfono, email, notas, niños.
+
+### D-8B-03 — `operador` autodeclarado por desplegable
+Desplegable obligatorio (Franco/Vicky/Rodrigo/Remo), sin login individual en el MVP.
+
+### D-8B-04 — Trazabilidad del operador por contrato real
+Operador embebido en `source_event` + `validado_por` explícito en `registrar_pago` (NULL se convierte en `'sistema_auto'`, por eso se manda explícito) + `created_by` en `confirmar_reserva`. Verificado contra OPS.
+
+### D-8B-05 — Pago = seña, no total
+`tipo='sena'`, `monto_esperado=monto_recibido=seña`, `estado_inicial='confirmado'`. El saldo lo deriva `confirmar_reserva` como `monto_total − monto_sena`. La capa no calcula ni manda el saldo.
+
+### D-8B-06 — `idempotency_key` Opción A (constraint parcial confirmada)
+`ops_8b_<id_cabana>_<fecha_in>_<fecha_out>_<contact_key>`, donde `contact_key` = teléfono solo dígitos o `email_<email>`. La constraint `uq_prereservas_idempotency_activa` es **parcial** (solo estados activos), por lo que una recarga tras cancelación no choca. Opción B (con fecha de carga) descartada.
+
+### D-8B-07 — Fallo parcial → compensación activa con regla de comunicación
+Si P2 o P3 fallan tras crear la pre-reserva, se intenta cancelar vía `cancelar_prereserva`. El mensaje se decide por `pagos_asociados_count`: count=0 → reversión limpia; count>0 → revisión manual mencionando el/los pago/s. **Nunca comunicar "revertido" si quedó un pago registrado.**
+
+### D-8B-08 — Colisión → mensaje de negocio claro
+`no_disponible`/`conflicto_al_confirmar` se traducen a "Esa cabaña ya está ocupada en esas fechas", nunca error técnico crudo.
+
+### D-8B-09 — Punto de extensión 8C marcado, repintado NO construido
+En 8B solo se deja un nodo placeholder post-`confirmar_reserva` ok. El repintado del calendario se construye en 8C.
+
+### D-8B-10 — Form Trigger protegido con Basic Auth
+Sin URL abierta. Sin IP Allowlist (los celulares tienen IP móvil/dinámica).
+
+### D-8B-11 — Fechas: flujo normal hoy/futuro
+`fecha_in >= hoy` y `fecha_out > fecha_in` en el flujo normal. Reservas pasadas o ya iniciadas quedan fuera, requieren decisión manual (consistente con D-8-01, sin backfill).
+
+### D-8B-12 — Nombre del huésped en campo único (revisada en v3.3)
+Un único campo "Nombre y apellido" obligatorio, persistido completo en `huesped.nombre` con `apellido` vacío. Reemplaza la decisión previa de apellido obligatorio separado (la función no lo usa estructuralmente; el campo único es más simple para el operador).
+
+### D-8B-13 — Seña Variante A
+Campo seña vacío o 0 → n8n calcula 50% del total automáticamente; valor >0 → se respeta. Pago 100% se carga como total=X, seña=X. Texto de ayuda "dejá vacío para 50% automático".
+
+### D-8B-14 — Validación completa en TEST, smoke mínimo en OPS
+Batería funcional completa en TEST antes de OPS; smoke en OPS con reserva real futura (primer write real, hecho).
+
+### D-8B-15 — Verificación estricta del resultado de `registrar_pago`
+Tras P2 no basta `ok:true`: se exige `ok && estado==='confirmado' && sin warning`. Un `ok:true` con `estado='en_revision'`/`warning` (pre-reserva no activa) se trata como anómalo con pago registrado → revisión manual.
+
+### D-8B-16 — Capacidad/cabaña la valida el motor, no la capa
+`crear_prereserva` ya valida `cabana_no_existe`/`cabana_inactiva`/`excede_capacidad`. La validación en n8n es solo UX temprana; la defensa de integridad la da el motor.
+
+### D-8B-17 — Normalización del teléfono para la key en n8n
+Solo dígitos (quitar espacios, guiones, paréntesis, `+`). No requiere E.164 perfecto, sí consistencia. Si no hay teléfono, `contact_key = email_<email_min>`.
+
+### D-8B-18 — Convención de `source_event`
+`<marcador_ambiente>_w8b_carga_<operador>_manual`, con operador en minúscula sin espacios (`franco`/`vicky`/`rodrigo`/`remo`). Marcador: `n8n_ops`/`n8n_test` según ambiente.
+
+### D-8B-19 — `encargado_semana` vacío en 8B
+No se mezcla "quién cargó" (cubierto por operador/source_event/validado_por/created_by) con el rol rotativo de la semana. Se deja vacío.
+
+### D-8B-20 — Motivo de cancelación en la compensación
+`motivo='cliente'` + `descripcion='rollback_8b_fallo_cadena'` (uso técnico de un motivo permitido por el contrato, con descripción que lo distingue de una cancelación normal del cliente).
+
+### D-8B-21 — Desplegables con strings compatibles con CHECK reales
+`canal_origen`/`canal_pago_esperado`/`medio_pago` son TEXT con CHECK (no enums). Etiqueta visible amigable → string persistido compatible: `canal_origen` ∈ {whatsapp, instagram, web, manual} (Directo/Referido/Otro→manual, Airbnb/Booking→web, con origen fino preservado en `notas` como "Origen operativo: …"); `canal_pago_esperado`/`medio_pago` ∈ {transferencia_bancaria, transferencia_mp, mp_link, cripto, efectivo}. `pre_reservas.canal_origen` es más restrictivo que `reservas.canal_origen` (no acepta airbnb/booking) y manda por ser la primera puerta de la cadena.
+
 
 - **D3** — Mantener solo `hora_checkin` y `hora_checkout` en tablas (sin "hora base" vs "hora real").
 - **D27** — Horarios = lo elegido por cliente, validado contra margen.

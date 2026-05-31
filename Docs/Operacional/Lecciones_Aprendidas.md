@@ -1057,3 +1057,91 @@ en vez de endurecer después.
 
 **Verificado:** 2026-05-29, Bloque 6 (diagnóstico: 0 EXECUTE a Data API, 0 grants
 RW a roles Data API antes de cualquier REVOKE).
+
+## Lecciones de la capa de carga interna — Etapa 8B
+
+### L-8B-01 — "TEXT libre" no significa sin restricción: verificar CHECK constraints
+Que una columna sea TEXT (no enum) no implica que acepte cualquier valor. En OPS,
+`canal_origen`, `canal_pago_esperado`, `medio_pago` y `tipo` son TEXT pero con
+`CHECK` que restringe los valores permitidos. Asumir "TEXT libre" llevó a un primer
+mapa de desplegables con valores (`directo`, `referido`, `airbnb`, `booking`,
+`otro`, `transferencia`, `mercadopago`) que el CHECK habría rechazado en runtime.
+
+**Implicación:** antes de fijar valores que se persisten en columnas TEXT, leer los
+`CHECK` reales con `pg_get_constraintdef` sobre `pg_constraint`. Los valores válidos
+de `canal_origen` en `pre_reservas` son `whatsapp/instagram/web/manual`; los de
+`canal_pago_esperado`/`medio_pago` son `transferencia_bancaria/transferencia_mp/
+mp_link/cripto/efectivo`. El dato operativo fino que no entra en el CHECK (Airbnb,
+Booking, etc.) se preserva en un campo libre (`notas`).
+
+**Verificado:** 2026-05-30, verificación read-only de CHECK contra OPS.
+
+### L-8B-02 — `pre_reservas.canal_origen` es más restrictivo que `reservas.canal_origen`
+El CHECK de `reservas.canal_origen` acepta `airbnb` y `booking`, pero el de
+`pre_reservas.canal_origen` NO. Como la cadena de carga crea primero la pre-reserva
+y `confirmar_reserva` copia ese valor a `reservas`, **manda el CHECK más restrictivo
+(el de `pre_reservas`)**. Persistir `airbnb` habría rebotado en el paso 1 aunque
+`reservas` lo aceptara.
+
+**Implicación:** cuando un valor atraviesa varias tablas en cadena, el conjunto de
+valores válidos es la intersección de todos los CHECK del camino, no el de la tabla
+final.
+
+**Verificado:** 2026-05-30, CHECK de ambas tablas leídos contra OPS.
+
+### L-8B-03 — `ok:true` de `registrar_pago` no garantiza pago `confirmado`
+Si la pre-reserva está en estado terminal, `registrar_pago` registra el pago
+forzado a `en_revision`, con `warning='prereserva_no_activa'`, y **devuelve
+`ok:true` igual**. Un encadenado que verifique solo `ok` puede avanzar creyendo que
+hay un pago confirmado cuando no lo hay.
+
+**Implicación:** tras `registrar_pago`, en un flujo de camino estricto, verificar
+`ok===true && estado==='confirmado' && sin warning`. No basta `ok`.
+
+**Verificado:** 2026-05-30, cuerpo real de `registrar_pago` (`pg_get_functiondef`) +
+test en TEST (caso anómalo).
+
+### L-8B-04 — La constraint de `idempotency_key` es PARCIAL (solo estados activos)
+`uq_prereservas_idempotency_activa` es un índice único parcial con
+`WHERE idempotency_key IS NOT NULL AND estado IN ('pendiente_pago','pago_en_revision')`.
+Por eso una pre-reserva cancelada/vencida sale del subconjunto único, y una recarga
+legítima con la misma cabaña/fechas/contacto no choca (no da `unique_violation`).
+Esto habilitó usar una `idempotency_key` determinística por datos sin temor a falsos
+bloqueos tras cancelación.
+
+**Implicación:** antes de diseñar una key determinística, verificar si la unicidad
+que la respalda es total o parcial — decide si la fórmula es viable.
+
+**Verificado:** 2026-05-30, `pg_indexes` + `pg_index.indpred` contra OPS.
+
+### L-8B-05 — n8n Form Trigger: campo Number vacío puede llegar como `0`, no como `""`
+El primer test de la seña falló ("La seña debe ser mayor a 0") porque un campo
+Number dejado vacío llegó como `0`/`"0"`, no como cadena vacía, y la validación
+`>0` lo rechazó. Para una semántica "vacío → default", tratar `0`, `""`, `null` y
+`undefined` todos como "vacío" leyendo el valor crudo (sin pasarlo por un normalizador
+que convierta `"0"` en un valor truthy), y validar `>0` solo para valores genuinos.
+
+**Implicación:** en validaciones de campos Number de n8n, no asumir que vacío = `""`;
+contemplar `0` explícitamente según la semántica deseada.
+
+**Verificado:** 2026-05-30, primer happy path en TEST (bug) + corrección v4.
+
+### L-8B-06 — Form Ending es un nodo aparte (`form` operation `completion`), no una propiedad del trigger
+Para mostrar un resultado final al operador con `Respond When = Workflow Finishes`,
+el patrón robusto es un nodo `n8n-nodes-base.form` con `operation: "completion"` al
+final de cada rama, no una propiedad del Form Trigger. Con ramas mutuamente
+excluyentes por IF, se muestra el Form Ending de la rama ejecutada. La lógica de
+decisión del mensaje puede centralizarse en un Code node previo (Build Response) que
+emite `completionTitle`/`completionMessage`, y el Form Ending solo los renderiza.
+
+**Verificado:** 2026-05-30, documentación oficial de n8n + workflow validado en TEST.
+
+### L-8B-07 — Enriquecer el contexto paso a paso en cadenas multi-función de n8n
+En un encadenado donde cada función devuelve IDs distintos (`crear_prereserva` da
+`id_pre_reserva`, `registrar_pago` da `id_pago`, `confirmar_reserva` da `id_reserva`),
+no depender de que cada paso reciba todos los IDs en su respuesta. Mantener un objeto
+`ctx` que se va enriqueciendo (clonado entre nodos para no mutar referencias) y del
+que cada Build Payload lee lo que necesita. Evita el bug de que un paso posterior se
+quede sin un ID que su función de origen no devolvió.
+
+**Verificado:** 2026-05-30, diseño v2 del workflow (corrección de bug detectado en v1).

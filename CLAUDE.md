@@ -8,19 +8,21 @@ Antes de trabajar, leer en este orden:
 2. Docs/Operacional/DECISIONES_NO_REABRIR.md
 3. Docs/Implementacion/6B_SCHEMA_SQL.md (schema canónico actual: **v1.7.3**)
 4. Docs/Arquitectura/ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md (diseño Etapa 8 — arranque OPS; subetapas 8A-8D)
-5. Docs/Bitacora/8A_CIERRE.md (cierre formal Etapa 8A — levantamiento del entorno OPS)
-6. Docs/Bitacora/7E_CIERRE.md (cierre formal Etapa 7E — endurecimiento de permisos Data API en DEV)
-7. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
-8. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
-9. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
-10. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
-11. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
-12. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
-13. Docs/Implementacion/6B_PLAN_FASES.md
-14. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a PROD)
-15. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
-16. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
-17. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
+5. Docs/Arquitectura/ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md (diseño Etapa 8B — capa de carga interna; **v3.5**)
+6. Docs/Bitacora/8B_CIERRE.md (cierre formal Etapa 8B — capa de carga validada en TEST + smoke OPS con primera reserva real)
+7. Docs/Bitacora/8A_CIERRE.md (cierre formal Etapa 8A — levantamiento del entorno OPS)
+8. Docs/Bitacora/7E_CIERRE.md (cierre formal Etapa 7E — endurecimiento de permisos Data API en DEV)
+9. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
+10. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
+11. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
+12. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
+13. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
+14. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
+15. Docs/Implementacion/6B_PLAN_FASES.md
+16. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a PROD)
+17. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
+18. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
+19. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
 
 No cargar contexto histórico largo salvo pedido explícito del usuario.
 
@@ -82,6 +84,7 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
   Manual Trigger → Build Input → Build Payload → Postgres → Build Response
   ```
 - **Patrón para workflows con validación temprana** (W7): agregar nodo IF antes de Postgres para evitar ejecutar queries inválidas.
+- **Patrón para cadenas multi-función (Etapa 8B):** Form Trigger → validar/normalizar → encadenar funciones con envelope normalizada por paso (`Continue On Fail` + Normalize tras cada Postgres, distinguiendo error técnico de negocio), `ctx` enriquecido paso a paso, compensación unificada ante fallo parcial, y un nodo `Form Ending` (`form` operation `completion`) para el resultado al operador. Template sanitizado reutilizable: `vita_w8b_carga_reserva__TEMPLATE.json`.
 - **Normalización defensiva con `nv()`** en Build Payload para todos los obligatorios, hasta que se aplique el hardening SQL.
 - **Wrapper externo unificado**: todos los workflows devuelven `{ ok, workflow, source_event, error, result, executed_at }` con extensiones específicas según el caso.
 - **Templates en repo** con sanitización obligatoria (placeholders `__CREDENTIAL_ID__`, `__WORKFLOW_VERSION_ID__`, etc.).
@@ -177,14 +180,25 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - **Smoke de cierre solo lectura** (D-8-12): OPS sin datos transaccionales; el primer write real será una reserva real por 8B. DEV/TEST/PROD no se tocaron.
 - Decisiones D-8-09, D-8-13 (+ confirmación de cumplimiento de D-8-03). Lecciones L-8A-01 a L-8A-07. Documento de cierre: `8A_CIERRE.md`. Diseño de la Etapa 8: `ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md`.
 
+**Etapa 8B — Capa de carga interna de reservas ✅ Cerrada (2026-05-30):**
+
+- Form Trigger n8n usable desde celular (Basic Auth, `Respond When = Workflow Finishes`, `Form Ending`) que encadena `crear_prereserva` → `registrar_pago` → `confirmar_reserva` en **una sola acción**, con compensación vía `cancelar_prereserva` ante fallo parcial. Sin INSERT directo: toda escritura pasa por las funciones.
+- **Contratos reales verificados contra OPS (read-only)** antes de implementar. Hallazgos clave: `canal_origen`/`canal_pago_esperado`/`medio_pago`/`tipo` son **TEXT con CHECK** (no enums); `crear_prereserva` ya valida cabaña/capacidad; `ok:true` de `registrar_pago` no garantiza pago confirmado (verificación estricta de estado + warning); constraint de `idempotency_key` es **parcial** (solo estados activos).
+- Cabaña por nombre (mapeo a IDs reales 1-5). Seña vacía/0 → 50% automático; valor explícito → se respeta (D-8B-13). Nombre+apellido en campo único (D-8B-12 revisada). Strings persistidos compatibles con los CHECK reales (D-8B-21), con origen fino (Airbnb/Booking/Directo/etc.) preservado en `notas`.
+- **Validación funcional completa en TEST** (happy path en ambos caminos de seña, colisión, idempotencia, validaciones de capa, compensación con pago).
+- **Smoke OPS exitoso = primer write real del sistema:** reserva id 1 (Tokio, Paula Lugo, 06→07 jun 2026, total 150000, seña 75000, saldo 75000, `created_by`/`validado_por` = vicky, `source_event` `n8n_ops_w8b_carga_vicky_manual`). Trazabilidad multiusuario verificada en producción.
+- Punto de extensión para el repintado de calendario (8C) marcado pero NO construido.
+- Artefactos: workflows `__TEST`/`__OPS`/`__TEMPLATE` (sanitizado). Decisiones D-8B-01 a D-8B-21; lecciones L-8B-01 a L-8B-07. Diseño: `ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md v3.5`. Documento de cierre: `8B_CIERRE.md`.
+- **Pendiente operativo:** activar el workflow `__OPS` para uso por URL sin ejecución manual (el smoke se hizo con ejecución observada).
+
 **Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV, TEST y OPS están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B con paridad 10/10; OPS reconstruido en 8A con paridad P01-P10 10/10).
 
 **Próxima etapa — opciones disponibles (orden sugerido):**
 
-Con DEV, TEST, OPS, 6D, 7A, 7B, 7C, 7D, 7E y 8A cerradas, el entorno OPS ya está levantado. Las opciones a priorizar por Franco son:
+Con DEV, TEST, OPS, 6D, 7A, 7B, 7C, 7D, 7E, 8A y 8B cerradas, el sistema está **operativo y tomando reservas reales** (primera reserva real cargada en el smoke de 8B). Las opciones a priorizar por Franco son:
 
-- **8B — Capa de carga de Vicky (siguiente natural):** Form Trigger n8n que encadena `crear_prereserva` → `registrar_pago` → `confirmar_reserva`, con monto total + seña editable (D-8-04) y elección de cabaña **por nombre** (D-8-10). Verificar el contrato real de las funciones con `pg_get_functiondef` antes de mapear `operador`/`cargado_por` (D-8-06); IDs reales de cabaña en OPS = 1-5.
-- **8C — Calendarios visuales por evento** (nuestro + el de Jenny). Formato (Sheet repintado vs HTML) por decidir.
+- **8C — Calendarios visuales por evento (siguiente natural y prioritario):** el calendario operativo manual del equipo (Franco/Rodrigo/Vicky/Remo) se agota justo ahora, lo que vuelve a 8C urgente. Calendario del equipo + el de limpieza de Jenny (`vista_limpieza_semana`). Engancha en el **punto de extensión que 8B dejó marcado** (post-`confirmar_reserva` ok). Formato (Sheet repintado vs HTML servido) por decidir al diseñar 8C. Revisar por qué el calendario operativo "se acaba" (probable tema de vista, no del motor: horizonte 120 días).
+- **Activar el workflow `__OPS` de 8B** para uso por URL sin ejecución manual (pendiente operativo).
 - **8D — Bloqueos operativos + cierre de Etapa 8.**
 - Residual de permisos de tabla en DEV (hallazgo A5 / pendiente 1.7): revocar o aceptar como definitivo. No urgente; OPS ya nació sin ese problema.
 - Integraciones con consumidores reales sobre TEST: webhook MercadoPago, bot, frontend — siempre sobre TEST primero.
@@ -224,6 +238,7 @@ No avanzar a PROD público, dashboard, MercadoPago real, bot o frontend público
 - **Tests funcionales primero, limpieza después.** Validar el comportamiento esperado antes de borrar la evidencia. **La limpieza de un entorno de prueba no se improvisa:** es un bloque dedicado con SQL explícito y aprobado (snapshot → limpieza atómica → verificación), con `DELETE` en orden por FKs, sin `DROP/TRUNCATE ... CASCADE`, y doble gate anti-error-de-entorno. Patrón validado en Etapa 7D (D-7C-01, D-7D-01, D-7D-02).
 - **`NOW()` en PostgreSQL retorna timestamp de transacción**, no de statement. Para validar triggers de `updated_at`, ejecutar INSERT y UPDATE en runs separados.
 - **Supabase SQL Editor muestra solo el resultado del último SELECT.** Para ver múltiples resultados, usar UNION ALL con columna identificadora.
+- **"TEXT libre" no implica sin restricción: verificar `CHECK` constraints antes de fijar valores persistidos** (L-8B-01). Columnas como `canal_origen`/`canal_pago_esperado`/`medio_pago`/`tipo` son TEXT pero con `CHECK` que restringe los valores. Leer los `CHECK` reales con `pg_get_constraintdef` sobre `pg_constraint`. Cuando un valor atraviesa varias tablas en cadena (pre_reservas → reservas), los valores válidos son la **intersección** de todos los `CHECK` del camino, no el de la tabla final (L-8B-02).
 
 ## Reglas operativas específicas para n8n (consolidadas durante 6C)
 
@@ -235,3 +250,6 @@ No avanzar a PROD público, dashboard, MercadoPago real, bot o frontend público
 - **Convención "todas las cabañas" no es universal**: W1 usa `0`, W6 usa `null`. Verificar siempre el contrato real de cada función (L-6C-08).
 - **Normalización defensiva con `nv()`** en Build Payload mientras el hardening SQL no se aplique (L-6C-07).
 - **Para validaciones tempranas con error estructurado**, usar nodo IF antes de Postgres (L-6C-09).
+- **Campo Number vacío de un Form Trigger puede llegar como `0`, no como `""`** (L-8B-05). Para semántica "vacío → default", tratar `0`/`""`/`null`/`undefined` todos como vacío leyendo el valor crudo; validar `>0` solo para valores genuinos.
+- **Form Ending es un nodo aparte** (`n8n-nodes-base.form`, `operation: completion`), no una propiedad del Form Trigger (L-8B-06). Con `Respond When = Workflow Finishes` y ramas mutuamente excluyentes por IF, se muestra el Form Ending de la rama ejecutada; la decisión del mensaje puede centralizarse en un Code previo.
+- **En cadenas multi-función, enriquecer un `ctx` paso a paso** (clonado entre nodos) en vez de depender de que cada función devuelva todos los IDs (L-8B-07). Tras cada Postgres con `Continue On Fail`, normalizar la salida distinguiendo error técnico de error de negocio; un `ok:true` puede no bastar (ej. `registrar_pago` degradado a `en_revision`, L-8B-03).

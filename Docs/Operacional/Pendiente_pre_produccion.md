@@ -3,8 +3,8 @@
 Lista de cambios y configuraciones a aplicar antes del despliegue de
 producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
 
-**Estado del archivo:** actualizado al cierre de Etapa 8A (sesión 2026-05-29).
-Items cerrados durante Etapas 6D, 7A, 7B y 8A listados en los resúmenes de abajo;
+**Estado del archivo:** actualizado al cierre de Etapa 8B (sesión 2026-05-30).
+Items cerrados durante Etapas 6D, 7A, 7B, 8A y 8B listados en los resúmenes de abajo;
 detalle histórico de los items 6D en el Apéndice al final del documento.
 
 ---
@@ -51,6 +51,23 @@ detalle histórico de los items 6D en el Apéndice al final del documento.
 | Credencial n8n `vita_supabase_ops` verificada por identidad | ✅ Cerrado | 8A Bloques 10-11 | `8A_CIERRE.md` |
 
 **Items pendientes activos:** ver secciones 1 a 8 abajo. **Nota:** las secciones 1.1, 1.2 y 1.3 quedaron cerradas en Etapa 7A (detalle conservado abajo con marca de cierre). Los items cerrados en 7B (entorno TEST levantado) se registran en el resumen de arriba; detalle completo en `7B_CIERRE.md`, no se duplica aquí.
+
+## Items cerrados en Etapa 8B — resumen
+
+| Item | Estado | Bloque que lo cerró | Referencia |
+|---|---|---|---|
+| Capa de carga interna (Form Trigger n8n encadenando las 3 funciones) | ✅ Cerrado | 8B, validado en TEST | `8B_CIERRE.md` |
+| Verificación de contratos reales de funciones contra OPS (read-only) | ✅ Cerrado | 8B sección 2 | `8B_CIERRE.md` §4 |
+| Primer write real en OPS (smoke con reserva real, id 1) | ✅ Cerrado | 8B smoke OPS | `8B_CIERRE.md` §8 |
+| Trazabilidad multiusuario verificada en producción (`created_by`/`validado_por`/`source_event`) | ✅ Cerrado | 8B smoke OPS | D-8B-04 |
+
+**Pendiente operativo nuevo (no de schema/seguridad):** activar el workflow
+`vita_w8b_carga_reserva__OPS` en n8n para que el equipo cargue por la URL del
+formulario sin ejecución manual. El smoke se hizo con ejecución observada (correcto
+para el primer write); para uso diario el workflow debe quedar activo. Ver
+`8B_CIERRE.md` §10.
+
+**Bitácora / cierres recientes:** `8A_CIERRE.md` (entorno OPS), `8B_CIERRE.md` (capa de carga).
 
 **Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H7 cerrados; H8 cerrado).
 **Cierre Etapa 7A:** `7A_CIERRE.md`.

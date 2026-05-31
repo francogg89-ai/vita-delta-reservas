@@ -8,7 +8,7 @@ Sistema de automatización integral para el complejo de cabañas Vita Delta.
 
 Vita Delta Reservas es un sistema de gestión operativa para un complejo de 5 cabañas (Bamboo, Madre Selva, Arrebol, Guatemala, Tokio). Centraliza disponibilidad, reservas, pricing, pagos, operación interna y comunicación con huéspedes en una arquitectura automatizable, trazable y escalable.
 
-El stack actual es **Supabase / PostgreSQL** como base de datos y fuente de verdad, **n8n** como orquestador de workflows, y **Claude API** como capa conversacional futura. El proyecto migró desde un stack inicial sobre Google Sheets; esa migración (Etapa 6B) está ejecutada y cerrada en el entorno DEV, y el sistema cuenta además con un entorno TEST levantado y validado, y un entorno **OPS de operación real interna** ya levantado, paritario, seguro y conectado a n8n (Etapa 8A).
+El stack actual es **Supabase / PostgreSQL** como base de datos y fuente de verdad, **n8n** como orquestador de workflows, y **Claude API** como capa conversacional futura. El proyecto migró desde un stack inicial sobre Google Sheets; esa migración (Etapa 6B) está ejecutada y cerrada en el entorno DEV, y el sistema cuenta además con un entorno TEST levantado y validado, y un entorno **OPS de operación real interna** levantado, paritario, seguro y conectado a n8n (Etapa 8A). Sobre OPS ya funciona la **capa de carga interna de reservas** (Etapa 8B): un formulario n8n con el que el equipo carga reservas reales en una acción. El sistema **ya está tomando reservas reales** (primera reserva real cargada en el smoke de 8B).
 
 > La IA conversa. n8n orquesta. PostgreSQL decide y persiste. Los humanos auditan.
 
@@ -45,8 +45,9 @@ Todas las etapas de diseño están cerradas. No se reabren.
 | 7D | Limpieza/reset del entorno TEST | Cerrada (2026-05-28) |
 | 7E | Endurecimiento de permisos Data API en DEV (paridad con TEST) | Cerrada (2026-05-28) |
 | 8A | Levantamiento del entorno OPS (operación real interna) | Cerrada (2026-05-29) |
+| 8B | Capa de carga interna de reservas (Form Trigger n8n) | Cerrada (2026-05-30) |
 
-**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. DEV, TEST y OPS están alineados funcionalmente: TEST se reconstruyó desde el canónico en 7B (paridad 10/10 vs DEV) y OPS en 8A (paridad P01-P10 10/10).
+**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. DEV, TEST y OPS están alineados funcionalmente: TEST se reconstruyó desde el canónico en 7B (paridad 10/10 vs DEV) y OPS en 8A (paridad P01-P10 10/10). 8B no modificó el schema: la capa de carga usa las funciones existentes tal cual.
 
 ---
 
@@ -84,6 +85,10 @@ La pre-reserva bloquea disponibilidad temporalmente y expira si no se confirma. 
 - `vita_w06_crear_bloqueo_supabase`
 - `vita_w07_vistas_operativas_supabase` — lectura de vistas operativas.
 
+### Capa de carga interna (Etapa 8B)
+
+- `vita_w8b_carga_reserva` — Form Trigger n8n (usable desde celular, Basic Auth) que encadena `crear_prereserva` → `registrar_pago` → `confirmar_reserva` en **una sola acción**, con compensación vía `cancelar_prereserva` ante fallo parcial. El operador elige cabaña por nombre, carga monto total y seña (vacía/0 → 50% automático), y recibe un resultado único (confirmada / error claro / revisión manual). Variantes `__TEST` (validado), `__OPS` (productivo) y `__TEMPLATE` (sanitizado reutilizable).
+
 ---
 
 ## Entornos
@@ -92,7 +97,7 @@ La pre-reserva bloquea disponibilidad temporalmente y expira si no se confirma. 
 |---|---|---|
 | DEV | `vita-delta-dev` | Backend completo v1.7.3 + hardening + 8 workflows validados + permisos EXECUTE endurecidos (7E). IDs de cabaña 17-21. |
 | TEST | `vita-delta-test` | Schema reconstruido desde canónico, paritario, validado y reseteado a estado limpio (7D). IDs de cabaña 1-5. |
-| OPS | `vita-delta-ops` | **Operación real interna.** Levantado en 8A: schema paritario (P01-P10 10/10), seeds reales, seguridad cerrada (nació más cerrado que TEST), `pg_cron` activo, credencial n8n `vita_supabase_ops` verificada por identidad. IDs de cabaña 1-5. Sin datos transaccionales aún (primer write por 8B). |
+| OPS | `vita-delta-ops` | **Operación real interna.** Levantado en 8A: schema paritario (P01-P10 10/10), seeds reales, seguridad cerrada (nació más cerrado que TEST), `pg_cron` activo, credencial n8n `vita_supabase_ops` verificada por identidad. IDs de cabaña 1-5. **Capa de carga 8B operativa; primera reserva real cargada** (id 1, Tokio). |
 | PROD | — | No creado. Etapa futura (público). |
 
 **IDs de cabaña no portables entre entornos** (DEV 17-21; TEST y OPS 1-5 cada uno en su propia base). Cada workflow usa los IDs del ambiente al que apunta. En el form de carga de 8B la cabaña se elige por nombre, no por ID.
@@ -148,10 +153,10 @@ Pendientes documentados al cierre de 7E:
 
 ## Próximas etapas — opciones disponibles
 
-Con DEV, TEST, OPS, 6C, 6D, 7A, 7B, 7C, 7D, 7E y 8A cerradas, el entorno OPS ya está levantado y operativo. Las opciones a priorizar (orden sugerido, no comprometidas):
+Con DEV, TEST, OPS, 6C, 6D, 7A, 7B, 7C, 7D, 7E, 8A y 8B cerradas, el sistema está **operativo y tomando reservas reales**. Las opciones a priorizar (orden sugerido, no comprometidas):
 
-- **8B — Capa de carga de Vicky:** Form Trigger n8n (usable desde celular) que encadena `crear_prereserva` → `registrar_pago` → `confirmar_reserva` en una acción, con monto total y seña editable, y elección de cabaña por nombre. Es el primer write real sobre OPS.
-- **8C — Calendarios visuales por evento** (operativo + el de limpieza para Jennifer).
+- **8C — Calendarios visuales por evento (siguiente natural y prioritario):** el calendario operativo manual del equipo se está agotando justo ahora, lo que vuelve a 8C urgente. Calendario del equipo + el de limpieza para Jennifer (`vista_limpieza_semana`). Engancha en el punto de extensión que 8B dejó marcado (post-`confirmar_reserva`). Formato (Sheet repintado vs HTML) por decidir al diseñar 8C.
+- **Activar el workflow `__OPS` de 8B** para uso por URL sin ejecución manual (pendiente operativo).
 - **8D — Bloqueos operativos + cierre de Etapa 8.**
 - **Residual de permisos de tabla en DEV** (hallazgo A5 / pendiente 1.7): revocar el set amplio de SELECT/escritura a roles Data API para alinear con TEST, o aceptarlo y documentarlo como definitivo. No urgente; OPS ya nació sin ese problema.
 - **Integraciones con consumidores reales sobre TEST:** webhook MercadoPago, bot conversacional, frontend público — siempre sobre TEST primero.
@@ -172,7 +177,7 @@ No avanzar a PROD público, MercadoPago real, bot o frontend público sin decisi
 - Tarifas y feriados productivos completos.
 - Entorno PROD (público). _(OPS, operación interna, ya está levantado en 8A.)_
 
-**El sistema no está en producción pública.** OPS es operación real interna, recién levantado, todavía sin carga de reservas (el primer write llega con 8B).
+**El sistema no está en producción pública.** OPS es operación real interna y **ya está tomando reservas reales** mediante la capa de carga interna de 8B (carga manual del equipo por formulario n8n). Falta la integración con consumidores externos automáticos (webhook MP, bot, web pública) y el entorno PROD público.
 
 ---
 
@@ -191,9 +196,10 @@ No avanzar a PROD público, MercadoPago real, bot o frontend público sin decisi
 - `Docs/Operacional/Lecciones_Aprendidas.md` — gotchas operativos.
 - `Docs/Implementacion/6B_SCHEMA_SQL.md` — schema canónico SQL vigente (v1.7.3).
 - `Docs/Implementacion/6B_PLAN_FASES.md` — plan de ejecución, conservado como referencia.
-- `Docs/Arquitectura/` — documentos de arquitectura de Etapas 1-6B y `ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md` (diseño del arranque OPS).
-- `Docs/Bitacora/` — cierres formales (`6C_CIERRE`, `6D_CIERRE`, `7A_CIERRE`, `7B_CIERRE`, `7C_CIERRE`, `7D_CIERRE`, `7E_CIERRE`, `8A_CIERRE`) y bitácoras de ejecución (`6B_EJECUCION_DEV`, `6C_EJECUCION`, `HARDENING_PRE_PRODUCCION_EJECUCION`).
+- `Docs/Arquitectura/` — documentos de arquitectura de Etapas 1-6B, `ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md` (diseño del arranque OPS) y `ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md` (diseño de la capa de carga, v3.5).
+- `Docs/Bitacora/` — cierres formales (`6C_CIERRE`, `6D_CIERRE`, `7A_CIERRE`, `7B_CIERRE`, `7C_CIERRE`, `7D_CIERRE`, `7E_CIERRE`, `8A_CIERRE`, `8B_CIERRE`) y bitácoras de ejecución (`6B_EJECUCION_DEV`, `6C_EJECUCION`, `HARDENING_PRE_PRODUCCION_EJECUCION`).
 - `Workflows/n8n/supabase/*.template.json` — 8 templates sanitizados de los workflows contra Supabase.
+- `Workflows/n8n/8B/` — workflows de la capa de carga: `vita_w8b_carga_reserva__TEST.json` (validado), `__OPS.json` (productivo), `__TEMPLATE.json` (sanitizado).
 - `CLAUDE.md` — reglas de trabajo y orden de lectura para Claude.
 
 ---
