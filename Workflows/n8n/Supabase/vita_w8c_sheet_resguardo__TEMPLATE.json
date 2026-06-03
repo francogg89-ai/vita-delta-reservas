@@ -1,0 +1,258 @@
+{
+  "name": "vita_w8c_sheet_resguardo__TEST",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "39cd60cf-0864-4b28-9434-823b9330cf98",
+      "name": "Regenerar resguardo",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id_cabana, fecha, estado, id_reserva_activa, hora_checkin_base, hora_checkout_base\nFROM vista_disponibilidad\nWHERE fecha >= CURRENT_DATE\n  AND fecha < CURRENT_DATE + INTERVAL '120 days'\nORDER BY id_cabana, fecha;",
+        "options": {}
+      },
+      "id": "eea47e6d-0d75-4101-b7d1-a982b5fce92e",
+      "name": "PG: leer grilla",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "name": "CRED_POSTGRES_TEST"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id_cabana, id_reserva, fecha_checkin, fecha_checkout, hora_checkin, hora_checkout,\n       personas, estado_reserva, huesped_nombre, huesped_telefono, monto_total, monto_saldo\nFROM vista_calendario\nWHERE fecha_checkin < CURRENT_DATE + INTERVAL '120 days'\n  AND fecha_checkout > CURRENT_DATE\nORDER BY id_cabana, fecha_checkin;",
+        "options": {}
+      },
+      "id": "7449893e-6fac-48d0-ac70-3f3bd19b43e8",
+      "name": "PG: leer detalle",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        0
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "name": "CRED_POSTGRES_TEST"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id_bloqueo, id_cabana, fecha_desde, fecha_hasta, motivo, descripcion\nFROM bloqueos\nWHERE activo = true\n  AND fecha_desde < CURRENT_DATE + INTERVAL '120 days'\n  AND fecha_hasta > CURRENT_DATE\nORDER BY fecha_desde;",
+        "options": {}
+      },
+      "id": "7ab4cd3a-28e4-4b7e-84c6-15b3a52a608d",
+      "name": "PG: leer bloqueos",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        0
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "name": "CRED_POSTGRES_TEST"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT r.id_cabana, r.id_reserva, r.fecha_checkout, r.hora_checkout,\n       TRIM(BOTH FROM (h.nombre || ' ') || COALESCE(h.apellido, '')) AS huesped_nombre\nFROM reservas r\nJOIN huespedes h ON h.id_huesped = r.id_huesped\nWHERE r.estado IN ('confirmada','activa','completada')\n  AND r.fecha_checkout >= CURRENT_DATE\n  AND r.fecha_checkout < CURRENT_DATE + INTERVAL '120 days';",
+        "options": {}
+      },
+      "id": "17a173d4-4061-49d6-bf14-967f6172eb14",
+      "name": "PG: leer salidas",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        896,
+        0
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "name": "CRED_POSTGRES_TEST"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== vita_w8c_sheet_resguardo__TEST — nodo Code (armar matriz) — v1 =====\n// Solo lectura de Supabase. Arma una matriz de filas para volcar al Sheet (clear+write).\n// Grilla cabañas×días, meses apilados verticalmente. Resguardo del operativo (CON montos).\n\nconst TZ = 'America/Argentina/Buenos_Aires';\n\nfunction val(v) { if (v === null || v === undefined) return ''; return String(v); }\nfunction hhmm(t) { if (!t) return ''; const s = String(t); return s.length >= 5 ? s.slice(0, 5) : s; }\nfunction money(n) {\n  if (n === null || n === undefined || n === '') return '';\n  const num = Number(n); if (Number.isNaN(num)) return '';\n  return '$' + num.toLocaleString('es-AR', { maximumFractionDigits: 0 });\n}\nfunction primerNombre(full) { if (!full) return ''; return String(full).trim().split(/\\s+/)[0]; }\nfunction ymd(v) { if (v === null || v === undefined) return ''; return String(v).slice(0, 10); }\n\nfunction safeAll(nodeName, keyField) {\n  try {\n    const items = $(nodeName).all();\n    const failed = items.some(it => it && it.json && (it.json.error || it.error));\n    if (failed) return { ok: false, rows: [] };\n    const rows = items.map(it => it.json).filter(j => j && j[keyField] !== undefined && j[keyField] !== null);\n    return { ok: true, rows };\n  } catch (e) { return { ok: false, rows: [] }; }\n}\n\nconst gridR = safeAll('PG: leer grilla', 'id_cabana');\nconst resR  = safeAll('PG: leer detalle', 'id_reserva');\nconst blkR  = safeAll('PG: leer bloqueos', 'id_bloqueo');\nconst outR  = safeAll('PG: leer salidas', 'id_reserva');\nconst huboError = !gridR.ok || !resR.ok || !blkR.ok || !outR.ok;\n\nconst ahora = new Intl.DateTimeFormat('es-AR', { timeZone: TZ, dateStyle: 'short', timeStyle: 'short' }).format(new Date());\n\nif (huboError) {\n  const matrizErr = [\n    ['Calendario operativo — Resguardo'],\n    ['ATENCIÓN: la última actualización falló. Datos NO confiables.'],\n    ['Intento: ' + ahora]\n  ];\n  return [{ json: { matriz: matrizErr, body: JSON.stringify({ values: matrizErr }), huboError: true } }];\n}\n\nconst ORDEN_CABANAS = [\n  { id: 1, nombre: 'Bamboo' }, { id: 2, nombre: 'Madre Selva' }, { id: 3, nombre: 'Arrebol' },\n  { id: 4, nombre: 'Guatemala' }, { id: 5, nombre: 'Tokio' },\n];\n\nconst dias = Array.from(new Set(gridR.rows.map(r => ymd(r.fecha)))).sort();\nconst primerDiaVisible = dias.length ? dias[0] : null;\n\nconst reservasPorCabana = {};\nfor (const r of resR.rows) (reservasPorCabana[r.id_cabana] = reservasPorCabana[r.id_cabana] || []).push(r);\n\nconst salidasPorCabana = {};\nconst vistosSalida = new Set();\nfunction pushSalida(idc, idr, fecha, hora, nombre) {\n  const k = String(idr);\n  if (vistosSalida.has(k)) return;\n  vistosSalida.add(k);\n  (salidasPorCabana[idc] = salidasPorCabana[idc] || []).push({ id_reserva: idr, fecha_checkout: fecha, hora_checkout: hora, huesped_nombre: nombre });\n}\nfor (const r of resR.rows) pushSalida(r.id_cabana, r.id_reserva, ymd(r.fecha_checkout), r.hora_checkout, r.huesped_nombre);\nfor (const s of outR.rows) pushSalida(s.id_cabana, s.id_reserva, ymd(s.fecha_checkout), s.hora_checkout, s.huesped_nombre);\n\nconst bloqueosEspecificos = {};\nconst bloqueosTotales = [];\nfor (const b of blkR.rows) {\n  if (b.id_cabana === null || b.id_cabana === undefined) bloqueosTotales.push(b);\n  else (bloqueosEspecificos[b.id_cabana] = bloqueosEspecificos[b.id_cabana] || []).push(b);\n}\n\nfunction reservasDeCabana(idc) { return reservasPorCabana[idc] || []; }\nfunction salidasDeCabana(idc) { return salidasPorCabana[idc] || []; }\nfunction entradaEseDia(idc, dia) { return reservasDeCabana(idc).find(r => ymd(r.fecha_checkin) === dia) || null; }\nfunction salidaEseDia(idc, dia) { return salidasDeCabana(idc).find(s => ymd(s.fecha_checkout) === dia) || null; }\nfunction ocupadaEseDia(idc, dia) {\n  return reservasDeCabana(idc).find(r =>\n    (ymd(r.fecha_checkin) <= dia && dia < ymd(r.fecha_checkout)) || ymd(r.fecha_checkout) === dia) || null;\n}\nfunction bloqueosQueCubren(idc, dia) {\n  const esp = (bloqueosEspecificos[idc] || []).filter(b => ymd(b.fecha_desde) <= dia && dia < ymd(b.fecha_hasta));\n  const tot = bloqueosTotales.filter(b => ymd(b.fecha_desde) <= dia && dia < ymd(b.fecha_hasta));\n  return esp.concat(tot);\n}\n\nfunction calcularCelda(idc, dia) {\n  const entra = entradaEseDia(idc, dia);\n  const sale = salidaEseDia(idc, dia);\n  const ocupa = ocupadaEseDia(idc, dia);\n  const bloqueosCubren = bloqueosQueCubren(idc, dia);\n  const bloqueado = bloqueosCubren.length > 0;\n  const borde = (function(){ const todos=(bloqueosEspecificos[idc]||[]).concat(bloqueosTotales); return todos.find(b=>ymd(b.fecha_desde)===dia||ymd(b.fecha_hasta)===dia)||null; })();\n  const hayMovimiento = !!(entra || sale);\n  const recambioHuesped = !!(entra && sale && entra.id_reserva !== sale.id_reserva);\n  const rojoBloqueoMov = !!(borde && hayMovimiento);\n  if (recambioHuesped || rojoBloqueoMov) return { estado: 'rojo', sale, entra, borde, bloqueosCubren };\n  if (bloqueado) return { estado: 'gris', bloqueosCubren };\n  if (ocupa) {\n    const inicioVisible = (ymd(ocupa.fecha_checkin) === dia) || (primerDiaVisible === dia && ymd(ocupa.fecha_checkin) < dia);\n    const esSalida = !!sale && !inicioVisible;\n    return { estado: 'verde', reserva: ocupa, esInicioVisible: inicioVisible, esSalida, sale };\n  }\n  return { estado: 'blanco' };\n}\n\nfunction celdaTexto(idc, dia) {\n  const c = calcularCelda(idc, dia);\n  let f1 = '', f2 = '', f3 = '';\n  if (c.estado === 'verde' && c.esInicioVisible) {\n    const r = c.reserva;\n    f1 = val(r.huesped_nombre) + ' · ' + val(r.personas) + 'p · ' + hhmm(r.hora_checkin);\n    f2 = val(r.huesped_telefono);\n    f3 = money(r.monto_total) + ' / saldo ' + money(r.monto_saldo);\n  } else if (c.estado === 'verde' && c.esSalida) {\n    f1 = 'Sale ' + primerNombre(c.sale.huesped_nombre) + ' · ' + hhmm(c.sale.hora_checkout);\n  } else if (c.estado === 'rojo') {\n    let arriba = '';\n    if (c.sale) arriba = 'Sale ' + primerNombre(c.sale.huesped_nombre) + ' · ' + hhmm(c.sale.hora_checkout);\n    else if (c.borde && ymd(c.borde.fecha_hasta) === dia) arriba = 'Fin bloqueo';\n    let abajo = '';\n    if (c.entra) {\n      abajo = 'Entra ' + val(c.entra.huesped_nombre) + ' · ' + val(c.entra.personas) + 'p · ' + hhmm(c.entra.hora_checkin);\n      f2 = val(c.entra.huesped_telefono);\n      f3 = money(c.entra.monto_total) + ' / saldo ' + money(c.entra.monto_saldo);\n    } else if (c.borde && ymd(c.borde.fecha_desde) === dia) {\n      abajo = 'Inicio bloqueo · ' + val(c.borde.motivo);\n    }\n    f1 = arriba && abajo ? (arriba + '\\n' + abajo) : (arriba || abajo);\n  } else if (c.estado === 'gris') {\n    const b = c.bloqueosCubren[0];\n    const extra = c.bloqueosCubren.length > 1 ? ' (+)' : '';\n    f1 = 'BLOQUEO: ' + val(b ? b.motivo : 'bloqueo') + extra;\n  }\n  return [f1, f2, f3];\n}\n\nconst meses = {};\nfor (const dia of dias) (meses[dia.slice(0, 7)] = meses[dia.slice(0, 7)] || []).push(dia);\nconst NOMBRE_MES = { '01': 'Enero', '02': 'Febrero', '03': 'Marzo', '04': 'Abril', '05': 'Mayo', '06': 'Junio', '07': 'Julio', '08': 'Agosto', '09': 'Septiembre', '10': 'Octubre', '11': 'Noviembre', '12': 'Diciembre' };\n\nconst matriz = [];\nmatriz.push(['Calendario operativo — Resguardo · Complejo Vita Delta']);\nmatriz.push(['Última actualización: ' + ahora + ' · horizonte ' + dias.length + ' días · TEST']);\nmatriz.push(['']);\n\nfor (const mk of Object.keys(meses).sort()) {\n  const diasMes = meses[mk];\n  const parts = mk.split('-'); const anio = parts[0]; const mes = parts[1];\n  matriz.push([NOMBRE_MES[mes] + ' ' + anio]);\n  const head = ['Cabaña'];\n  for (const d of diasMes) head.push(d.slice(8, 10));\n  matriz.push(head);\n  for (const cab of ORDEN_CABANAS) {\n    const celdas = diasMes.map(d => celdaTexto(cab.id, d));\n    const filaHuesped = [cab.nombre];\n    const filaTel = [''];\n    const filaPago = [''];\n    celdas.forEach(cel => { filaHuesped.push(cel[0]); filaTel.push(cel[1]); filaPago.push(cel[2]); });\n    matriz.push(filaHuesped);\n    matriz.push(filaTel);\n    matriz.push(filaPago);\n  }\n  matriz.push(['']);\n}\n\nreturn [{ json: { matriz, body: JSON.stringify({ values: matriz }), huboError: false, filas: matriz.length } }];\n"
+      },
+      "id": "bb4dbc33-d518-4e4f-a495-4dda3777d2c7",
+      "name": "Code: armar matriz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID_PLACEHOLDER/values/A1:AZ1000:clear",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {}
+      },
+      "id": "32e21419-de3d-4dd0-82ed-55c17ce1a631",
+      "name": "Sheet: clear",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1344,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "CRED_GOOGLE_SHEETS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID_PLACEHOLDER/values/A1?valueInputOption=USER_ENTERED",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $(\"Code: armar matriz\").item.json.body }}",
+        "options": {}
+      },
+      "id": "fc4d28dc-0174-43b4-8b21-58a546aa6c9c",
+      "name": "Sheet: update",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1568,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "CRED_GOOGLE_SHEETS"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Regenerar resguardo": {
+      "main": [
+        [
+          {
+            "node": "PG: leer grilla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer grilla": {
+      "main": [
+        [
+          {
+            "node": "PG: leer detalle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer detalle": {
+      "main": [
+        [
+          {
+            "node": "PG: leer bloqueos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer bloqueos": {
+      "main": [
+        [
+          {
+            "node": "PG: leer salidas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer salidas": {
+      "main": [
+        [
+          {
+            "node": "Code: armar matriz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: armar matriz": {
+      "main": [
+        [
+          {
+            "node": "Sheet: clear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheet: clear": {
+      "main": [
+        [
+          {
+            "node": "Sheet: update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "tags": []
+}

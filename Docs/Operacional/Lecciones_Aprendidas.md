@@ -1145,3 +1145,66 @@ que cada Build Payload lee lo que necesita. Evita el bug de que un paso posterio
 quede sin un ID que su función de origen no devolvió.
 
 **Verificado:** 2026-05-30, diseño v2 del workflow (corrección de bug detectado en v1).
+
+## Lecciones de los calendarios visuales — Etapa 8C
+
+### L-8C-01 — n8n auto-empareja credenciales por nombre al crear/importar y puede caer en el entorno equivocado
+Al crear o importar un workflow vía SDK, n8n intenta auto-asignar credenciales por
+nombre y puede asignar el entorno equivocado o una credencial ajena. En 8C ocurrió
+repetidamente: los nodos Postgres quedaron auto-asignados a `vita_supabase_dev`
+(entorno equivocado) en los tres workflows, y en el de limpieza el Webhook quedó con
+la credencial Basic Auth del formulario 8B (`Formulario-reservas`) en vez de una
+propia.
+
+**Implicación:** verificar y corregir SIEMPRE las credenciales asignadas tras
+crear/importar un workflow, antes de cualquier ejecución. Nunca asumir que el
+auto-emparejamiento puso la correcta. Especialmente crítico cuando hay varios
+entornos (DEV/TEST/OPS) con credenciales de nombre parecido.
+
+**Verificado:** 2026-05-31 / 2026-06-01, creación de los 3 workflows de 8C vía SDK.
+
+### L-8C-02 — Las fechas de Postgres pueden llegar como timestamp completo, no como `YYYY-MM-DD`
+En el workflow de limpieza, las fechas llegaron del nodo Postgres como timestamp
+completo (`2026-06-01T00:00:00.000Z`), no como fecha simple. Una función que esperaba
+`YYYY-MM-DD` y hacía `split('-')` produjo encabezados rotos (`undefined ...T00:00:00.000Z/06`).
+
+**Implicación:** normalizar toda fecha a `YYYY-MM-DD` con `String(v).slice(0,10)`
+antes de comparar, parsear o etiquetar, en cualquier nodo Code que reciba fechas de
+Postgres. No asumir el formato de salida. (El operativo no lo manifestó porque su uso
+de fechas toleraba el formato, pero el riesgo era latente.)
+
+**Verificado:** 2026-06-01, bug observado y corregido en el render de limpieza.
+
+### L-8C-03 — Para grilla arbitraria en Google Sheets desde n8n, usar HTTP a la API REST, no el nodo nativo
+El nodo nativo `n8n-nodes-base.googleSheets` (v4.7) está orientado a datos tabulares
+con columnas nombradas (ResourceMapper) y no vuelca bien una grilla arbitraria con
+celdas multilínea y encabezados intercalados. Para eso conviene un nodo HTTP Request
+contra la API REST de Sheets (`values:update`/`values:clear`), que acepta una matriz
+cruda desde un rango, con `authentication: predefinedCredentialType` +
+`nodeCredentialType: googleSheetsOAuth2Api` (reutiliza la credencial OAuth existente).
+
+**Implicación:** elegir el mecanismo según la forma del dato — nodo nativo para filas
+homogéneas con columnas fijas; HTTP a la API REST para grillas/matrices arbitrarias.
+
+**Verificado:** 2026-06-01, construcción del Sheet de resguardo (Bloque 3 de 8C).
+
+### L-8C-04 — Los nodos HTTP Request no reciben auto-asignación de credencial al crear vía SDK
+Complemento de L-8C-01: al crear un workflow vía SDK, n8n informa explícitamente que
+los nodos HTTP Request fueron "skipped during credential auto-assignment" y que sus
+credenciales deben configurarse manualmente. Hay que asignarles la credencial a mano
+siempre (en 8C, la credencial OAuth de Google Sheets a los dos nodos HTTP del resguardo).
+
+**Verificado:** 2026-06-01, creación del workflow de resguardo y del test de escritura.
+
+### L-8C-05 — Validar el supuesto técnico más riesgoso con un workflow mínimo antes de construir el completo
+Antes de construir el workflow de resguardo (8 nodos), se creó un workflow mínimo de
+un solo nodo HTTP que escribió una celda de prueba en el Sheet, para validar el único
+supuesto incierto: que la credencial OAuth tuviera permiso de escritura sobre el Sheet.
+Confirmado eso, el workflow completo se construyó con confianza. Si hubiera fallado por
+permisos, se habría detectado sin haber invertido en los 8 nodos.
+
+**Implicación:** ante un supuesto técnico riesgoso y aislable (permisos, conectividad,
+formato de respuesta de una API externa), construir primero una prueba mínima que
+valide solo ese supuesto, antes de invertir en el artefacto completo.
+
+**Verificado:** 2026-06-01, test `vita_w8c_test_escritura_sheet__TEST` previo al resguardo.

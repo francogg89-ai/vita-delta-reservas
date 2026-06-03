@@ -3,8 +3,8 @@
 Lista de cambios y configuraciones a aplicar antes del despliegue de
 producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
 
-**Estado del archivo:** actualizado al cierre de Etapa 8B (sesión 2026-05-30).
-Items cerrados durante Etapas 6D, 7A, 7B, 8A y 8B listados en los resúmenes de abajo;
+**Estado del archivo:** actualizado al cierre de Etapa 8C (sesión 2026-06-01).
+Items cerrados durante Etapas 6D, 7A, 7B, 8A, 8B y 8C listados en los resúmenes de abajo;
 detalle histórico de los items 6D en el Apéndice al final del documento.
 
 ---
@@ -68,6 +68,23 @@ para el primer write); para uso diario el workflow debe quedar activo. Ver
 `8B_CIERRE.md` §10.
 
 **Bitácora / cierres recientes:** `8A_CIERRE.md` (entorno OPS), `8B_CIERRE.md` (capa de carga).
+
+## Items cerrados / tocados en Etapa 8C — resumen
+
+| Item | Estado | Bloque que lo cerró | Referencia |
+|---|---|---|---|
+| Calendarios visuales (HTML operativo + HTML limpieza + Sheet resguardo, solo lectura) | ✅ Cerrado en TEST | 8C, validado en TEST | `8C_CIERRE.md` |
+| Resguardo vía n8n+HTTP a API REST de Sheets, NO Apps Script | ✅ Decidido | 8C Bloque 3 | D-8C-22 |
+| Item 3.1 (notificación a Jennifer por reserva próxima) → formalizado como 8C-bis | 🟡 Diferido | 8C diseño | D-8C-21, §3.1 |
+
+**Pendiente nuevo de 8C (no de schema):** **smoke read-only en OPS** de los tres
+calendarios (derivar a OPS, verificar con datos reales, decidir activación). Los tres
+workflows quedan validados en TEST e inactivos. 8C no escribe en tablas
+transaccionales, así que el smoke es de bajo riesgo. Ver `8C_CIERRE.md` §8.
+
+**Pendiente diferido de 8C:** **8C-bis — Alerta por reserva próxima** (recoge el item
+3.1 de este documento), trabajo posterior independiente con documento propio; canal
+mail o Telegram a decidir. Ver §3.1 actualizado y `8C_CIERRE.md` §10.
 
 **Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H7 cerrados; H8 cerrado).
 **Cierre Etapa 7A:** `7A_CIERRE.md`.
@@ -407,6 +424,8 @@ Tipo: "Reserva nueva confirmada dentro de tu semana"
 
 **Origen:** discusión del Bloque 20, Fase 3 (decisión de diseño confirmada
 por Franco — Jennifer necesita updates cuando la semana cambia).
+
+**Actualización (8C, 2026-06-01):** este pendiente quedó formalizado en el diseño de 8C como **Bloque 4 opcional / 8C-bis — Alerta por reserva próxima** (D-8C-21), explícitamente fuera del alcance del cierre de 8C (`8C_CIERRE.md`) y como trabajo posterior independiente con documento propio. Definiciones acordadas en 8C: dispara post-`confirmar_reserva` OK si `fecha_checkin ∈ [hoy, hoy+7]`; destinatarios equipo operativo y Jennifer; **no toca schema**. Canal a decidir entre **mail** (con regla de notificación en el celular de cada uno) o **Telegram** (push vía bot, nodo nativo de n8n) — NO requiere esperar la decisión de WhatsApp, que es comunicación externa con huéspedes (no la alerta interna). Engancha en el punto de extensión de 8B, junto con el disparo automático del Sheet de resguardo de 8C (Forma A: 8B invoca el workflow). Nota: los calendarios HTML de 8C (operativo y limpieza) **no** dependen de esta alerta ni de ningún disparo — son ventanas en vivo que se arman al abrir la URL y siempre muestran el estado actual; la alerta es una mejora de robustez (que algo avise sin tener que mirar), no un requisito de los calendarios.
 
 ### 3.2 Endpoint obligatorio antes de web pública — `consultar_disponibilidad_precio`
 
