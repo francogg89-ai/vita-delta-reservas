@@ -8,23 +8,27 @@ Antes de trabajar, leer en este orden:
 2. Docs/Operacional/DECISIONES_NO_REABRIR.md
 3. Docs/Implementacion/6B_SCHEMA_SQL.md (schema canónico actual: **v1.7.3**)
 4. Docs/Arquitectura/ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md (diseño Etapa 8 — arranque OPS; subetapas 8A-8D)
-5. Docs/Arquitectura/ARQUITECTURA_ETAPA_8C_CALENDARIOS_VISUALES.md (diseño Etapa 8C — calendarios visuales; **v1.3**)
-6. Docs/Bitacora/8C_CIERRE.md (cierre formal Etapa 8C — tres calendarios validados en TEST; smoke OPS y 8C-bis posteriores)
-7. Docs/Arquitectura/ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md (diseño Etapa 8B — capa de carga interna; **v3.5**)
-8. Docs/Bitacora/8B_CIERRE.md (cierre formal Etapa 8B — capa de carga validada en TEST + smoke OPS con primera reserva real)
-9. Docs/Bitacora/8A_CIERRE.md (cierre formal Etapa 8A — levantamiento del entorno OPS)
-10. Docs/Bitacora/7E_CIERRE.md (cierre formal Etapa 7E — endurecimiento de permisos Data API en DEV)
-11. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
-12. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
-13. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
-14. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
-15. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
-16. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
-17. Docs/Implementacion/6B_PLAN_FASES.md
-18. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a PROD)
-19. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
-20. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
-21. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
+5. Docs/Arquitectura/ARQUITECTURA_ETAPA_8D_BLOQUEOS_OPERATIVOS.md (diseño Etapa 8D — capa de bloqueos; **v1.1**)
+6. Docs/Bitacora/8D_CIERRE.md (cierre formal Etapa 8D — bloqueos validados en TEST + OPS; **cierra la Etapa 8 completa**)
+7. Docs/Arquitectura/ARQUITECTURA_ETAPA_8C_CALENDARIOS_VISUALES.md (diseño Etapa 8C — calendarios visuales; **v1.3**)
+8. Docs/Bitacora/8C_CIERRE.md (cierre formal Etapa 8C — tres calendarios validados en TEST y activos en OPS; 8C-bis posterior)
+9. Docs/Arquitectura/ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md (diseño Etapa 8B — capa de carga interna; **v3.5**)
+10. Docs/Bitacora/8B_CIERRE.md (cierre formal Etapa 8B — capa de carga validada en TEST + smoke OPS con primera reserva real)
+11. Docs/Bitacora/8A_CIERRE.md (cierre formal Etapa 8A — levantamiento del entorno OPS)
+12. Docs/Bitacora/7E_CIERRE.md (cierre formal Etapa 7E — endurecimiento de permisos Data API en DEV)
+13. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
+14. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
+15. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
+16. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
+17. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
+18. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
+19. Docs/Implementacion/6B_PLAN_FASES.md
+20. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a PROD)
+21. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
+22. Docs/Bitacora/8D_EJECUCION.md (bitácora de ejecución de 8D, si necesitás el detalle de construcción/incidencias)
+23. Docs/Bitacora/8C_EJECUCION.md (bitácora de ejecución de 8C)
+24. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
+25. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
 
 No cargar contexto histórico largo salvo pedido explícito del usuario.
 
@@ -193,30 +197,38 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - Artefactos: workflows `__TEST`/`__OPS`/`__TEMPLATE` (sanitizado). Decisiones D-8B-01 a D-8B-21; lecciones L-8B-01 a L-8B-07. Diseño: `ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md v3.5`. Documento de cierre: `8B_CIERRE.md`.
 - **Pendiente operativo:** activar el workflow `__OPS` para uso por URL sin ejecución manual (el smoke se hizo con ejecución observada).
 
-**Etapa 8C — Calendarios visuales por evento ✅ Cerrada en TEST (2026-06-01):**
+**Etapa 8C — Calendarios visuales por evento ✅ Cerrada (2026-06-01, TEST + OPS):**
 
-- **Tres calendarios derivados de solo lectura** desde Supabase (fuente de verdad), sin tocar schema ni funciones del motor. Cero escrituras en tablas transaccionales; ninguna llamada a las funciones del motor. OPS no tocado.
-- **HTML operativo** (Franco/Rodrigo/Vicky/Remo): grilla día×cabaña 120 días con pestañas por mes; reservas confirmadas/activas + bloqueos; montos/horarios/teléfono. `vita_w8c_html_operativo__TEST` (id `8vFm5cb4vrhwMCi5`, 6 nodos, inactivo).
-- **HTML limpieza** (Jennifer): grilla 7 días, **sin montos**, con mascotas y notas operativas. Basic Auth propia y separada (D-8C-20). `vita_w8c_html_limpieza__TEST` (id `OcLCHBVfatqr8ljs`, 7 nodos, inactivo).
-- **Sheet de resguardo**: operativo (CON montos) volcado a un Google Sheet como respaldo offline; grilla con meses apilados, sin colores, clear+write vía HTTP a la API REST de Sheets (**NO Apps Script** — D-8C-22). Disparo manual, autónomo para invocación futura desde 8B. `vita_w8c_sheet_resguardo__TEST` (id `ufvxuLE9C2JiCUpi`, 8 nodos, inactivo).
+- **Tres calendarios derivados de solo lectura** desde Supabase (fuente de verdad), sin tocar schema ni funciones del motor. Cero escrituras en tablas transaccionales; ninguna llamada a las funciones del motor.
+- **HTML operativo** (Franco/Rodrigo/Vicky/Remo): grilla día×cabaña 120 días con pestañas por mes; reservas confirmadas/activas + bloqueos; montos/horarios/teléfono. `vita_w8c_html_operativo` (TEST id `8vFm5cb4vrhwMCi5`; derivado a OPS y activo).
+- **HTML limpieza** (Jennifer): grilla 7 días, **sin montos**, con mascotas y notas operativas. Basic Auth propia y separada (D-8C-20). `vita_w8c_html_limpieza` (TEST id `OcLCHBVfatqr8ljs`; derivado a OPS y activo).
+- **Sheet de resguardo**: operativo (CON montos) volcado a un Google Sheet como respaldo offline; grilla con meses apilados, sin colores, clear+write vía HTTP a la API REST de Sheets (**NO Apps Script** — D-8C-22). Disparo manual, autónomo para invocación futura desde 8B. `vita_w8c_sheet_resguardo` (TEST id `ufvxuLE9C2JiCUpi`).
 - **Aclaración clave:** los HTML son **ventanas en vivo** (se arman en cada visita a la URL, siempre muestran el estado actual); NO necesitan disparo. Solo el Sheet de resguardo es una foto estática que se regenera por ejecución.
 - Lógica de pintado en capa de presentación: operativo **rojo > gris > verde > blanco**; limpieza **rojo > gris > amarillo (salida) > verde > blanco**. Detección de salida incluye `confirmada`/`activa`/`completada` (4ta query sobre `reservas`); bloqueo con `EXISTS` sin asumir unicidad (totales `id_cabana IS NULL` fuera del EXCLUDE); fechas normalizadas a `YYYY-MM-DD`.
-- **Validación funcional completa en TEST** con batería sembrada (reservas vía 8B, bloqueos vía W6 `__TEST`). **Smoke read-only en OPS: pendiente** (workflows quedan en TEST hasta promover).
+- **Validación funcional completa en TEST** y **smoke OPS ejecutado**: los HTML operativo y limpieza están **activos y en uso real** por el equipo (resguardo OPS manual).
 - **8C-bis (alerta por reserva próxima): fuera de alcance del cierre**, trabajo posterior independiente con documento propio (no reabre `8C_CIERRE.md`); notificación a Rodrigo y Jennifer por mail o Telegram, canal a decidir.
-- Artefactos: 3 workflows `__TEST` + 2 templates sanitizados (`vita_w8c_html_operativo__TEMPLATE.json`, `vita_w8c_sheet_resguardo__TEMPLATE.json`) + nodos Code versionados. Decisiones D-8C-01 a D-8C-23; lecciones L-8C-01 a L-8C-05. Diseño: `ARQUITECTURA_ETAPA_8C_CALENDARIOS_VISUALES.md v1.3`. Documento de cierre: `8C_CIERRE.md`.
+- Artefactos: workflows `__TEST`/`__OPS` + 2 templates sanitizados (`vita_w8c_html_operativo__TEMPLATE.json`, `vita_w8c_sheet_resguardo__TEMPLATE.json`) + nodos Code versionados. Decisiones D-8C-01 a D-8C-23; lecciones L-8C-01 a L-8C-05. Diseño: `ARQUITECTURA_ETAPA_8C_CALENDARIOS_VISUALES.md v1.3`. Cierre: `8C_CIERRE.md`. Ejecución: `8C_EJECUCION.md`.
 
-**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV, TEST y OPS están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B con paridad 10/10; OPS reconstruido en 8A con paridad P01-P10 10/10). 8C no modificó el schema: los calendarios son solo lectura.
+**Etapa 8D — Capa de bloqueos operativos ✅ Cerrada (2026-06-04, TEST + OPS) — cierra la Etapa 8:**
+
+- **Formulario n8n** (Form Trigger, Basic Auth propia, usable desde celular) que invoca `crear_bloqueo()` en **una sola acción** (sin cadena, sin pagos, sin compensación; sin INSERT directo; sin tocar schema). El bloqueo aparece en gris en los calendarios de 8C.
+- **Contrato verificado read-only** (TEST, 2026-06-03): la función valida TODO (cabaña, fechas, motivo, y los tres conflictos: reserva confirmada/activa, pre-reserva vigente, bloqueo solapado) → el formulario es solo UX. Un bloqueo NO convive con reservas (las rechaza). Concurrencia resuelta en la función; triple protección de solapamiento.
+- **Campos:** cabaña (desplegable, nombre→id 1-5, **sin opción TODAS** — D-8D-03), fecha desde, fecha hasta/liberación (modelo `[)`, exclusive), motivo (5 valores del CHECK), descripción opcional, creado por. Una cabaña por vez; varias = varias cargas (D-8D-02).
+- **Manejo de errores en dos familias:** conflictos unificados ("esas fechas no están disponibles", sin exponer IDs — D-8D-04/05); errores de entrada diferenciados. **Éxito en lenguaje humano** (último día inclusive + día de liberación — D-8D-08).
+- **8D SOLO CREA bloqueos** (D-8D-09): corregir o levantar uno requiere intervención manual controlada (`activo=false` vía SQL); no hay desbloqueo desde el formulario. Riesgo aceptado para el MVP.
+- **Validado en TEST y operativo en OPS:** `vita_w8d_bloqueo__TEST` (id `GIfBlI6xCnrkH2Y4`, 9 nodos) y `vita_w8d_bloqueo__OPS` (activo, primer bloqueo real creado). Incidencia clave (L-8D-01): el nodo Postgres devuelve el resultado de la función envuelto en la columna `resultado`; el Normalize debe leer `item.resultado.ok`, no `item.ok` (un "Problema técnico" inicial era esto; la base nunca falló).
+- Artefactos: workflows `__TEST`/`__OPS` + template sanitizado `vita_w8d_bloqueo__TEMPLATE.json` + nodos Code. Decisiones D-8D-01 a D-8D-09; lecciones L-8D-01 a L-8D-03. Diseño: `ARQUITECTURA_ETAPA_8D_BLOQUEOS_OPERATIVOS.md v1.1`. Cierre: `8D_CIERRE.md`. Ejecución: `8D_EJECUCION.md`.
+
+**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV, TEST y OPS están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B con paridad 10/10; OPS reconstruido en 8A con paridad P01-P10 10/10). Ni 8C ni 8D modificaron el schema: los calendarios son solo lectura y los bloqueos usan `crear_bloqueo()` tal cual.
 
 **Próxima etapa — opciones disponibles (orden sugerido):**
 
-Con DEV, TEST, OPS, 6D, 7A, 7B, 7C, 7D, 7E, 8A, 8B y 8C (en TEST) cerradas, el sistema está **operativo y tomando reservas reales** y los tres calendarios visuales están validados en TEST. Las opciones a priorizar por Franco son:
+Con DEV, TEST, OPS, 6D, 7A, 7B, 7C, 7D, 7E, **8A, 8B, 8C y 8D cerradas, la Etapa 8 (operación real interna) está completa**. El equipo opera el complejo con tres acciones autoservicio sobre OPS: cargar reservas, ver el estado en los calendarios y crear bloqueos. Las opciones a priorizar por Franco de acá en más:
 
-- **Smoke read-only de 8C en OPS (siguiente natural):** derivar los tres calendarios a OPS (credencial OPS y, en el resguardo, un Sheet de OPS), abrir endpoints y verificar con datos reales. Riesgo mínimo: 8C no escribe en tablas transaccionales. Luego decidir activación.
 - **8C-bis — Alerta por reserva próxima** (trabajo independiente, documento propio): dispara post-`confirmar_reserva` si el check-in cae en [hoy, hoy+7]; notificación a Rodrigo y Jennifer por mail o Telegram (no requiere esperar WhatsApp, que es comunicación externa). Engancha en el punto de extensión de 8B, junto con el disparo automático del resguardo.
-- **Activar el workflow `__OPS` de 8B** para uso por URL sin ejecución manual (pendiente operativo).
-- **8D — Bloqueos operativos + cierre de Etapa 8.**
+- **Edición / baja de bloqueos:** hoy 8D solo crea (D-8D-09); levantar o corregir un bloqueo es manual. Si se vuelve frecuente, sería una capa posterior con su propio formulario.
+- **Apertura al exterior (etapas futuras grandes, sobre TEST primero):** webhook MercadoPago real, bot conversacional (Claude API), web pública, WhatsApp/Instagram (Meta API), y eventualmente PROD público.
 - Residual de permisos de tabla en DEV (hallazgo A5 / pendiente 1.7): revocar o aceptar como definitivo. No urgente; OPS ya nació sin ese problema.
-- Integraciones con consumidores reales sobre TEST: webhook MercadoPago, bot, frontend — siempre sobre TEST primero.
 
 No avanzar a PROD público, dashboard, MercadoPago real, bot o frontend público sin decisión explícita del usuario y sin revisar primero `Pendiente_pre_produccion.md`.
 

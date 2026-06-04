@@ -1,0 +1,360 @@
+{
+  "name": "vita_w8d_bloqueo__OPS",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "basicAuth",
+        "formTitle": "Crear bloqueo de cabaña — Vita Delta",
+        "formDescription": "Bloquea una cabaña por un rango de fechas. Solo crea bloqueos: para corregir o levantar uno, avisar al administrador.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Cabaña",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Bamboo"
+                  },
+                  {
+                    "option": "Madre Selva"
+                  },
+                  {
+                    "option": "Arrebol"
+                  },
+                  {
+                    "option": "Guatemala"
+                  },
+                  {
+                    "option": "Tokio"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Fecha desde",
+              "fieldType": "date",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Fecha hasta / liberación",
+              "fieldType": "date",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Motivo",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Mantenimiento"
+                  },
+                  {
+                    "option": "Uso propio"
+                  },
+                  {
+                    "option": "Tormenta / clima"
+                  },
+                  {
+                    "option": "Overbooking"
+                  },
+                  {
+                    "option": "Otro"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Descripción",
+              "fieldType": "textarea"
+            },
+            {
+              "fieldLabel": "Creado por",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Franco"
+                  },
+                  {
+                    "option": "Rodrigo"
+                  },
+                  {
+                    "option": "Vicky"
+                  },
+                  {
+                    "option": "Remo"
+                  }
+                ]
+              },
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Crear bloqueo",
+          "path": "PATH_PLACEHOLDER",
+          "useWorkflowTimezone": true
+        }
+      },
+      "id": "fd551ac7-8d62-492e-88d8-e55b9aae3e7c",
+      "name": "Form Bloqueo",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        96
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "name": "CRED_BASIC_AUTH_BLOQUEO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Validar/Normalizar Input — 8D bloqueos =====\nconst TEST_OPS = 'ops'; // marcador de entorno: 'test' o 'ops'\n\nconst MAPA_CABANAS = { 'Bamboo': 1, 'Madre Selva': 2, 'Arrebol': 3, 'Guatemala': 4, 'Tokio': 5 };\nconst MAPA_MOTIVO = {\n  'Mantenimiento': 'mantenimiento',\n  'Uso propio': 'uso_propio',\n  'Tormenta / clima': 'tormenta',\n  'Overbooking': 'overbooking',\n  'Otro': 'otro'\n};\n\nconst f = $input.first().json;\n\nconst cabanaLabel = (f['Cabaña'] || f['Cabana'] || '').toString().trim();\nconst fechaDesde  = (f['Fecha desde'] || '').toString().trim().slice(0, 10);\nconst fechaHasta  = (f['Fecha hasta / liberación'] || f['Fecha hasta'] || '').toString().trim().slice(0, 10);\nconst motivoLabel = (f['Motivo'] || '').toString().trim();\nconst descripcion = (f['Descripción'] || f['Descripcion'] || '').toString().trim();\nconst operadorLabel = (f['Creado por'] || '').toString().trim();\n\nconst idCabana = MAPA_CABANAS[cabanaLabel];\nconst motivo = MAPA_MOTIVO[motivoLabel];\nconst operador = operadorLabel.toLowerCase().replace(/\\s+/g, '');\n\nlet errorCapa = null;\nif (!cabanaLabel || idCabana === undefined) errorCapa = 'cabana';\nelse if (!fechaDesde || !fechaHasta) errorCapa = 'fechas_faltan';\nelse if (fechaHasta <= fechaDesde) errorCapa = 'fechas_orden';\nelse if (!motivo) errorCapa = 'motivo';\nelse if (!operador) errorCapa = 'operador';\n\nconst sourceEvent = 'n8n_' + TEST_OPS + '_w8d_bloqueo_' + (operador || 'desconocido') + '_manual';\n\nreturn [{\n  json: {\n    ok_capa: errorCapa === null,\n    error_capa: errorCapa,\n    id_cabana: idCabana !== undefined ? String(idCabana) : '',\n    cabana_label: cabanaLabel,\n    fecha_desde: fechaDesde,\n    fecha_hasta: fechaHasta,\n    motivo: motivo || '',\n    motivo_label: motivoLabel,\n    descripcion: descripcion,\n    creado_por: operador,\n    source_event: sourceEvent\n  }\n}];\n"
+      },
+      "id": "3a0a206a-1ca7-41a6-a8b1-38f65963ac27",
+      "name": "Validar y Normalizar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok_capa }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": true
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7bf530bf-3507-47a6-acb0-350ebc5a1ee7",
+      "name": "IF validacion capa",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Build Payload — 8D bloqueos =====\nconst v = $input.first().json;\nconst payload = {\n  id_cabana:    v.id_cabana,\n  fecha_desde:  v.fecha_desde,\n  fecha_hasta:  v.fecha_hasta,\n  motivo:       v.motivo,\n  descripcion:  v.descripcion || '',\n  creado_por:   v.creado_por,\n  source_event: v.source_event\n};\nreturn [{ json: { payload, ctx: {\n  cabana_label: v.cabana_label,\n  fecha_desde: v.fecha_desde,\n  fecha_hasta: v.fecha_hasta,\n  motivo_label: v.motivo_label\n} } }];\n"
+      },
+      "id": "5361862b-6538-4dfc-a0ab-600d3eb94ebe",
+      "name": "Build Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT crear_bloqueo('{{ JSON.stringify($json.payload) }}'::jsonb) AS resultado;",
+        "options": {}
+      },
+      "id": "d2edc31f-f62d-4e89-bfd6-58b209615722",
+      "name": "PG: crear_bloqueo",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        896,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "name": "CRED_POSTGRES_OPS"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Normalize — envelope tras crear_bloqueo =====\nlet raw;\ntry { raw = $input.first().json; } catch (e) { raw = null; }\n\n// El nodo Postgres devuelve el jsonb dentro de la columna 'resultado'.\n// Si no viene, es error técnico del nodo.\nconst item = raw && raw.resultado !== undefined ? raw.resultado : raw;\n\nlet ctx = {};\ntry { ctx = $('Build Payload').first().json.ctx || {}; } catch (e) { ctx = {}; }\n\nconst tieneOk = item && Object.prototype.hasOwnProperty.call(item, 'ok');\nconst huboErrorTecnico = !item || !tieneOk;\n\nlet envelope;\nif (huboErrorTecnico) {\n  envelope = { tipo: 'tecnico', ok: false };\n} else if (item.ok === true) {\n  envelope = { tipo: 'exito', ok: true, id_bloqueo: item.id_bloqueo, id_cabana: item.id_cabana, tipo_bloqueo: item.tipo_bloqueo };\n} else {\n  const err = item.error;\n  const conflictos = ['conflicto_con_reserva', 'conflicto_con_prereserva', 'bloqueo_solapado'];\n  const familia = conflictos.includes(err) ? 'conflicto' : 'entrada';\n  envelope = { tipo: 'negocio', ok: false, error: err, familia };\n}\nenvelope.ctx = ctx;\nreturn [{ json: envelope }];"
+      },
+      "id": "ac94d52c-ca53-4906-9c83-88898cc83a4a",
+      "name": "Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Build Response — mensaje único al operador =====\nconst e = $input.first().json;\nconst ctx = e.ctx || {};\n\nfunction fmtFecha(ymd) {\n  if (!ymd) return '';\n  const p = String(ymd).slice(0,10).split('-');\n  if (p.length !== 3) return ymd;\n  return p[2] + '/' + p[1];\n}\nfunction diaAnterior(ymd) {\n  if (!ymd) return '';\n  const d = new Date(String(ymd).slice(0,10) + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() - 1);\n  return d.toISOString().slice(0,10);\n}\n\nlet title, message;\n\nif (e.tipo === 'exito') {\n  const ultimoInclusive = diaAnterior(ctx.fecha_hasta);\n  title = 'Bloqueo creado';\n  message = ctx.cabana_label + ' bloqueada desde el ' + fmtFecha(ctx.fecha_desde) + ' hasta el ' + fmtFecha(ultimoInclusive) + ' inclusive. Se libera el ' + fmtFecha(ctx.fecha_hasta) + '. (Motivo: ' + ctx.motivo_label + '. N° ' + e.id_bloqueo + '.)';\n} else if (e.tipo === 'negocio' && e.familia === 'conflicto') {\n  title = 'No se pudo crear el bloqueo';\n  message = 'Esas fechas no están disponibles para bloquear. Revisá el calendario.';\n} else if (e.tipo === 'negocio' && e.familia === 'entrada') {\n  title = 'Revisá los datos';\n  switch (e.error) {\n    case 'fechas_invalidas':\n      message = \"La fecha 'hasta / liberación' tiene que ser posterior a la fecha 'desde'.\"; break;\n    case 'cabana_no_existe':\n      message = 'La cabaña seleccionada no es válida.'; break;\n    case 'motivo_invalido':\n      message = 'El motivo seleccionado no es válido.'; break;\n    case 'payload_invalido':\n      message = 'Faltan datos obligatorios. Completá cabaña, fechas, motivo y operador.'; break;\n    default:\n      message = 'Hay un dato inválido. Revisá el formulario.';\n  }\n} else {\n  title = 'Problema técnico';\n  message = 'No se pudo registrar el bloqueo por un problema técnico. Reintentá en unos minutos.';\n}\n\nreturn [{ json: { completionTitle: title, completionMessage: message } }];\n"
+      },
+      "id": "c7658fa3-b8e2-4b8a-963c-1f2820e9f891",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "={{ $json.completionTitle }}",
+        "completionMessage": "={{ $json.completionMessage }}",
+        "options": {}
+      },
+      "id": "b70c666a-c5c1-4a8f-bf5e-5cc0c1b594fa",
+      "name": "Form Ending",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1568,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const v = $input.first().json;\nconst map = { fechas_orden: 'fechas_invalidas', fechas_faltan: 'payload_invalido', cabana: 'cabana_no_existe', motivo: 'motivo_invalido', operador: 'payload_invalido' };\nconst err = map[v.error_capa] || 'payload_invalido';\nreturn [{ json: { tipo: 'negocio', ok: false, error: err, familia: 'entrada', ctx: { cabana_label: v.cabana_label, fecha_desde: v.fecha_desde, fecha_hasta: v.fecha_hasta, motivo_label: v.motivo_label } } }];\n"
+      },
+      "id": "a5ad615e-2f3c-4ded-b393-8562aadef06b",
+      "name": "Error Capa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        192
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Form Bloqueo": {
+      "main": [
+        [
+          {
+            "node": "Validar y Normalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar y Normalizar": {
+      "main": [
+        [
+          {
+            "node": "IF validacion capa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF validacion capa": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Capa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "PG: crear_bloqueo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: crear_bloqueo": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Form Ending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Capa": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "tags": []
+}

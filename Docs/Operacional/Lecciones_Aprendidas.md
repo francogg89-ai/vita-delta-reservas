@@ -1208,3 +1208,51 @@ formato de respuesta de una API externa), construir primero una prueba mínima q
 valide solo ese supuesto, antes de invertir en el artefacto completo.
 
 **Verificado:** 2026-06-01, test `vita_w8c_test_escritura_sheet__TEST` previo al resguardo.
+
+## Lecciones de la capa de bloqueos — Etapa 8D
+
+### L-8D-01 — El nodo Postgres devuelve el resultado de una función envuelto en la columna
+Cuando un nodo Postgres ejecuta `SELECT mi_funcion(...) AS resultado`, el JSON que devuelve
+la función llega **dentro de la columna** (`item.resultado`), no en la raíz del item. Un
+nodo Code posterior que lea `item.ok` no encuentra nada y, si usa esa ausencia para
+detectar "error técnico", clasifica un éxito como fallo.
+
+**Síntoma real en 8D:** el formulario mostraba "Problema técnico" aunque el bloqueo se
+creaba bien en la base (la función devolvía `ok: true`). El bug estaba en el nodo Normalize,
+que leía `item.ok` en vez de `item.resultado.ok`.
+
+**Implicación:** al consumir el output de un nodo Postgres que llama una función vía
+`SELECT funcion(...) AS alias`, desenvolver la columna antes de leer sus campos:
+`const item = raw && raw.alias !== undefined ? raw.alias : raw;`. La base puede estar
+funcionando perfecto aunque la UI muestre error — verificar el OUTPUT del nodo Postgres
+(no solo el mensaje final) antes de concluir que "el motor falló".
+
+**Verificado:** 2026-06-04, bug observado y corregido en el Normalize de 8D.
+
+### L-8D-02 — Pasar JSON a una función SQL: interpolación funciona, parametrizado es más robusto
+Para pasar un payload JSON a una función desde el nodo Postgres, la interpolación
+`'{{ JSON.stringify($json.payload) }}'::jsonb` funciona en la mayoría de los casos, pero la
+query parametrizada (`SELECT funcion($1::jsonb)` + Query Parameters con
+`{{ JSON.stringify($json.payload) }}`) es más robusta ante comillas simples y caracteres
+especiales en el contenido (ej. una descripción con apóstrofo). Recomendada cuando el
+payload incluye texto libre.
+
+**Nota:** la query interpolada NO se puede probar pegándola en el SQL Editor de Supabase
+(las `{{ }}` son sintaxis de n8n, no SQL); la prueba real es ejecutar el workflow desde n8n.
+
+**Verificado:** 2026-06-04, nodo `PG: crear_bloqueo` de 8D.
+
+### L-8D-03 — Al promover a OPS, revisar marcadores de entorno embebidos en el código (no solo credenciales)
+Al duplicar un workflow para OPS, además de cambiar la credencial Postgres hay que revisar:
+(a) marcadores de entorno embebidos en nodos Code (en 8D, la constante `TEST_OPS = 'test'`
+que arma el `source_event` — si no se cambia a `'ops'`, los registros reales quedan
+etiquetados "test"); (b) el `path` del trigger (para no colisionar con el workflow de TEST
+en la misma instancia); (c) la Basic Auth (propia de OPS).
+
+**Consecuencia de olvidar el marcador:** no rompe nada funcional (el bloqueo se crea bien),
+pero ensucia la trazabilidad (un registro real con `source_event` "test"). Corregirlo
+después implica escritura directa a OPS y el `log_cambios` asociado queda con la etiqueta
+vieja igual, así que conviene revisarlo ANTES de la primera ejecución en OPS.
+
+**Verificado:** 2026-06-04, promoción de 8D a OPS (un bloqueo temprano quedó con marcador
+'test', aceptado como está; los siguientes correctos).

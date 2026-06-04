@@ -3,8 +3,8 @@
 Lista de cambios y configuraciones a aplicar antes del despliegue de
 producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
 
-**Estado del archivo:** actualizado al cierre de Etapa 8C (sesión 2026-06-01).
-Items cerrados durante Etapas 6D, 7A, 7B, 8A, 8B y 8C listados en los resúmenes de abajo;
+**Estado del archivo:** actualizado al cierre de Etapa 8D (sesión 2026-06-04). **Con 8D se cierra la Etapa 8 completa** (operación real interna).
+Items cerrados durante Etapas 6D, 7A, 7B, 8A, 8B, 8C y 8D listados en los resúmenes de abajo;
 detalle histórico de los items 6D en el Apéndice al final del documento.
 
 ---
@@ -73,18 +73,33 @@ para el primer write); para uso diario el workflow debe quedar activo. Ver
 
 | Item | Estado | Bloque que lo cerró | Referencia |
 |---|---|---|---|
-| Calendarios visuales (HTML operativo + HTML limpieza + Sheet resguardo, solo lectura) | ✅ Cerrado en TEST | 8C, validado en TEST | `8C_CIERRE.md` |
+| Calendarios visuales (HTML operativo + HTML limpieza + Sheet resguardo, solo lectura) | ✅ Cerrado en TEST + OPS | 8C, validado en TEST y activo en OPS | `8C_CIERRE.md` |
 | Resguardo vía n8n+HTTP a API REST de Sheets, NO Apps Script | ✅ Decidido | 8C Bloque 3 | D-8C-22 |
+| Smoke OPS de 8C (derivar, verificar, activar) | ✅ Cerrado | posterior a 8C | HTML operativo y limpieza activos y en uso real |
 | Item 3.1 (notificación a Jennifer por reserva próxima) → formalizado como 8C-bis | 🟡 Diferido | 8C diseño | D-8C-21, §3.1 |
 
-**Pendiente nuevo de 8C (no de schema):** **smoke read-only en OPS** de los tres
-calendarios (derivar a OPS, verificar con datos reales, decidir activación). Los tres
-workflows quedan validados en TEST e inactivos. 8C no escribe en tablas
-transaccionales, así que el smoke es de bajo riesgo. Ver `8C_CIERRE.md` §8.
+**Smoke OPS de 8C: ✅ ejecutado.** Los HTML operativo y limpieza se derivaron a OPS
+(credencial OPS, paths `w8c-op-ops`/`w8c-limp-ops`, Sheet de OPS para el resguardo) y se
+**activaron**; el equipo los usa en producción. El resguardo OPS es manual.
 
 **Pendiente diferido de 8C:** **8C-bis — Alerta por reserva próxima** (recoge el item
 3.1 de este documento), trabajo posterior independiente con documento propio; canal
 mail o Telegram a decidir. Ver §3.1 actualizado y `8C_CIERRE.md` §10.
+
+## Items cerrados / tocados en Etapa 8D — resumen
+
+| Item | Estado | Bloque que lo cerró | Referencia |
+|---|---|---|---|
+| Capa de bloqueos operativos (Form Trigger que invoca `crear_bloqueo`) | ✅ Cerrado en TEST + OPS | 8D, validado en TEST y activo en OPS | `8D_CIERRE.md` |
+| Verificación read-only del contrato de `crear_bloqueo` | ✅ Cerrado | 8D, contra TEST | `8D_CIERRE.md` §3 |
+| Primer bloqueo real creado en OPS | ✅ Cerrado | 8D smoke OPS | `8D_CIERRE.md` §6.2 |
+| **Etapa 8 completa** (8A entorno + 8B reservas + 8C calendarios + 8D bloqueos) | ✅ Cerrada | 8D | `8D_CIERRE.md` §11 |
+
+**Pendiente nuevo de 8D (no de schema):** **edición / baja de bloqueos**. 8D solo crea
+(D-8D-09); levantar o corregir un bloqueo es manual (`activo=false` vía SQL aprobado). Si
+se vuelve frecuente, sería una capa posterior con su propio formulario. No urgente.
+
+**Bitácoras / cierres recientes:** `8C_CIERRE.md`, `8D_CIERRE.md`, `8D_EJECUCION.md`.
 
 **Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H7 cerrados; H8 cerrado).
 **Cierre Etapa 7A:** `7A_CIERRE.md`.

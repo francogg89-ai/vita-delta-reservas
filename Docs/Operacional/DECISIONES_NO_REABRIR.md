@@ -614,6 +614,33 @@ El Sheet de resguardo se escribe desde n8n mediante HTTP Request contra la API R
 ### D-8C-23 — Formato del resguardo: grilla con meses apilados, sin colores, clear+write
 Grilla cabañas×días (consistente con el operativo) con meses apilados verticalmente en una sola hoja (sin pestañas-por-mes en Sheets, por robustez: manejar creación/limpieza dinámica de hojas agrega fragilidad en la pieza que debe ser más confiable); sin pintado de colores (datos completos y legibles priorizados; el formato de fondos en Sheets va por otra API y es costoso/frágil); estrategia clear+write (POST `values:clear` sobre rango amplio + PUT `values:update` desde A1) para reflejar el estado actual sin residuos. Disparo manual, con el workflow diseñado autónomo para invocación futura desde el punto de extensión de 8B (post-`confirmar_reserva`). El ancho de columnas no se autoajusta (mejora opcional menor): el ancho fijado a mano se conserva entre regeneraciones porque clear+write solo toca valores, no formato.
 
+### D-8D-01 — 8D = Form Trigger que llama a `crear_bloqueo()` en una acción
+La capa de bloqueos operativos es un formulario n8n que invoca `crear_bloqueo()` una sola vez (sin cadena, sin pagos, sin compensación). El motor valida todo (cabaña, fechas, motivo, y los tres tipos de conflicto: reserva, pre-reserva, bloqueo solapado); la capa es solo UX + mensajería. Sin INSERT directo a `bloqueos`; sin tocar schema.
+
+### D-8D-02 — Una cabaña por vez; varias cabañas = varias cargas
+8D bloquea una cabaña por formulario. Para bloquear varias cabañas específicas, se cargan varios bloqueos separados. No hay selección múltiple. Evita errores parciales y compensaciones.
+
+### D-8D-03 — NO se expone el bloqueo total (`id_cabana IS NULL`) en el formulario
+El motor soporta el bloqueo total del complejo, pero NO se expone en el formulario: nunca se usó en la práctica; si hiciera falta, se cubre con cargas individuales de las 5 cabañas. La capacidad sigue existiendo en la función por si en el futuro se decide exponerla.
+
+### D-8D-04 — Mensajes de conflicto unificados; errores de entrada diferenciados
+Los tres conflictos (`conflicto_con_reserva`, `conflicto_con_prereserva`, `bloqueo_solapado`) muestran un mismo mensaje unificado ("Esas fechas no están disponibles para bloquear. Revisá el calendario."). Los errores de entrada (`fechas_invalidas`, `cabana_no_existe`, `motivo_invalido`, `payload_invalido`) llevan mensajes claros y diferenciados, porque indican qué corregir.
+
+### D-8D-05 — El mensaje de conflicto NO expone IDs ni datos de reservas/pre-reservas
+Cuando un bloqueo se rechaza por conflicto, el formulario solo informa que las fechas no están disponibles; nunca muestra IDs, nombres ni datos de las reservas/pre-reservas en conflicto.
+
+### D-8D-06 — `source_event` = `n8n_<marcador>_w8d_bloqueo_<operador>_manual`
+Convención de trazabilidad análoga a 8B. Marcador de entorno `test`/`ops` (en una constante `TEST_OPS` al inicio del nodo Validar); operador en minúscula sin espacios.
+
+### D-8D-07 — Basic Auth propia de 8D, separada de 8B y 8C
+El Form Trigger de bloqueos usa una credencial Basic Auth propia, distinta de la del formulario de carga 8B y de las de los calendarios 8C. No reutilizar credenciales entre formularios/públicos.
+
+### D-8D-08 — `fecha_hasta` exclusive; campo "Fecha hasta / liberación" + mensaje humano
+Se mantiene el modelo `[)` (fecha hasta exclusive). El campo se llama "Fecha hasta / liberación" con ayuda explícita ("ese día YA NO queda bloqueado; para bloquear 10, 11 y 12, poner desde 10 y hasta 13"), y el mensaje de éxito se expresa en lenguaje humano mostrando el último día inclusive (`fecha_hasta − 1`, solo en el texto) y el día de liberación. La validación de fechas la hace el motor.
+
+### D-8D-09 — 8D SOLO CREA bloqueos; corregir/levantar es manual controlado
+El formulario 8D solo crea bloqueos. No hay edición ni baja desde el formulario. Para corregir un bloqueo cargado por error o levantarlo antes de tiempo, se requiere intervención manual controlada (`activo=false` vía SQL aprobado, o un workflow dedicado futuro). Riesgo operativo aceptado conscientemente para el MVP; una capa de edición/baja sería una etapa posterior si se vuelve necesaria.
+
 
 - **D3** — Mantener solo `hora_checkin` y `hora_checkout` en tablas (sin "hora base" vs "hora real").
 - **D27** — Horarios = lo elegido por cliente, validado contra margen.
