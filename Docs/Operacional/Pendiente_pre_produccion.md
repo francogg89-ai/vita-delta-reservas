@@ -3,8 +3,8 @@
 Lista de cambios y configuraciones a aplicar antes del despliegue de
 producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
 
-**Estado del archivo:** actualizado al cierre de Etapa 8D (sesión 2026-06-04). **Con 8D se cierra la Etapa 8 completa** (operación real interna).
-Items cerrados durante Etapas 6D, 7A, 7B, 8A, 8B, 8C y 8D listados en los resúmenes de abajo;
+**Estado del archivo:** actualizado al cierre de la Sub-etapa 8C-bis (sesión 2026-06-04). **Con 8D se cerró la Etapa 8 completa** (operación real interna); **8C-bis** (alerta por reserva próxima, recoge el item 3.1) quedó cerrada después como sub-etapa propia.
+Items cerrados durante Etapas 6D, 7A, 7B, 8A, 8B, 8C, 8D y la sub-etapa 8C-bis listados en los resúmenes de abajo;
 detalle histórico de los items 6D en el Apéndice al final del documento.
 
 ---
@@ -76,15 +76,38 @@ para el primer write); para uso diario el workflow debe quedar activo. Ver
 | Calendarios visuales (HTML operativo + HTML limpieza + Sheet resguardo, solo lectura) | ✅ Cerrado en TEST + OPS | 8C, validado en TEST y activo en OPS | `8C_CIERRE.md` |
 | Resguardo vía n8n+HTTP a API REST de Sheets, NO Apps Script | ✅ Decidido | 8C Bloque 3 | D-8C-22 |
 | Smoke OPS de 8C (derivar, verificar, activar) | ✅ Cerrado | posterior a 8C | HTML operativo y limpieza activos y en uso real |
-| Item 3.1 (notificación a Jennifer por reserva próxima) → formalizado como 8C-bis | 🟡 Diferido | 8C diseño | D-8C-21, §3.1 |
+| Item 3.1 (notificación a Jennifer por reserva próxima) → resuelto como 8C-bis | ✅ Cerrado | 8C-bis (mail, rama lateral en 8B) | `8C-bis_CIERRE.md`, D-8Cbis-01..10, §3.1 |
 
 **Smoke OPS de 8C: ✅ ejecutado.** Los HTML operativo y limpieza se derivaron a OPS
 (credencial OPS, paths `w8c-op-ops`/`w8c-limp-ops`, Sheet de OPS para el resguardo) y se
 **activaron**; el equipo los usa en producción. El resguardo OPS es manual.
 
-**Pendiente diferido de 8C:** **8C-bis — Alerta por reserva próxima** (recoge el item
-3.1 de este documento), trabajo posterior independiente con documento propio; canal
-mail o Telegram a decidir. Ver §3.1 actualizado y `8C_CIERRE.md` §10.
+**Pendiente diferido de 8C — ✅ RESUELTO en 8C-bis:** **8C-bis — Alerta por reserva
+próxima** (recogía el item 3.1 de este documento). Cerrado el 2026-06-04 con documento
+propio `8C-bis_CIERRE.md`. Canal resuelto = **mail** (D-8Cbis-01). Ver §3.1 (marcado
+resuelto) y el resumen de 8C-bis abajo.
+
+## Items cerrados / tocados en Sub-etapa 8C-bis — resumen
+
+| Item | Estado | Bloque que lo cerró | Referencia |
+|---|---|---|---|
+| Item 3.1 — Alerta por reserva próxima a equipo + Jennifer (mail) | ✅ Cerrado | 8C-bis, TEST validado + OPS activo | `8C-bis_CIERRE.md` |
+| Canal de notificación = mail (no Telegram/WhatsApp) | ✅ Decidido | 8C-bis | D-8Cbis-01 |
+| Disparo en rama lateral desde 8B (no afecta la reserva si el mail falla) | ✅ Cerrado | 8C-bis, validado end-to-end en TEST | D-8Cbis-02, `8C-bis_CIERRE.md` §6 |
+| Privacidad por construcción (mail sin montos/huésped/teléfono/notas) | ✅ Cerrado | 8C-bis | D-8Cbis-05 |
+| Enganche publicado y activo en 8B OPS (`entorno: "ops"`, destinatarios reales) | ✅ Cerrado | 8C-bis | `8C-bis_CIERRE.md` §8 |
+
+**Estado de 8C-bis: ✅ publicado y activo en OPS.** Sub-workflow `vita_w8cbis_alerta__OPS`
+(id `fHzMFj7pGMKuYEOb`) invocado en rama lateral desde el formulario de producción
+`vita_w8b_carga_reserva__OPS`. Destinatarios reales: operativo Franco + Rodrigo, limpieza
+Jennifer. La **primera ejecución real** quedará registrada con la próxima reserva con
+check-in en la ventana [hoy, hoy+7]; la garantía de no-afectación (validada en TEST)
+protege esa corrida. Pendiente menor futuro: migrar el remitente SMTP (hoy Gmail personal
+de Franco) al mail propio de las cabañas, sin rediseño (D-8Cbis-09).
+
+**Nota sobre el pendiente operativo de 8B** (activar el formulario OPS para uso por URL):
+al cierre de 8C-bis, `vita_w8b_carga_reserva__OPS` ya está **activo y publicado** —
+ese pendiente queda cubierto.
 
 ## Items cerrados / tocados en Etapa 8D — resumen
 
@@ -414,7 +437,7 @@ SELECT cron.schedule('expirar_prereservas', '*/10 * * * *',
 
 ## 3. Notificaciones operativas (n8n)
 
-### 3.1 Notificación a Jennifer cuando pre-reserva se convierte a reserva dentro del horizonte de limpieza
+### 3.1 Notificación a Jennifer cuando pre-reserva se convierte a reserva dentro del horizonte de limpieza — ✅ RESUELTO (8C-bis, 2026-06-04)
 
 **Contexto:** `vista_limpieza_semana` muestra check-ins y check-outs de los
 próximos 7 días. `vista_calendario_semanal` muestra estado día por día.
@@ -441,6 +464,25 @@ Tipo: "Reserva nueva confirmada dentro de tu semana"
 por Franco — Jennifer necesita updates cuando la semana cambia).
 
 **Actualización (8C, 2026-06-01):** este pendiente quedó formalizado en el diseño de 8C como **Bloque 4 opcional / 8C-bis — Alerta por reserva próxima** (D-8C-21), explícitamente fuera del alcance del cierre de 8C (`8C_CIERRE.md`) y como trabajo posterior independiente con documento propio. Definiciones acordadas en 8C: dispara post-`confirmar_reserva` OK si `fecha_checkin ∈ [hoy, hoy+7]`; destinatarios equipo operativo y Jennifer; **no toca schema**. Canal a decidir entre **mail** (con regla de notificación en el celular de cada uno) o **Telegram** (push vía bot, nodo nativo de n8n) — NO requiere esperar la decisión de WhatsApp, que es comunicación externa con huéspedes (no la alerta interna). Engancha en el punto de extensión de 8B, junto con el disparo automático del Sheet de resguardo de 8C (Forma A: 8B invoca el workflow). Nota: los calendarios HTML de 8C (operativo y limpieza) **no** dependen de esta alerta ni de ningún disparo — son ventanas en vivo que se arman al abrir la URL y siempre muestran el estado actual; la alerta es una mejora de robustez (que algo avise sin tener que mirar), no un requisito de los calendarios.
+
+**Resolución (8C-bis, 2026-06-04) — ✅ CERRADO.** Construido como sub-workflow
+`vita_w8cbis_alerta__OPS` (id `fHzMFj7pGMKuYEOb`) e invocado **en rama lateral** desde el
+formulario de carga 8B. Decisiones finales respecto de lo previsto en 8C:
+- **Canal = mail** (D-8Cbis-01), no Telegram ni WhatsApp.
+- **Contenido reducido por privacidad** (D-8Cbis-05): el mail NO incluye datos del huésped,
+  teléfono, montos ni notas (a diferencia de lo bosquejado arriba en "Mitigación
+  propuesta"). Solo informa cabaña, entrada y salida, y enlaza al calendario
+  correspondiente (operativo o de limpieza), que ya tiene su propio control de acceso. El
+  detalle sensible se ve abriendo el calendario, no en el correo.
+- **Destinatarios:** operativo = Franco + Rodrigo; limpieza = Jennifer
+  (`yeniferminafo@gmail.com`).
+- **Rama lateral** (D-8Cbis-02): si el envío falla, la reserva confirmada no se afecta —
+  garantía validada end-to-end en TEST.
+- **Fuente de datos:** una query read-only por `id_reserva` a `reservas` + `cabanas`
+  (D-8Cbis-04); `confirmar_reserva` solo devuelve ids, por eso se consulta aparte.
+- **Estado:** validado en TEST con envío real; publicado y activo en OPS. La primera
+  ejecución real quedará registrada con la próxima reserva en ventana.
+Ver `8C-bis_CIERRE.md` y decisiones D-8Cbis-01 a D-8Cbis-10.
 
 ### 3.2 Endpoint obligatorio antes de web pública — `consultar_disponibilidad_precio`
 

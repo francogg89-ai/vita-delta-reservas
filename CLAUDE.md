@@ -10,6 +10,7 @@ Antes de trabajar, leer en este orden:
 4. Docs/Arquitectura/ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md (diseño Etapa 8 — arranque OPS; subetapas 8A-8D)
 5. Docs/Arquitectura/ARQUITECTURA_ETAPA_8D_BLOQUEOS_OPERATIVOS.md (diseño Etapa 8D — capa de bloqueos; **v1.1**)
 6. Docs/Bitacora/8D_CIERRE.md (cierre formal Etapa 8D — bloqueos validados en TEST + OPS; **cierra la Etapa 8 completa**)
+6-bis. Docs/Bitacora/8C-bis_CIERRE.md (cierre formal Sub-etapa 8C-bis — alerta por reserva próxima por mail, validada en TEST + activa en OPS; recoge el item 3.1)
 7. Docs/Arquitectura/ARQUITECTURA_ETAPA_8C_CALENDARIOS_VISUALES.md (diseño Etapa 8C — calendarios visuales; **v1.3**)
 8. Docs/Bitacora/8C_CIERRE.md (cierre formal Etapa 8C — tres calendarios validados en TEST y activos en OPS; 8C-bis posterior)
 9. Docs/Arquitectura/ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md (diseño Etapa 8B — capa de carga interna; **v3.5**)
@@ -206,7 +207,7 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - **Aclaración clave:** los HTML son **ventanas en vivo** (se arman en cada visita a la URL, siempre muestran el estado actual); NO necesitan disparo. Solo el Sheet de resguardo es una foto estática que se regenera por ejecución.
 - Lógica de pintado en capa de presentación: operativo **rojo > gris > verde > blanco**; limpieza **rojo > gris > amarillo (salida) > verde > blanco**. Detección de salida incluye `confirmada`/`activa`/`completada` (4ta query sobre `reservas`); bloqueo con `EXISTS` sin asumir unicidad (totales `id_cabana IS NULL` fuera del EXCLUDE); fechas normalizadas a `YYYY-MM-DD`.
 - **Validación funcional completa en TEST** y **smoke OPS ejecutado**: los HTML operativo y limpieza están **activos y en uso real** por el equipo (resguardo OPS manual).
-- **8C-bis (alerta por reserva próxima): fuera de alcance del cierre**, trabajo posterior independiente con documento propio (no reabre `8C_CIERRE.md`); notificación a Rodrigo y Jennifer por mail o Telegram, canal a decidir.
+- **8C-bis (alerta por reserva próxima): ✅ resuelta después como sub-etapa propia** (canal = mail; no reabre `8C_CIERRE.md`). Ver el bloque "Sub-etapa 8C-bis" más abajo y `8C-bis_CIERRE.md`.
 - Artefactos: workflows `__TEST`/`__OPS` + 2 templates sanitizados (`vita_w8c_html_operativo__TEMPLATE.json`, `vita_w8c_sheet_resguardo__TEMPLATE.json`) + nodos Code versionados. Decisiones D-8C-01 a D-8C-23; lecciones L-8C-01 a L-8C-05. Diseño: `ARQUITECTURA_ETAPA_8C_CALENDARIOS_VISUALES.md v1.3`. Cierre: `8C_CIERRE.md`. Ejecución: `8C_EJECUCION.md`.
 
 **Etapa 8D — Capa de bloqueos operativos ✅ Cerrada (2026-06-04, TEST + OPS) — cierra la Etapa 8:**
@@ -219,13 +220,25 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - **Validado en TEST y operativo en OPS:** `vita_w8d_bloqueo__TEST` (id `GIfBlI6xCnrkH2Y4`, 9 nodos) y `vita_w8d_bloqueo__OPS` (activo, primer bloqueo real creado). Incidencia clave (L-8D-01): el nodo Postgres devuelve el resultado de la función envuelto en la columna `resultado`; el Normalize debe leer `item.resultado.ok`, no `item.ok` (un "Problema técnico" inicial era esto; la base nunca falló).
 - Artefactos: workflows `__TEST`/`__OPS` + template sanitizado `vita_w8d_bloqueo__TEMPLATE.json` + nodos Code. Decisiones D-8D-01 a D-8D-09; lecciones L-8D-01 a L-8D-03. Diseño: `ARQUITECTURA_ETAPA_8D_BLOQUEOS_OPERATIVOS.md v1.1`. Cierre: `8D_CIERRE.md`. Ejecución: `8D_EJECUCION.md`.
 
-**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV, TEST y OPS están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B con paridad 10/10; OPS reconstruido en 8A con paridad P01-P10 10/10). Ni 8C ni 8D modificaron el schema: los calendarios son solo lectura y los bloqueos usan `crear_bloqueo()` tal cual.
+**Sub-etapa 8C-bis — Alerta por reserva próxima (mail) ✅ Cerrada (2026-06-04, TEST + OPS):**
+
+- **Sub-workflow independiente** (`vita_w8cbis_alerta__OPS`, id `fHzMFj7pGMKuYEOb`, 13 nodos) invocado desde el formulario de carga 8B mediante Execute Workflow **en rama lateral**. Recoge el item 3.1 de `Pendiente_pre_produccion.md` y D-8C-21.
+- **Disparo:** cuando se confirma una reserva con `fecha_checkin ∈ [hoy, hoy+7]` (TZ America/Argentina/Buenos_Aires), envía un mail al equipo operativo (Franco + Rodrigo) y a Jennifer (limpieza). Sin cron/polling.
+- **Garantía estructural (D-8Cbis-02):** el PUNTO EXTENSION de 8B alimenta `Build Response` (item original, respuesta al operador) y el Call (sub-workflow) **en paralelo**; el Call queda como hoja sin salida. Si el mail falla, la reserva confirmada NO se ve afectada. Validado end-to-end en TEST con el Call pineado para fallar → `Build Response` igual mostró "✅ Reserva confirmada".
+- **Privacidad por construcción (D-8Cbis-05):** el mail solo informa cabaña/entrada/salida y enlaza al calendario correspondiente; NO incluye montos, huésped, teléfono ni notas. El detalle se ve abriendo el calendario (con su propio Basic Auth).
+- **Solo lectura (D-8Cbis-04):** consulta la reserva por `id_reserva` (`SELECT` sobre `reservas`+`cabanas`, sin join a `huespedes`); no invoca funciones del motor ni escribe. `confirmar_reserva` solo devuelve ids, por eso se consulta aparte; las vistas de calendario no sirven para lookup puntual (filtran por ventana).
+- **Canal = mail (D-8Cbis-01)**, no Telegram/WhatsApp. Remitente temporal = Gmail personal de Franco (credencial "SMTP gmail"), migrable al futuro mail de las cabañas sin rediseño (D-8Cbis-09). Config por entorno: bloque `test` → mail de Franco (red de seguridad para pruebas), bloque `ops` → destinatarios reales (D-8Cbis-08).
+- **Validado en TEST** (6 casos de lógica con pin data + envío real + aislamiento de la rama lateral) y **publicado/activo en OPS** (credencial `vita_supabase_ops`, Call de 8B OPS con `entorno: "ops"`, destinatarios reales). La **primera ejecución real** quedará registrada con la próxima reserva en ventana (Franco decidió no forzar prueba: el formulario ya opera con reservas reales).
+- Hallazgos: el `\t` invisible heredado en un destinatario (L-8Cbis-02) y la diferencia draft vs. `activeVersion` al publicar (L-8Cbis-03), ambos detectados por lectura del JSON y resueltos antes del cierre.
+- Workflows: `vita_w8cbis_alerta__TEST` (id `TdTlv9ZhswwzijF2`) y `vita_w8cbis_alerta__OPS` (id `fHzMFj7pGMKuYEOb`, activo). Decisiones D-8Cbis-01 a D-8Cbis-10; lecciones L-8Cbis-01 a L-8Cbis-03. Cierre: `8C-bis_CIERRE.md`. No reabre los cierres de 8B, 8C ni 8D.
+
+**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV, TEST y OPS están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B con paridad 10/10; OPS reconstruido en 8A con paridad P01-P10 10/10). Ni 8C ni 8D modificaron el schema: los calendarios son solo lectura y los bloqueos usan `crear_bloqueo()` tal cual. **8C-bis tampoco toca schema:** es solo lectura + envío de mail.
 
 **Próxima etapa — opciones disponibles (orden sugerido):**
 
-Con DEV, TEST, OPS, 6D, 7A, 7B, 7C, 7D, 7E, **8A, 8B, 8C y 8D cerradas, la Etapa 8 (operación real interna) está completa**. El equipo opera el complejo con tres acciones autoservicio sobre OPS: cargar reservas, ver el estado en los calendarios y crear bloqueos. Las opciones a priorizar por Franco de acá en más:
+Con DEV, TEST, OPS, 6D, 7A, 7B, 7C, 7D, 7E, **8A, 8B, 8C y 8D cerradas, la Etapa 8 (operación real interna) está completa**, y la **sub-etapa 8C-bis** (alerta por reserva próxima por mail) también cerrada y activa en OPS. El equipo opera el complejo con tres acciones autoservicio sobre OPS: cargar reservas, ver el estado en los calendarios y crear bloqueos; y recibe avisos automáticos por mail cuando se confirma una reserva próxima. Las opciones a priorizar por Franco de acá en más:
 
-- **8C-bis — Alerta por reserva próxima** (trabajo independiente, documento propio): dispara post-`confirmar_reserva` si el check-in cae en [hoy, hoy+7]; notificación a Rodrigo y Jennifer por mail o Telegram (no requiere esperar WhatsApp, que es comunicación externa). Engancha en el punto de extensión de 8B, junto con el disparo automático del resguardo.
+- **Registrar la primera ejecución real de 8C-bis** cuando entre la próxima reserva con check-in en ventana, y verificar la entrega a los tres destinatarios reales. Pendiente menor asociado: migrar el remitente SMTP al futuro mail propio de las cabañas (D-8Cbis-09).
 - **Edición / baja de bloqueos:** hoy 8D solo crea (D-8D-09); levantar o corregir un bloqueo es manual. Si se vuelve frecuente, sería una capa posterior con su propio formulario.
 - **Apertura al exterior (etapas futuras grandes, sobre TEST primero):** webhook MercadoPago real, bot conversacional (Claude API), web pública, WhatsApp/Instagram (Meta API), y eventualmente PROD público.
 - Residual de permisos de tabla en DEV (hallazgo A5 / pendiente 1.7): revocar o aceptar como definitivo. No urgente; OPS ya nació sin ese problema.

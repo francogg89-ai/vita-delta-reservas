@@ -3,42 +3,55 @@
   "nodes": [
     {
       "parameters": {
-        "formTitle": "Carga de reserva",
+        "authentication": "basicAuth",
+        "formTitle": "Carga de reserva — Vita Delta",
         "formDescription": "Cargá una reserva ya cerrada.",
         "formFields": {
           "values": [
             {
               "fieldLabel": "Operador",
               "fieldType": "dropdown",
-              "requiredField": true,
               "fieldOptions": {
                 "values": [
                   {
-                    "option": "Operador 1"
+                    "option": "Franco"
                   },
                   {
-                    "option": "Operador 2"
+                    "option": "Vicky"
+                  },
+                  {
+                    "option": "Rodrigo"
+                  },
+                  {
+                    "option": "Remo"
                   }
                 ]
-              }
+              },
+              "requiredField": true
             },
             {
               "fieldLabel": "Cabaña",
               "fieldType": "dropdown",
-              "requiredField": true,
               "fieldOptions": {
                 "values": [
                   {
-                    "option": "Cabana A"
+                    "option": "Bamboo"
                   },
                   {
-                    "option": "Cabana B"
+                    "option": "Madre Selva"
                   },
                   {
-                    "option": "Cabana C"
+                    "option": "Arrebol"
+                  },
+                  {
+                    "option": "Guatemala"
+                  },
+                  {
+                    "option": "Tokio"
                   }
                 ]
-              }
+              },
+              "requiredField": true
             },
             {
               "fieldLabel": "Fecha de entrada",
@@ -57,23 +70,19 @@
             },
             {
               "fieldLabel": "Nombre y apellido",
-              "fieldType": "text",
               "requiredField": true
             },
             {
-              "fieldLabel": "Teléfono",
-              "fieldType": "text",
-              "requiredField": false
+              "fieldLabel": "Teléfono"
             },
             {
               "fieldLabel": "Email",
-              "fieldType": "email",
-              "requiredField": false
+              "fieldType": "email"
             },
             {
               "fieldLabel": "Canal de origen",
               "fieldType": "dropdown",
-              "requiredField": true,
+              "defaultValue": "WhatsApp",
               "fieldOptions": {
                 "values": [
                   {
@@ -99,12 +108,12 @@
                   }
                 ]
               },
-              "defaultValue": "WhatsApp"
+              "requiredField": true
             },
             {
               "fieldLabel": "Canal de pago esperado",
               "fieldType": "dropdown",
-              "requiredField": true,
+              "defaultValue": "Transferencia bancaria",
               "fieldOptions": {
                 "values": [
                   {
@@ -124,12 +133,12 @@
                   }
                 ]
               },
-              "defaultValue": "Transferencia bancaria"
+              "requiredField": true
             },
             {
               "fieldLabel": "Medio de pago",
               "fieldType": "dropdown",
-              "requiredField": true,
+              "defaultValue": "Transferencia bancaria",
               "fieldOptions": {
                 "values": [
                   {
@@ -149,7 +158,7 @@
                   }
                 ]
               },
-              "defaultValue": "Transferencia bancaria"
+              "requiredField": true
             },
             {
               "fieldLabel": "Monto total",
@@ -159,57 +168,56 @@
             {
               "fieldLabel": "Seña",
               "fieldType": "number",
-              "requiredField": false,
               "placeholder": "dejá vacío para 50% automático"
             },
             {
-              "fieldLabel": "Referencia de pago",
-              "fieldType": "text",
-              "requiredField": false
+              "fieldLabel": "Referencia de pago"
             },
             {
-              "fieldLabel": "Niños",
-              "fieldType": "text",
-              "requiredField": false
+              "fieldLabel": "Niños"
             },
             {
               "fieldLabel": "Notas",
-              "fieldType": "textarea",
-              "requiredField": false
+              "fieldType": "textarea"
             }
           ]
         },
         "responseMode": "lastNode",
         "options": {
+          "appendAttribution": false,
           "buttonLabel": "Cargar reserva",
-          "path": "<FORM_PATH>",
-          "useWorkflowTimezone": true,
+          "path": "REEMPLAZAR_FORM_PATH",
           "ignoreBots": true,
-          "appendAttribution": false
-        },
-        "authentication": "basicAuth"
+          "useWorkflowTimezone": true
+        }
       },
-      "id": "form_trigger_8b_ops",
+      "id": "08763ede-e850-405e-b5b3-a24b1fcd840a",
       "name": "Form Trigger 8B",
       "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 2.5,
       "position": [
-        0,
-        320
+        -2592,
+        560
       ],
-      "webhookId": "<WEBHOOK_ID_FORM>"
+      "webhookId": "REEMPLAZAR_WEBHOOK_ID",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "REEMPLAZAR_CRED_BASICAUTH",
+          "name": "<BASIC_AUTH_FORM>"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const nv = (v) => { if (v === undefined || v === null) return null; const s = String(v).trim(); return s === '' ? null : s; };\n\n// === Bloque B: Validar y Normalizar Input (sin escritura) ===\n// AJUSTAR: mapa de nombre de cabaña (etiqueta visible del form) -> id real en TU base.\nconst MAP_CABANA = { \"Cabana A\":1, \"Cabana B\":2, \"Cabana C\":3 };\n// AJUSTAR: capacidad maxima por id de cabaña (UX temprana; la defensa real es el motor SQL).\nconst MAP_CAP    = { 1:4, 2:4, 3:4 };\n// AJUSTAR: operadores (etiqueta visible -> string normalizado para trazabilidad).\nconst MAP_OP     = { \"Operador 1\":\"operador_1\", \"Operador 2\":\"operador_2\" };\n// canal_origen: CHECK pre_reservas acepta SOLO whatsapp/instagram/web/manual.\n// Etiqueta visible -> { val: string persistido, fino: etiqueta fina para notas si aplica }\nconst MAP_CANAL_ORIGEN = {\n  \"WhatsApp\":  { val: \"whatsapp\",  fino: null },\n  \"Instagram\": { val: \"instagram\", fino: null },\n  \"Directo\":   { val: \"manual\",    fino: \"Directo\" },\n  \"Referido\":  { val: \"manual\",    fino: \"Referido\" },\n  \"Airbnb\":    { val: \"web\",       fino: \"Airbnb\" },\n  \"Booking\":   { val: \"web\",       fino: \"Booking\" },\n  \"Otro\":      { val: \"manual\",    fino: \"Otro\" }\n};\n// canal_pago_esperado y medio_pago: CHECK acepta transferencia_bancaria/transferencia_mp/mp_link/cripto/efectivo.\nconst MAP_CANAL_PAGO = {\n  \"Transferencia bancaria\":     \"transferencia_bancaria\",\n  \"Transferencia MercadoPago\":  \"transferencia_mp\",\n  \"Link MercadoPago\":           \"mp_link\",\n  \"Efectivo\":                   \"efectivo\",\n  \"Cripto\":                     \"cripto\"\n};\nconst MAP_MEDIO_PAGO = {\n  \"Transferencia bancaria\":     \"transferencia_bancaria\",\n  \"Transferencia MercadoPago\":  \"transferencia_mp\",\n  \"Link MercadoPago\":           \"mp_link\",\n  \"Efectivo\":                   \"efectivo\",\n  \"Cripto\":                     \"cripto\"\n};\n\n// 'hoy' en America/Argentina/Buenos_Aires como 'YYYY-MM-DD' (explícito, sin corrimientos)\nfunction hoyBuenosAires() {\n  const parts = new Intl.DateTimeFormat('en-CA', {\n    timeZone: 'America/Argentina/Buenos_Aires',\n    year: 'numeric', month: '2-digit', day: '2-digit'\n  }).formatToParts(new Date());\n  const y = parts.find(p => p.type === 'year').value;\n  const m = parts.find(p => p.type === 'month').value;\n  const d = parts.find(p => p.type === 'day').value;\n  return `${y}-${m}-${d}`;   // en-CA ya da YYYY-MM-DD, pero lo reconstruimos explícito\n}\n\nconst f = $json;\nconst operador_label = nv(f[\"Operador\"]);\nconst cabana_label   = nv(f[\"Cabaña\"]);\nconst fecha_in       = nv(f[\"Fecha de entrada\"]);\nconst fecha_out      = nv(f[\"Fecha de salida\"]);\nconst personas_in    = nv(f[\"Personas\"]);\nconst nombre_completo = nv(f[\"Nombre y apellido\"]);\nconst telefono       = nv(f[\"Teléfono\"]);\nconst email          = nv(f[\"Email\"]);\nconst canal_origen_label = nv(f[\"Canal de origen\"]);\nconst canal_pago_label   = nv(f[\"Canal de pago esperado\"]);\nconst medio_pago_label   = nv(f[\"Medio de pago\"]);\nconst total_in       = nv(f[\"Monto total\"]);\nconst sena_in        = nv(f[\"Seña\"]);\nconst referencia     = nv(f[\"Referencia de pago\"]);\nconst ninos          = nv(f[\"Niños\"]);\nconst notas          = nv(f[\"Notas\"]);\n\nconst fail = (msg) => ({ json: { valido: false, msg_error: msg } });\n\nconst operador = operador_label ? MAP_OP[operador_label] : null;\nconst id_cabana = cabana_label ? MAP_CABANA[cabana_label] : null;\nconst canal_origen_map = canal_origen_label ? MAP_CANAL_ORIGEN[canal_origen_label] : null;\nconst canal_origen = canal_origen_map ? canal_origen_map.val : null;\nconst origen_fino = canal_origen_map ? canal_origen_map.fino : null;   // etiqueta fina o null\nconst canal_pago_esperado = canal_pago_label ? MAP_CANAL_PAGO[canal_pago_label] : null;\nconst medio_pago = medio_pago_label ? MAP_MEDIO_PAGO[medio_pago_label] : null;\n\nif (!operador) return fail(\"Falta el operador (quién carga).\");\nif (!id_cabana) return fail(\"Falta la cabaña o no se reconoce.\");\nif (!fecha_in || !fecha_out) return fail(\"Faltan las fechas de entrada o salida.\");\nif (!personas_in) return fail(\"Falta la cantidad de personas.\");\nif (!nombre_completo) return fail(\"Falta el nombre y apellido del huésped.\");\nif (!canal_origen) return fail(\"Falta el canal de origen.\");\nif (!canal_pago_esperado) return fail(\"Falta el canal de pago esperado.\");\nif (!medio_pago) return fail(\"Falta el medio de pago.\");\nif (!total_in) return fail(\"Falta el monto total.\");\n\nconst personas = parseInt(personas_in, 10);\nif (!Number.isInteger(personas) || personas < 1) return fail(\"La cantidad de personas no es válida.\");\nconst total = Number(total_in);\nif (!(total > 0)) return fail(\"El monto total debe ser mayor a 0.\");\n\nif (!telefono && !email) return fail(\"Cargá al menos teléfono o email del huésped.\");\n\nconst hoyStr = hoyBuenosAires();\nif (fecha_out <= fecha_in) return fail(\"La fecha de salida debe ser posterior a la de entrada.\");\nif (fecha_in < hoyStr) return fail(\"Las reservas con fechas pasadas o ya iniciadas requieren carga manual; no se cargan por acá.\");\n\nconst cap = MAP_CAP[id_cabana];\nif (personas > cap) return fail(\"Esa cabaña admite hasta \" + cap + \" personas.\");\n\n// Seña: vacía / 0 / no numérica -> 50% automático. Valor > 0 explícito -> se respeta.\n// (n8n puede entregar 0 para un Number vacío; 0 se interpreta como \"no cargó seña\" -> 50%.\n//  El caso de pago 100% se carga como total=X, seña=X, no como seña=0.)\nlet sena;\nconst sena_raw = f[\"Seña\"];\nconst sena_num = (sena_raw === null || sena_raw === undefined || String(sena_raw).trim() === \"\")\n                 ? NaN : Number(sena_raw);\nif (Number.isNaN(sena_num) || sena_num === 0) {\n  sena = Math.round(total * 0.5 * 100) / 100;     // 50% automático\n} else if (sena_num < 0) {\n  return fail(\"La seña no puede ser negativa.\");\n} else if (sena_num > total) {\n  return fail(\"La seña no puede superar el monto total.\");\n} else {\n  sena = sena_num;                                 // valor explícito > 0\n}\n\n// contact_key robusto: teléfono (solo dígitos) o email_<email_min>. Nunca 'sintel'.\nlet contact_key;\nif (telefono) {\n  const tel_norm = telefono.replace(/[^\\d]/g, \"\");\n  if (!tel_norm) {\n    // teléfono presente pero sin dígitos válidos: caer a email si hay\n    if (email) { contact_key = \"email_\" + email.trim().toLowerCase(); }\n    else { return fail(\"El teléfono no tiene dígitos válidos y no hay email.\"); }\n  } else {\n    contact_key = tel_norm;\n  }\n} else {\n  // sin teléfono, con email (garantizado por validación de contacto)\n  contact_key = \"email_\" + email.trim().toLowerCase();\n}\n\nconst idempotency_key = [\"ops_8b\", id_cabana, fecha_in, fecha_out, contact_key].join(\"_\");\n// AJUSTAR: reemplazar <MARCADOR_AMBIENTE> por el de tu entorno (ej: n8n_ops / n8n_test).\nconst source_event = \"<MARCADOR_AMBIENTE>_w8b_carga_\" + operador + \"_manual\";\n\n// Preservar el dato operativo fino (Airbnb/Booking/Directo/Referido/Otro) en notas,\n// ya que el CHECK de canal_origen obliga a persistir un valor genérico (web/manual).\nlet notas_final = notas;\nif (origen_fino) {\n  const prefijo = \"Origen operativo: \" + origen_fino;\n  notas_final = notas ? (prefijo + \" | \" + notas) : prefijo;\n}\n\nreturn { json: {\n  valido: true,\n  operador, id_cabana, cabana_label,\n  fecha_in, fecha_out, personas,\n  nombre_completo, telefono, email,\n  canal_origen, origen_fino, canal_pago_esperado, medio_pago,\n  total, sena, saldo: Math.round((total - sena) * 100) / 100,\n  referencia, ninos, notas: notas_final,\n  contact_key, idempotency_key, source_event,\n  id_pre_reserva: null, id_pago: null, id_reserva: null\n}};\n"
+        "jsCode": "const nv = (v) => { if (v === undefined || v === null) return null; const s = String(v).trim(); return s === '' ? null : s; };\n\n// === Bloque B: Validar y Normalizar Input (sin escritura) ===\nconst MAP_CABANA = { \"Bamboo\":1, \"Madre Selva\":2, \"Arrebol\":3, \"Guatemala\":4, \"Tokio\":5 };\nconst MAP_CAP    = { 1:5, 2:5, 3:5, 4:4, 5:4 };\nconst MAP_OP     = { \"Franco\":\"franco\", \"Vicky\":\"vicky\", \"Rodrigo\":\"rodrigo\", \"Remo\":\"remo\" };\n// canal_origen: CHECK pre_reservas acepta SOLO whatsapp/instagram/web/manual.\n// Etiqueta visible -> { val: string persistido, fino: etiqueta fina para notas si aplica }\nconst MAP_CANAL_ORIGEN = {\n  \"WhatsApp\":  { val: \"whatsapp\",  fino: null },\n  \"Instagram\": { val: \"instagram\", fino: null },\n  \"Directo\":   { val: \"manual\",    fino: \"Directo\" },\n  \"Referido\":  { val: \"manual\",    fino: \"Referido\" },\n  \"Airbnb\":    { val: \"web\",       fino: \"Airbnb\" },\n  \"Booking\":   { val: \"web\",       fino: \"Booking\" },\n  \"Otro\":      { val: \"manual\",    fino: \"Otro\" }\n};\n// canal_pago_esperado y medio_pago: CHECK acepta transferencia_bancaria/transferencia_mp/mp_link/cripto/efectivo.\nconst MAP_CANAL_PAGO = {\n  \"Transferencia bancaria\":     \"transferencia_bancaria\",\n  \"Transferencia MercadoPago\":  \"transferencia_mp\",\n  \"Link MercadoPago\":           \"mp_link\",\n  \"Efectivo\":                   \"efectivo\",\n  \"Cripto\":                     \"cripto\"\n};\nconst MAP_MEDIO_PAGO = {\n  \"Transferencia bancaria\":     \"transferencia_bancaria\",\n  \"Transferencia MercadoPago\":  \"transferencia_mp\",\n  \"Link MercadoPago\":           \"mp_link\",\n  \"Efectivo\":                   \"efectivo\",\n  \"Cripto\":                     \"cripto\"\n};\n\n// 'hoy' en America/Argentina/Buenos_Aires como 'YYYY-MM-DD' (explícito, sin corrimientos)\nfunction hoyBuenosAires() {\n  const parts = new Intl.DateTimeFormat('en-CA', {\n    timeZone: 'America/Argentina/Buenos_Aires',\n    year: 'numeric', month: '2-digit', day: '2-digit'\n  }).formatToParts(new Date());\n  const y = parts.find(p => p.type === 'year').value;\n  const m = parts.find(p => p.type === 'month').value;\n  const d = parts.find(p => p.type === 'day').value;\n  return `${y}-${m}-${d}`;   // en-CA ya da YYYY-MM-DD, pero lo reconstruimos explícito\n}\n\nconst f = $json;\nconst operador_label = nv(f[\"Operador\"]);\nconst cabana_label   = nv(f[\"Cabaña\"]);\nconst fecha_in       = nv(f[\"Fecha de entrada\"]);\nconst fecha_out      = nv(f[\"Fecha de salida\"]);\nconst personas_in    = nv(f[\"Personas\"]);\nconst nombre_completo = nv(f[\"Nombre y apellido\"]);\nconst telefono       = nv(f[\"Teléfono\"]);\nconst email          = nv(f[\"Email\"]);\nconst canal_origen_label = nv(f[\"Canal de origen\"]);\nconst canal_pago_label   = nv(f[\"Canal de pago esperado\"]);\nconst medio_pago_label   = nv(f[\"Medio de pago\"]);\nconst total_in       = nv(f[\"Monto total\"]);\nconst sena_in        = nv(f[\"Seña\"]);\nconst referencia     = nv(f[\"Referencia de pago\"]);\nconst ninos          = nv(f[\"Niños\"]);\nconst notas          = nv(f[\"Notas\"]);\n\nconst fail = (msg) => ({ json: { valido: false, msg_error: msg } });\n\nconst operador = operador_label ? MAP_OP[operador_label] : null;\nconst id_cabana = cabana_label ? MAP_CABANA[cabana_label] : null;\nconst canal_origen_map = canal_origen_label ? MAP_CANAL_ORIGEN[canal_origen_label] : null;\nconst canal_origen = canal_origen_map ? canal_origen_map.val : null;\nconst origen_fino = canal_origen_map ? canal_origen_map.fino : null;   // etiqueta fina o null\nconst canal_pago_esperado = canal_pago_label ? MAP_CANAL_PAGO[canal_pago_label] : null;\nconst medio_pago = medio_pago_label ? MAP_MEDIO_PAGO[medio_pago_label] : null;\n\nif (!operador) return fail(\"Falta el operador (quién carga).\");\nif (!id_cabana) return fail(\"Falta la cabaña o no se reconoce.\");\nif (!fecha_in || !fecha_out) return fail(\"Faltan las fechas de entrada o salida.\");\nif (!personas_in) return fail(\"Falta la cantidad de personas.\");\nif (!nombre_completo) return fail(\"Falta el nombre y apellido del huésped.\");\nif (!canal_origen) return fail(\"Falta el canal de origen.\");\nif (!canal_pago_esperado) return fail(\"Falta el canal de pago esperado.\");\nif (!medio_pago) return fail(\"Falta el medio de pago.\");\nif (!total_in) return fail(\"Falta el monto total.\");\n\nconst personas = parseInt(personas_in, 10);\nif (!Number.isInteger(personas) || personas < 1) return fail(\"La cantidad de personas no es válida.\");\nconst total = Number(total_in);\nif (!(total > 0)) return fail(\"El monto total debe ser mayor a 0.\");\n\nif (!telefono && !email) return fail(\"Cargá al menos teléfono o email del huésped.\");\n\nconst hoyStr = hoyBuenosAires();\nif (fecha_out <= fecha_in) return fail(\"La fecha de salida debe ser posterior a la de entrada.\");\nif (fecha_in < hoyStr) return fail(\"Las reservas con fechas pasadas o ya iniciadas requieren carga manual; no se cargan por acá.\");\n\nconst cap = MAP_CAP[id_cabana];\nif (personas > cap) return fail(\"Esa cabaña admite hasta \" + cap + \" personas.\");\n\n// Seña: vacía / 0 / no numérica -> 50% automático. Valor > 0 explícito -> se respeta.\n// (n8n puede entregar 0 para un Number vacío; 0 se interpreta como \"no cargó seña\" -> 50%.\n//  El caso de pago 100% se carga como total=X, seña=X, no como seña=0.)\nlet sena;\nconst sena_raw = f[\"Seña\"];\nconst sena_num = (sena_raw === null || sena_raw === undefined || String(sena_raw).trim() === \"\")\n                 ? NaN : Number(sena_raw);\nif (Number.isNaN(sena_num) || sena_num === 0) {\n  sena = Math.round(total * 0.5 * 100) / 100;     // 50% automático\n} else if (sena_num < 0) {\n  return fail(\"La seña no puede ser negativa.\");\n} else if (sena_num > total) {\n  return fail(\"La seña no puede superar el monto total.\");\n} else {\n  sena = sena_num;                                 // valor explícito > 0\n}\n\n// contact_key robusto: teléfono (solo dígitos) o email_<email_min>. Nunca 'sintel'.\nlet contact_key;\nif (telefono) {\n  const tel_norm = telefono.replace(/[^\\d]/g, \"\");\n  if (!tel_norm) {\n    // teléfono presente pero sin dígitos válidos: caer a email si hay\n    if (email) { contact_key = \"email_\" + email.trim().toLowerCase(); }\n    else { return fail(\"El teléfono no tiene dígitos válidos y no hay email.\"); }\n  } else {\n    contact_key = tel_norm;\n  }\n} else {\n  // sin teléfono, con email (garantizado por validación de contacto)\n  contact_key = \"email_\" + email.trim().toLowerCase();\n}\n\nconst idempotency_key = [\"ops_8b\", id_cabana, fecha_in, fecha_out, contact_key].join(\"_\");\nconst source_event = \"n8n_ops_w8b_carga_\" + operador + \"_manual\";\n\n// Preservar el dato operativo fino (Airbnb/Booking/Directo/Referido/Otro) en notas,\n// ya que el CHECK de canal_origen obliga a persistir un valor genérico (web/manual).\nlet notas_final = notas;\nif (origen_fino) {\n  const prefijo = \"Origen operativo: \" + origen_fino;\n  notas_final = notas ? (prefijo + \" | \" + notas) : prefijo;\n}\n\nreturn { json: {\n  valido: true,\n  operador, id_cabana, cabana_label,\n  fecha_in, fecha_out, personas,\n  nombre_completo, telefono, email,\n  canal_origen, origen_fino, canal_pago_esperado, medio_pago,\n  total, sena, saldo: Math.round((total - sena) * 100) / 100,\n  referencia, ninos, notas: notas_final,\n  contact_key, idempotency_key, source_event,\n  id_pre_reserva: null, id_pago: null, id_reserva: null\n}};\n"
       },
-      "id": "validar_y_normalizar_input",
+      "id": "e630696d-f564-4007-8083-07aae512fb89",
       "name": "Validar y Normalizar Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        220,
-        320
+        -2384,
+        560
       ]
     },
     {
@@ -217,7 +225,9 @@
         "conditions": {
           "options": {
             "caseSensitive": true,
-            "typeValidation": "loose"
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
           },
           "conditions": [
             {
@@ -235,26 +245,26 @@
         },
         "options": {}
       },
-      "id": "if_validacion_ok",
+      "id": "fa6ee4ce-6bf2-4878-95ec-cc673d2a6511",
       "name": "IF Validacion OK",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        440,
-        320
+        -2160,
+        560
       ]
     },
     {
       "parameters": {
         "jsCode": "const nv = (v) => { if (v === undefined || v === null) return null; const s = String(v).trim(); return s === '' ? null : s; };\n\n// === Build Payload P1: crear_prereserva ===\nconst d = $json;\nconst payload = {\n  huesped: { nombre: d.nombre_completo, apellido: \"\", telefono: nv(d.telefono), email: nv(d.email) },\n  id_cabana: d.id_cabana,\n  fecha_in: d.fecha_in,\n  fecha_out: d.fecha_out,\n  personas: d.personas,\n  monto_total: d.total,\n  monto_sena: d.sena,\n  canal_origen: d.canal_origen,\n  canal_pago_esperado: d.canal_pago_esperado,\n  source_event: d.source_event,\n  idempotency_key: d.idempotency_key,\n  notas: nv(d.notas),\n  ninos: nv(d.ninos)\n};\nreturn { json: { payload, ctx: d } };\n"
       },
-      "id": "build_payload_p1",
+      "id": "c5321b1c-088d-43e6-8175-44647f1bd5b0",
       "name": "Build Payload P1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        660,
-        200
+        -1936,
+        432
       ]
     },
     {
@@ -265,34 +275,34 @@
           "queryReplacement": "={{ JSON.stringify($json.payload) }}"
         }
       },
-      "id": "postgres_crear_prereserva",
+      "id": "3d415fe9-1217-48ea-89a8-b5b876fdbe77",
       "name": "Postgres crear_prereserva",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        880,
-        200
+        -1712,
+        432
       ],
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
-          "id": "<ID_CREDENCIAL_POSTGRES>",
-          "name": "<NOMBRE_CREDENCIAL_POSTGRES>"
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "vita_supabase_<ENTORNO>"
         }
       },
-      "onError": "continueRegularOutput",
-      "alwaysOutputData": true
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
         "jsCode": "const nv = (v) => { if (v === undefined || v === null) return null; const s = String(v).trim(); return s === '' ? null : s; };\n\n// === Normalize: crear_prereserva ===\nconst ctx = ($('Build Payload P1') ? JSON.parse(JSON.stringify($('Build Payload P1').item.json.ctx)) : ($json.ctx || {}));\nconst row = $json;\nlet br = null, ok = false, error_type = null, raw_error = null;\n\nif (row && row.error) {\n  error_type = 'tecnico';\n  raw_error = String((row.error && row.error.message) || row.error);\n} else {\n  br = row[\"crear_prereserva\"] || row.result || null;\n  if (typeof br === 'string') { try { br = JSON.parse(br); } catch (e) {} }\n  if (!br && row && typeof row === 'object' && ('ok' in row)) { br = row; }\n  if (!br) {\n    error_type = 'tecnico';\n    raw_error = 'respuesta_sql_vacia_o_no_reconocida';\n  } else if (br.ok === true) {\n    ok = true;\n  } else {\n    error_type = 'negocio';\n  }\n}\n\nif (ok && br && br.id_pre_reserva != null) { ctx.id_pre_reserva = br.id_pre_reserva; }\n\nreturn { json: {\n  step: \"crear_prereserva\", ok, error_type, raw_error,\n  business_result: br,\n  id_pre_reserva: ctx.id_pre_reserva ?? null,\n  id_pago: ctx.id_pago ?? null,\n  id_reserva: ctx.id_reserva ?? null,\n  ctx\n}};\n"
       },
-      "id": "normalize_c",
+      "id": "4eb9c3d4-2644-4226-8f3e-c66ec9b21d00",
       "name": "Normalize C",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1100,
-        200
+        -1504,
+        432
       ]
     },
     {
@@ -300,7 +310,9 @@
         "conditions": {
           "options": {
             "caseSensitive": true,
-            "typeValidation": "loose"
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
           },
           "conditions": [
             {
@@ -318,26 +330,26 @@
         },
         "options": {}
       },
-      "id": "if_p1_ok",
+      "id": "ee2549ab-69d7-4370-964f-ba9b3e5c64b7",
       "name": "IF P1 OK",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1320,
-        200
+        -1280,
+        432
       ]
     },
     {
       "parameters": {
         "jsCode": "const nv = (v) => { if (v === undefined || v === null) return null; const s = String(v).trim(); return s === '' ? null : s; };\n\n// === Build Payload P2: registrar_pago ===\nconst prev = $json;                 // viene de Normalize C\nconst ctx = prev.ctx;               // ctx ya trae id_pre_reserva enriquecido\nconst payload = {\n  id_pre_reserva: ctx.id_pre_reserva,\n  tipo: \"sena\",\n  medio_pago: ctx.medio_pago,\n  monto_esperado: ctx.sena,\n  monto_recibido: ctx.sena,\n  estado_inicial: \"confirmado\",\n  referencia_externa: nv(ctx.referencia),\n  validado_por: ctx.operador,\n  source_event: ctx.source_event\n};\nreturn { json: { payload, ctx } };\n"
       },
-      "id": "build_payload_p2",
+      "id": "c5ee45a4-fef4-4226-a36f-599119c9fd7b",
       "name": "Build Payload P2",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1540,
-        120
+        -1056,
+        352
       ]
     },
     {
@@ -348,34 +360,34 @@
           "queryReplacement": "={{ JSON.stringify($json.payload) }}"
         }
       },
-      "id": "postgres_registrar_pago",
+      "id": "d11513dd-e7e1-4b4f-af22-cb434098962b",
       "name": "Postgres registrar_pago",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1760,
-        120
+        -832,
+        352
       ],
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
-          "id": "<ID_CREDENCIAL_POSTGRES>",
-          "name": "<NOMBRE_CREDENCIAL_POSTGRES>"
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "vita_supabase_<ENTORNO>"
         }
       },
-      "onError": "continueRegularOutput",
-      "alwaysOutputData": true
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
         "jsCode": "const nv = (v) => { if (v === undefined || v === null) return null; const s = String(v).trim(); return s === '' ? null : s; };\n\n// === Normalize: registrar_pago ===\nconst ctx = ($('Build Payload P2') ? JSON.parse(JSON.stringify($('Build Payload P2').item.json.ctx)) : ($json.ctx || {}));\nconst row = $json;\nlet br = null, ok = false, error_type = null, raw_error = null;\n\nif (row && row.error) {\n  error_type = 'tecnico';\n  raw_error = String((row.error && row.error.message) || row.error);\n} else {\n  br = row[\"registrar_pago\"] || row.result || null;\n  if (typeof br === 'string') { try { br = JSON.parse(br); } catch (e) {} }\n  if (!br && row && typeof row === 'object' && ('ok' in row)) { br = row; }\n  if (!br) {\n    error_type = 'tecnico';\n    raw_error = 'respuesta_sql_vacia_o_no_reconocida';\n  } else if (br.ok === true) {\n    ok = true;\n  } else {\n    error_type = 'negocio';\n  }\n}\n\nif (br && br.id_pago != null) { ctx.id_pago = br.id_pago; }\n// REGLA ESTRICTA D-8B-15: ok:true no basta; debe ser estado 'confirmado' y SIN warning.\nif (ok && br) {\n  const estado_ok = (br.estado === 'confirmado');\n  const sin_warning = !br.warning;\n  if (!(estado_ok && sin_warning)) {\n    ok = false;\n    error_type = 'negocio';   // anómalo: pago registrado pero no confirmado\n  }\n}\n\nreturn { json: {\n  step: \"registrar_pago\", ok, error_type, raw_error,\n  business_result: br,\n  id_pre_reserva: ctx.id_pre_reserva ?? null,\n  id_pago: ctx.id_pago ?? null,\n  id_reserva: ctx.id_reserva ?? null,\n  ctx\n}};\n"
       },
-      "id": "normalize_p2",
+      "id": "aa2a4470-193c-4322-ba70-120f1d379021",
       "name": "Normalize P2",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1980,
-        120
+        -624,
+        352
       ]
     },
     {
@@ -383,7 +395,9 @@
         "conditions": {
           "options": {
             "caseSensitive": true,
-            "typeValidation": "loose"
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
           },
           "conditions": [
             {
@@ -401,26 +415,26 @@
         },
         "options": {}
       },
-      "id": "if_p2_ok_estricto",
+      "id": "728649c2-0543-4897-ad58-445d1d23cc0a",
       "name": "IF P2 OK estricto",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2200,
-        120
+        -400,
+        352
       ]
     },
     {
       "parameters": {
         "jsCode": "const nv = (v) => { if (v === undefined || v === null) return null; const s = String(v).trim(); return s === '' ? null : s; };\n\n// === Build Payload P3: confirmar_reserva ===\nconst prev = $json;                 // viene de Normalize P2\nconst ctx = prev.ctx;               // ctx trae id_pre_reserva y id_pago\nconst payload = {\n  id_pre_reserva: ctx.id_pre_reserva,\n  permitir_pago_en_revision: false,\n  created_by: ctx.operador,\n  encargado_semana: \"\",\n  source_event: ctx.source_event\n};\nreturn { json: { payload, ctx } };\n"
       },
-      "id": "build_payload_p3",
+      "id": "e84038cb-4dee-4cde-8aab-3c8b1dccbc20",
       "name": "Build Payload P3",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2420,
-        60
+        -176,
+        304
       ]
     },
     {
@@ -431,34 +445,34 @@
           "queryReplacement": "={{ JSON.stringify($json.payload) }}"
         }
       },
-      "id": "postgres_confirmar_reserva",
+      "id": "950d958d-7ae9-43e2-a657-20ee6a64be76",
       "name": "Postgres confirmar_reserva",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        2640,
-        60
+        48,
+        304
       ],
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
-          "id": "<ID_CREDENCIAL_POSTGRES>",
-          "name": "<NOMBRE_CREDENCIAL_POSTGRES>"
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "vita_supabase_<ENTORNO>"
         }
       },
-      "onError": "continueRegularOutput",
-      "alwaysOutputData": true
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
         "jsCode": "const nv = (v) => { if (v === undefined || v === null) return null; const s = String(v).trim(); return s === '' ? null : s; };\n\n// === Normalize: confirmar_reserva ===\nconst ctx = ($('Build Payload P3') ? JSON.parse(JSON.stringify($('Build Payload P3').item.json.ctx)) : ($json.ctx || {}));\nconst row = $json;\nlet br = null, ok = false, error_type = null, raw_error = null;\n\nif (row && row.error) {\n  error_type = 'tecnico';\n  raw_error = String((row.error && row.error.message) || row.error);\n} else {\n  br = row[\"confirmar_reserva\"] || row.result || null;\n  if (typeof br === 'string') { try { br = JSON.parse(br); } catch (e) {} }\n  if (!br && row && typeof row === 'object' && ('ok' in row)) { br = row; }\n  if (!br) {\n    error_type = 'tecnico';\n    raw_error = 'respuesta_sql_vacia_o_no_reconocida';\n  } else if (br.ok === true) {\n    ok = true;\n  } else {\n    error_type = 'negocio';\n  }\n}\n\nif (ok && br && br.id_reserva != null) { ctx.id_reserva = br.id_reserva; }\n\nreturn { json: {\n  step: \"confirmar_reserva\", ok, error_type, raw_error,\n  business_result: br,\n  id_pre_reserva: ctx.id_pre_reserva ?? null,\n  id_pago: ctx.id_pago ?? null,\n  id_reserva: ctx.id_reserva ?? null,\n  ctx\n}};\n"
       },
-      "id": "normalize_p3",
+      "id": "cab02606-73ab-442c-a94e-9ae94c9635e5",
       "name": "Normalize P3",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2860,
-        60
+        272,
+        304
       ]
     },
     {
@@ -466,7 +480,9 @@
         "conditions": {
           "options": {
             "caseSensitive": true,
-            "typeValidation": "loose"
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
           },
           "conditions": [
             {
@@ -484,37 +500,37 @@
         },
         "options": {}
       },
-      "id": "if_p3_ok",
+      "id": "983f7ec3-c46b-4fb8-a43b-80ea840a5206",
       "name": "IF P3 OK",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        3080,
-        60
+        496,
+        304
       ]
     },
     {
       "parameters": {},
-      "id": "punto_extension_8c",
+      "id": "cb8300cc-ab85-4b8b-87b1-f4930eb09748",
       "name": "PUNTO EXTENSION 8C (repintado - NO construir en 8B)",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        3300,
-        40
+        704,
+        272
       ]
     },
     {
       "parameters": {
-        "jsCode": "\n// === Build Compensation Context (unifica fallo P2 y fallo P3) ===\nconst prev = $json;                 // Normalize P2 (rama F) o Normalize P3 (rama G)\nconst ctx = prev.ctx || {};\nconst failed_step = prev.step;      // 'registrar_pago' | 'confirmar_reserva'\nconst id_pre_reserva = ctx.id_pre_reserva ?? prev.id_pre_reserva ?? null;\nconst id_pago = ctx.id_pago ?? prev.id_pago ?? null;\nconst pago_registrado = (failed_step === 'confirmar_reserva') ? true : (id_pago != null);\nconst failure_reason = (prev.error_type === 'tecnico')\n  ? ('tecnico: ' + (prev.raw_error || 'desconocido'))\n  : ('negocio: ' + (prev.business_result ? (prev.business_result.error || JSON.stringify(prev.business_result)) : 'desconocido'));\nreturn { json: {\n  payload: {\n    id_pre_reserva: id_pre_reserva,\n    motivo: \"cliente\",\n    descripcion: \"rollback_8b_fallo_cadena\",\n    source_event: ctx.source_event || \"<MARCADOR_AMBIENTE>_w8b_carga_desconocido_manual\"\n  },\n  compensation_context: { id_pre_reserva, id_pago, failed_step, failure_reason, pago_registrado, raw_result: prev },\n  ctx\n}};\n"
+        "jsCode": "\n// === Build Compensation Context (unifica fallo P2 y fallo P3) ===\nconst prev = $json;                 // Normalize P2 (rama F) o Normalize P3 (rama G)\nconst ctx = prev.ctx || {};\nconst failed_step = prev.step;      // 'registrar_pago' | 'confirmar_reserva'\nconst id_pre_reserva = ctx.id_pre_reserva ?? prev.id_pre_reserva ?? null;\nconst id_pago = ctx.id_pago ?? prev.id_pago ?? null;\nconst pago_registrado = (failed_step === 'confirmar_reserva') ? true : (id_pago != null);\nconst failure_reason = (prev.error_type === 'tecnico')\n  ? ('tecnico: ' + (prev.raw_error || 'desconocido'))\n  : ('negocio: ' + (prev.business_result ? (prev.business_result.error || JSON.stringify(prev.business_result)) : 'desconocido'));\nreturn { json: {\n  payload: {\n    id_pre_reserva: id_pre_reserva,\n    motivo: \"cliente\",\n    descripcion: \"rollback_8b_fallo_cadena\",\n    source_event: ctx.source_event || \"n8n_ops_w8b_carga_desconocido_manual\"\n  },\n  compensation_context: { id_pre_reserva, id_pago, failed_step, failure_reason, pago_registrado, raw_result: prev },\n  ctx\n}};\n"
       },
-      "id": "build_compensation_context",
+      "id": "102ccbb9-9c5a-4575-84b6-ddcfe29423ee",
       "name": "Build Compensation Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2640,
-        380
+        48,
+        624
       ]
     },
     {
@@ -525,47 +541,47 @@
           "queryReplacement": "={{ JSON.stringify($json.payload) }}"
         }
       },
-      "id": "postgres_cancelar_prereserva",
+      "id": "dc947e0d-4839-418d-8f94-414887ac54ed",
       "name": "Postgres cancelar_prereserva",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        2860,
-        380
+        272,
+        624
       ],
+      "alwaysOutputData": true,
       "credentials": {
         "postgres": {
-          "id": "<ID_CREDENCIAL_POSTGRES>",
-          "name": "<NOMBRE_CREDENCIAL_POSTGRES>"
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "vita_supabase_<ENTORNO>"
         }
       },
-      "onError": "continueRegularOutput",
-      "alwaysOutputData": true
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
         "jsCode": "\n// === Normalize I: normaliza SOLO el resultado técnico de cancelar_prereserva ===\nconst row = $json;\nconst compCtx = ($('Build Compensation Context') ? $('Build Compensation Context').item.json.compensation_context : null);\nconst ctx = ($('Build Compensation Context') ? $('Build Compensation Context').item.json.ctx : null);\nlet cancelacion_ok = false, pagos_asociados_count = null, pagos_asociados_ids = null;\nlet estado_no_cancelable = false, error_type = null, raw_error = null, br = null;\n\nif (row && row.error) {\n  error_type = 'tecnico';\n  raw_error = String((row.error && row.error.message) || row.error);\n} else {\n  br = row.cancelar_prereserva || row.result || null;\n  if (typeof br === 'string') { try { br = JSON.parse(br); } catch (e) {} }\n  if (!br && row && typeof row === 'object' && ('ok' in row)) { br = row; }\n  if (!br) {\n    error_type = 'tecnico';\n    raw_error = 'respuesta_sql_vacia_o_no_reconocida';\n  } else if (br.ok === true) {\n    cancelacion_ok = true;\n    pagos_asociados_count = br.pagos_asociados_count ?? null;\n    pagos_asociados_ids = br.pagos_asociados_ids ?? null;\n  } else {\n    error_type = 'negocio';\n    if (br.error === 'estado_no_cancelable') estado_no_cancelable = true;\n  }\n}\nreturn { json: {\n  step: \"cancelar_prereserva\",\n  cancelacion_ok, pagos_asociados_count, pagos_asociados_ids,\n  estado_no_cancelable, error_type, raw_error,\n  compensation_context: compCtx, ctx\n}};\n"
       },
-      "id": "normalize_i",
+      "id": "6080e100-3e01-4710-9674-44cdfb5aa8e2",
       "name": "Normalize I",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3080,
-        380
+        496,
+        624
       ]
     },
     {
       "parameters": {
-        "jsCode": "\n// === Build Response: ÚNICA fuente de la decisión del mensaje ===\n// Emite { resultado, completionTitle, completionMessage } que consume el nodo Form Ending.\nconst j = $json;\nfunction out(tipo, titulo, detalle) {\n  return { json: { resultado: tipo, completionTitle: titulo, completionMessage: detalle } };\n}\n\n// 1) Validación fallida (Bloque B)\nif (j.valido === false) return out(\"error_validacion\", \"No se pudo cargar\", j.msg_error);\n\n// 2) Éxito (rama G-ok: confirmar_reserva ok)\nif (j.ok === true && j.step === \"confirmar_reserva\") {\n  const ctx = j.ctx || {};\n  const det = \"Reserva N° \" + (ctx.id_reserva ?? j.id_reserva) + \". \" + (ctx.cabana_label||\"\") + \" \" +\n              (ctx.fecha_in||\"\") + \" → \" + (ctx.fecha_out||\"\") +\n              \". Saldo pendiente: $\" + (ctx.saldo!=null?ctx.saldo:\"-\") + \".\";\n  return out(\"ok\", \"✅ Reserva confirmada\", det);\n}\n\n// 3) Error en P1 (Normalize C, ok:false)\nif (j.step === \"crear_prereserva\" && j.ok === false) {\n  if (j.error_type === \"tecnico\")\n    return out(\"error_tecnico\", \"⚠️ Error técnico\",\n      \"No se pudo procesar la carga. Reintentá en un momento; si persiste, avisá al responsable.\");\n  const e = j.business_result ? j.business_result.error : null;\n  const MAP = {\n    payload_invalido: \"Faltan datos obligatorios (revisá los campos).\",\n    precio_requerido: \"Faltan el monto total o la seña.\",\n    fechas_invalidas: \"La fecha de salida debe ser posterior a la de entrada.\",\n    huesped_nombre_requerido: \"Falta el nombre del huésped.\",\n    huesped_contacto_requerido: \"Cargá al menos teléfono o email.\",\n    cabana_no_existe: \"Esa cabaña no está disponible para cargar.\",\n    cabana_inactiva: \"Esa cabaña no está disponible para cargar.\",\n    excede_capacidad: \"Esa cabaña no admite esa cantidad de personas.\",\n    no_disponible: \"Esa cabaña ya está ocupada en esas fechas.\",\n    hora_fuera_de_rango: \"El horario solicitado está fuera del rango permitido.\"\n  };\n  return out(\"error_negocio\", \"No se pudo cargar\", MAP[e] || (\"No se pudo crear la reserva (\" + (e||\"error\") + \").\"));\n}\n\n// 4) Resultado de compensación (Normalize I)\nif (j.step === \"cancelar_prereserva\") {\n  const cc = j.compensation_context || {};\n  const idp = cc.id_pre_reserva;\n  const ids = (j.pagos_asociados_ids && j.pagos_asociados_ids.length) ? j.pagos_asociados_ids.join(\", \") : null;\n  if (j.cancelacion_ok === true && j.pagos_asociados_count === 0)\n    return out(\"reversion_limpia\", \"No se completó la carga\",\n      \"La carga no se pudo completar (\" + (cc.failure_reason||\"\") + \"). \" +\n      \"La pre-reserva se canceló y no quedó ningún pago registrado. Podés reintentar.\");\n  if (j.cancelacion_ok === true && j.pagos_asociados_count > 0)\n    return out(\"revision_manual\", \"⚠️ Requiere revisión manual\",\n      \"Se registró un pago pero no se pudo confirmar la reserva. La pre-reserva #\" + idp +\n      \" se canceló pero el/los pago/s siguen registrados (#\" + ids + \"). Avisá al responsable con esos números.\");\n  const pagoTxt = cc.id_pago ? (\", pago #\" + cc.id_pago) : \"\";\n  return out(\"estado_parcial\", \"⚠️ Carga incompleta\",\n    \"La carga quedó incompleta (pre-reserva #\" + idp + pagoTxt + \") y no se pudo revertir automáticamente. \" +\n    \"Requiere revisión manual — avisá al responsable.\");\n}\n\n// 5) Fallback defensivo\nreturn out(\"error_tecnico\", \"⚠️ Error inesperado\",\n  \"No se pudo determinar el resultado de la carga. Avisá al responsable.\");\n"
+        "jsCode": "\n// === Build Response: ÚNICA fuente de la decisión del mensaje ===\n// Emite { resultado, completionTitle, completionMessage } que consume el nodo Form Ending.\nconst j = $json;\nfunction out(tipo, titulo, detalle) {\n  return { json: { resultado: tipo, completionTitle: titulo, completionMessage: detalle } };\n}\n\n// 1) Validación fallida (Bloque B)\nif (j.valido === false) return out(\"error_validacion\", \"No se pudo cargar\", j.msg_error);\n\n// 2) Éxito (rama G-ok: confirmar_reserva ok)\nif (j.ok === true && j.step === \"confirmar_reserva\") {\n  const ctx = j.ctx || {};\n  const det = \"Reserva N° \" + (ctx.id_reserva ?? j.id_reserva) + \". \" + (ctx.cabana_label||\"\") + \" \" +\n              (ctx.fecha_in||\"\") + \" → \" + (ctx.fecha_out||\"\") +\n              \". Saldo pendiente: $\" + (ctx.saldo!=null?ctx.saldo:\"-\") + \".\";\n  return out(\"ok\", \"✅ Reserva confirmada\", det);\n}\n\n// 3) Error en P1 (Normalize C, ok:false)\nif (j.step === \"crear_prereserva\" && j.ok === false) {\n  if (j.error_type === \"tecnico\")\n    return out(\"error_tecnico\", \"⚠️ Error técnico\",\n      \"No se pudo procesar la carga. Reintentá en un momento; si persiste, avisá a Franco.\");\n  const e = j.business_result ? j.business_result.error : null;\n  const MAP = {\n    payload_invalido: \"Faltan datos obligatorios (revisá los campos).\",\n    precio_requerido: \"Faltan el monto total o la seña.\",\n    fechas_invalidas: \"La fecha de salida debe ser posterior a la de entrada.\",\n    huesped_nombre_requerido: \"Falta el nombre del huésped.\",\n    huesped_contacto_requerido: \"Cargá al menos teléfono o email.\",\n    cabana_no_existe: \"Esa cabaña no está disponible para cargar.\",\n    cabana_inactiva: \"Esa cabaña no está disponible para cargar.\",\n    excede_capacidad: \"Esa cabaña no admite esa cantidad de personas.\",\n    no_disponible: \"Esa cabaña ya está ocupada en esas fechas.\",\n    hora_fuera_de_rango: \"El horario solicitado está fuera del rango permitido.\"\n  };\n  return out(\"error_negocio\", \"No se pudo cargar\", MAP[e] || (\"No se pudo crear la reserva (\" + (e||\"error\") + \").\"));\n}\n\n// 4) Resultado de compensación (Normalize I)\nif (j.step === \"cancelar_prereserva\") {\n  const cc = j.compensation_context || {};\n  const idp = cc.id_pre_reserva;\n  const ids = (j.pagos_asociados_ids && j.pagos_asociados_ids.length) ? j.pagos_asociados_ids.join(\", \") : null;\n  if (j.cancelacion_ok === true && j.pagos_asociados_count === 0)\n    return out(\"reversion_limpia\", \"No se completó la carga\",\n      \"La carga no se pudo completar (\" + (cc.failure_reason||\"\") + \"). \" +\n      \"La pre-reserva se canceló y no quedó ningún pago registrado. Podés reintentar.\");\n  if (j.cancelacion_ok === true && j.pagos_asociados_count > 0)\n    return out(\"revision_manual\", \"⚠️ Requiere revisión manual\",\n      \"Se registró un pago pero no se pudo confirmar la reserva. La pre-reserva #\" + idp +\n      \" se canceló pero el/los pago/s siguen registrados (#\" + ids + \"). Avisá a Franco con esos números.\");\n  const pagoTxt = cc.id_pago ? (\", pago #\" + cc.id_pago) : \"\";\n  return out(\"estado_parcial\", \"⚠️ Carga incompleta\",\n    \"La carga quedó incompleta (pre-reserva #\" + idp + pagoTxt + \") y no se pudo revertir automáticamente. \" +\n    \"Requiere revisión manual — avisá a Franco.\");\n}\n\n// 5) Fallback defensivo\nreturn out(\"error_tecnico\", \"⚠️ Error inesperado\",\n  \"No se pudo determinar el resultado de la carga. Avisá a Franco.\");\n"
       },
-      "id": "build_response",
+      "id": "18249a77-433e-4b90-847c-dd6025b7ef9c",
       "name": "Build Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3520,
-        320
+        928,
+        560
       ]
     },
     {
@@ -575,17 +591,103 @@
         "completionMessage": "={{ $json.completionMessage }}",
         "options": {}
       },
-      "id": "form_ending_8b",
+      "id": "5536920f-733d-46ca-b132-02a4009c1e02",
       "name": "Form Ending",
       "type": "n8n-nodes-base.form",
       "typeVersion": 1,
       "position": [
-        3760,
-        320
+        1168,
+        560
       ],
-      "webhookId": "<WEBHOOK_ID_ENDING>"
+      "webhookId": "REEMPLAZAR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_ID_8CBIS",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/REEMPLAZAR_ID_8CBIS"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_reserva": "={{ $json.id_reserva ?? $json.business_result?.id_reserva }}",
+            "id_pre_reserva": "={{ $json.id_pre_reserva ?? $json.business_result?.id_pre_reserva }}",
+            "entorno": "ops",
+            "source": "w8b_carga",
+            "operador": "={{ $json.ctx?.operador }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "id_reserva",
+              "displayName": "id_reserva",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "id_pre_reserva",
+              "displayName": "id_pre_reserva",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "entorno",
+              "displayName": "entorno",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "operador",
+              "displayName": "operador",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1104,
+        176
+      ],
+      "id": "b41baf71-96b5-4449-a528-00ccfabffb84",
+      "name": "Call 'vita_w8cbis_alerta__OPS'",
+      "onError": "continueRegularOutput"
     }
   ],
+  "pinData": {},
   "connections": {
     "Validar y Normalizar Input": {
       "main": [
@@ -776,6 +878,11 @@
             "node": "Build Response",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Call 'vita_w8cbis_alerta__OPS'",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -839,9 +946,10 @@
   "active": false,
   "settings": {
     "executionOrder": "v1",
-    "timezone": "America/Argentina/Buenos_Aires"
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": true
   },
-  "meta": {
-    "templateNote": "TEMPLATE SANITIZADO — Etapa 8B capa de carga (patron Form Trigger -> crear_prereserva -> registrar_pago -> confirmar_reserva, con compensacion via cancelar_prereserva). SIN datos reales. Completar antes de usar: <ID_CREDENCIAL_POSTGRES>, <NOMBRE_CREDENCIAL_POSTGRES>, <FORM_PATH>, <WEBHOOK_ID_FORM>, <WEBHOOK_ID_ENDING>, <MARCADOR_AMBIENTE>, y los mapas MAP_CABANA / MAP_CAP / MAP_OP + opciones de los dropdowns Operador y Cabaña (marcados // AJUSTAR). Los strings persistidos de canal_origen/canal_pago_esperado/medio_pago asumen los CHECK de Vita Delta; verificar contra los CHECK de tu propia base. Password de Basic Auth se configura al importar (no viaja en el JSON)."
-  }
+  "tags": []
 }

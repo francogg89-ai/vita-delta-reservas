@@ -1256,3 +1256,41 @@ vieja igual, así que conviene revisarlo ANTES de la primera ejecución en OPS.
 
 **Verificado:** 2026-06-04, promoción de 8D a OPS (un bloqueo temprano quedó con marcador
 'test', aceptado como está; los siguientes correctos).
+
+## Lecciones de la alerta por reserva próxima — Sub-etapa 8C-bis
+
+### L-8Cbis-01 — Execute Workflow emite el output del sub-workflow, no el item original
+Cuando un nodo Execute Workflow (Call) se conecta en serie hacia un nodo posterior, ese
+nodo recibe **el output del sub-workflow invocado**, no el item que venía fluyendo en el
+workflow padre. En 8C-bis, conectar el Call hacia `Build Response` habría hecho que la
+pantalla de confirmación del operador dependiera del resultado de la notificación (o se
+rompiera si el sub-workflow no devolvía la forma esperada). Solución: **rama lateral** — el
+nodo previo (PUNTO EXTENSION) alimenta `Build Response` y el Call en paralelo desde la
+misma salida, y el Call queda como hoja sin salida. Así la respuesta al operador usa el
+item original y es indiferente a lo que pase en el aviso.
+
+**Verificado:** validación end-to-end en TEST con el Call pineado para fallar →
+`Build Response` igual emitió "✅ Reserva confirmada" con los datos correctos.
+
+### L-8Cbis-02 — Copy-paste de mails puede arrastrar un carácter de tabulación invisible
+Al pegar una dirección de correo dentro de un array en un nodo Code, quedó un `\t`
+(tabulación) pegado al inicio del string (`'\trodrigo...@gmail.com'`). El `.join(',')`
+posterior produjo un destinatario con tabulación al frente, que un servidor SMTP rechaza
+silenciosamente. No es visible en la UI a simple vista. **Regla:** al adaptar
+destinatarios/strings sensibles entre entornos, inspeccionar el JSON real del nodo (no solo
+la vista del editor) para detectar whitespace espurio; o aplicar `.trim()` defensivo a cada
+dirección antes de usarla.
+
+**Verificado:** 2026-06-04, detectado por lectura del JSON del workflow OPS y corregido
+antes de la primera ejecución real.
+
+### L-8Cbis-03 — En n8n, un cambio guardado no entra en producción hasta "Publish"
+Editar y guardar un workflow deja el cambio en la versión de trabajo (draft), pero la
+versión que se ejecuta en producción es la **publicada** (`activeVersion`). Tras cargar el
+mail real de Jennifer y guardar, la `activeVersion` todavía tenía el destinatario anterior;
+una reserva real habría notificado al destinatario viejo hasta pulsar "Publish". **Regla:**
+después de un cambio que debe impactar producción, confirmar que la `activeVersion` refleja
+el cambio (o re-leer el workflow por MCP), no solo que está guardado.
+
+**Verificado:** 2026-06-04, diferencia draft vs. `activeVersion` detectada por lectura del
+workflow OPS; se confirmó la publicación antes del cierre.

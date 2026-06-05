@@ -1,0 +1,425 @@
+{
+  "name": "vita_w8cbis_alerta__TEMPLATE",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "id_reserva",
+              "type": "number"
+            },
+            {
+              "name": "id_pre_reserva",
+              "type": "number"
+            },
+            {
+              "name": "entorno"
+            },
+            {
+              "name": "source"
+            },
+            {
+              "name": "operador"
+            }
+          ]
+        }
+      },
+      "id": "8f4eef9c-ff46-4861-8976-b93775ab51b1",
+      "name": "Disparo 8C-bis",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const inItem = $input.first() ? $input.first().json : {};\nconst rawId = inItem.id_reserva;\nconst idReserva = Number(rawId);\nconst idValido = Number.isInteger(idReserva) && idReserva > 0;\nconst entorno = String(inItem.entorno || '').toLowerCase().trim();\nconst entornoValido = entorno === 'test' || entorno === 'ops';\nconst entradaValida = idValido && entornoValido;\nreturn [{\n  json: {\n    entrada_valida: entradaValida,\n    id_reserva: idValido ? idReserva : null,\n    id_pre_reserva: inItem.id_pre_reserva ?? null,\n    entorno: entornoValido ? entorno : null,\n    source: inItem.source ?? null,\n    operador: inItem.operador ?? null,\n    _motivo_invalido: entradaValida ? null : (!idValido ? 'id_reserva ausente o no numerico' : 'entorno invalido'),\n  },\n}];"
+      },
+      "id": "f33e73aa-c291-4ce0-b435-da3faedc8800",
+      "name": "Validar entrada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.entrada_valida }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7f4928a6-87a6-4392-9b7c-2fe00531b9af",
+      "name": "Entrada valida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  r.id_reserva,\n  c.nombre AS cabana,\n  r.fecha_checkin,\n  r.fecha_checkout,\n  r.hora_checkin,\n  r.hora_checkout\nFROM reservas r\n  JOIN cabanas c ON c.id_cabana = r.id_cabana\nWHERE r.id_reserva = $1;",
+        "options": {
+          "queryReplacement": "={{ $json.id_reserva }}"
+        }
+      },
+      "id": "29de22e4-680e-4b92-a771-2b27c2133ada",
+      "name": "Reserva por id (read-only)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "vita_supabase_<ENTORNO>"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.id_reserva }}",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2bfa53f-154b-45c9-b13a-abea1d42e1d9",
+      "name": "Reserva encontrada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const entorno = $('Validar entrada').first().json.entorno || 'ops';\nconst CFG = {\n  test: {\n    destinatarios: { operativo: ['OPERATIVO_1@EJEMPLO.COM'], limpieza: ['OPERATIVO_1@EJEMPLO.COM'] },\n    url_op: 'https://<TU_INSTANCIA>.app.n8n.cloud/webhook/w8c-op-ops',\n    url_limp: 'https://<TU_INSTANCIA>.app.n8n.cloud/webhook/w8c-limp-ops',\n  },\n  ops: {\n    destinatarios: { operativo: ['OPERATIVO_1@EJEMPLO.COM','OPERATIVO_2@EJEMPLO.COM'], limpieza: ['LIMPIEZA@EJEMPLO.COM'] },\n    url_op: 'https://<TU_INSTANCIA>.app.n8n.cloud/webhook/w8c-op-ops',\n    url_limp: 'https://<TU_INSTANCIA>.app.n8n.cloud/webhook/w8c-limp-ops',\n  },\n};\nconst cfg = CFG[entorno] || CFG.ops;\nfunction ymd(v) {\n  if (v == null) return null;\n  const s = String(v);\n  const m = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);\n  return m ? m[0] : null;\n}\nconst row = $input.first().json;\nconst ci = ymd(row.fecha_checkin);\nconst co = ymd(row.fecha_checkout);\nconst hoy = $now.setZone('America/Argentina/Buenos_Aires').toFormat('yyyy-MM-dd');\nconst limite = $now.setZone('America/Argentina/Buenos_Aires').plus({ days: 7 }).toFormat('yyyy-MM-dd');\nconst enVentana = ci != null && ci >= hoy && ci <= limite;\nconst cabana = row.cabana || '';\nconst asunto = '[Vita Delta] Nueva reserva proxima - ' + cabana + ' - ' + (ci || '');\nconst cuerpoBase = 'Se confirmo una reserva proxima.\\n\\n' + 'Cabana: ' + cabana + '\\n' + 'Entrada: ' + (ci || '') + '\\n' + 'Salida: ' + (co || '') + '\\n\\n';\nconst cuerpoOperativo = cuerpoBase + 'Ver calendario operativo:\\n' + cfg.url_op + '\\n';\nconst cuerpoLimpieza = cuerpoBase + 'Ver calendario de limpieza:\\n' + cfg.url_limp + '\\n';\nreturn [{\n  json: {\n    en_ventana: enVentana, hoy, limite, fecha_checkin: ci, fecha_checkout: co, cabana, asunto,\n    cuerpo_operativo: cuerpoOperativo, cuerpo_limpieza: cuerpoLimpieza,\n    dest_operativo: cfg.destinatarios.operativo.join(','), dest_limpieza: cfg.destinatarios.limpieza.join(','),\n    id_reserva: row.id_reserva, entorno,\n  },\n}];"
+      },
+      "id": "110dd593-6be6-425f-a5e7-9d03cb360fc6",
+      "name": "Ventana + armar mail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.en_ventana }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ae47c2df-d5f8-40aa-b695-554ef11ee809",
+      "name": "En ventana?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "REMITENTE@EJEMPLO.COM",
+        "toEmail": "={{ $json.dest_operativo }}",
+        "subject": "={{ $json.asunto }}",
+        "emailFormat": "text",
+        "text": "={{ $json.cuerpo_operativo }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "953b82b9-b61c-49da-ba43-b2e8e0d96825",
+      "name": "Mail operativo",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1568,
+        0
+      ],
+      "alwaysOutputData": true,
+      "webhookId": "REEMPLAZAR_WEBHOOK_ID",
+      "credentials": {
+        "smtp": {
+          "id": "REEMPLAZAR_CRED_SMTP",
+          "name": "SMTP <REMITENTE>"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function envioOk(nodeName) {\n  try {\n    const it = $(nodeName).first();\n    if (!it) return false;\n    if (it.json && it.json.error) return false;\n    return true;\n  } catch (e) { return false; }\n}\nconst ctx = $('Ventana + armar mail').first().json;\nreturn [{\n  json: {\n    id_reserva: ctx.id_reserva, entorno: ctx.entorno, fecha_checkin: ctx.fecha_checkin,\n    operativo: envioOk('Mail operativo') ? 'ok' : 'fail',\n    limpieza: envioOk('Mail limpieza') ? 'ok' : 'fail',\n    aviso: 'Notificacion 8C-bis: el resultado del mail NO afecta la reserva confirmada.',\n  },\n}];"
+      },
+      "id": "270d1d54-086d-4976-ad4c-158fca155066",
+      "name": "Consolidar resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "e7f5fb05-5e53-4b95-b515-c96169243547",
+      "name": "Fuera de ventana, no se envia",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        192
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1ea8043-c4f9-42b1-a613-0bb9975e329c",
+      "name": "Stop: reserva no encontrada",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        288
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "05dc55ea-d08d-4789-8b70-9c187c5f8708",
+      "name": "Stop: entrada invalida",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        672,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "REMITENTE@EJEMPLO.COM",
+        "toEmail": "={{ $(\"Ventana + armar mail\").item.json.dest_limpieza }}",
+        "subject": "={{ $(\"Ventana + armar mail\").item.json.asunto }}",
+        "emailFormat": "text",
+        "text": "={{ $(\"Ventana + armar mail\").item.json.cuerpo_limpieza }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "ae34bb51-d970-4e65-9a71-9d1fed49b53a",
+      "name": "Mail limpieza",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1792,
+        0
+      ],
+      "alwaysOutputData": true,
+      "webhookId": "REEMPLAZAR_WEBHOOK_ID",
+      "credentials": {
+        "smtp": {
+          "id": "REEMPLAZAR_CRED_SMTP",
+          "name": "SMTP <REMITENTE>"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Disparo 8C-bis": {
+      "main": [
+        [
+          {
+            "node": "Validar entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar entrada": {
+      "main": [
+        [
+          {
+            "node": "Entrada valida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada valida?": {
+      "main": [
+        [
+          {
+            "node": "Reserva por id (read-only)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop: entrada invalida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserva por id (read-only)": {
+      "main": [
+        [
+          {
+            "node": "Reserva encontrada?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserva encontrada?": {
+      "main": [
+        [
+          {
+            "node": "Ventana + armar mail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop: reserva no encontrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ventana + armar mail": {
+      "main": [
+        [
+          {
+            "node": "En ventana?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "En ventana?": {
+      "main": [
+        [
+          {
+            "node": "Mail operativo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fuera de ventana, no se envia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail operativo": {
+      "main": [
+        [
+          {
+            "node": "Mail limpieza",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail limpieza": {
+      "main": [
+        [
+          {
+            "node": "Consolidar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "tags": []
+}

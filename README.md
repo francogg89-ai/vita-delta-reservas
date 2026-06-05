@@ -8,7 +8,7 @@ Sistema de automatización integral para el complejo de cabañas Vita Delta.
 
 Vita Delta Reservas es un sistema de gestión operativa para un complejo de 5 cabañas (Bamboo, Madre Selva, Arrebol, Guatemala, Tokio). Centraliza disponibilidad, reservas, pricing, pagos, operación interna y comunicación con huéspedes en una arquitectura automatizable, trazable y escalable.
 
-El stack actual es **Supabase / PostgreSQL** como base de datos y fuente de verdad, **n8n** como orquestador de workflows, y **Claude API** como capa conversacional futura. El proyecto migró desde un stack inicial sobre Google Sheets; esa migración (Etapa 6B) está ejecutada y cerrada en el entorno DEV, y el sistema cuenta además con un entorno TEST levantado y validado, y un entorno **OPS de operación real interna** levantado, paritario, seguro y conectado a n8n (Etapa 8A). Sobre OPS ya funciona la **capa de carga interna de reservas** (Etapa 8B): un formulario n8n con el que el equipo carga reservas reales en una acción. El sistema **ya está tomando reservas reales** (primera reserva real cargada en el smoke de 8B). Sobre esa base se construyó la **capa de calendarios visuales** (Etapa 8C): tres vistas de solo lectura — calendario operativo del equipo, calendario de limpieza para Jennifer (sin montos) y un Sheet de resguardo — que presentan el estado del sistema sin tocar el motor, hoy activas y en uso real. Por último, la **capa de bloqueos operativos** (Etapa 8D) agrega un formulario n8n para que el equipo bloquee una cabaña (mantenimiento, uso propio, clima) en una acción. **Con 8D se cierra la Etapa 8 (operación real interna):** el equipo opera el complejo con tres acciones autoservicio sobre OPS — cargar reservas, ver el estado y crear bloqueos —, todo sobre Supabase como fuente de verdad.
+El stack actual es **Supabase / PostgreSQL** como base de datos y fuente de verdad, **n8n** como orquestador de workflows, y **Claude API** como capa conversacional futura. El proyecto migró desde un stack inicial sobre Google Sheets; esa migración (Etapa 6B) está ejecutada y cerrada en el entorno DEV, y el sistema cuenta además con un entorno TEST levantado y validado, y un entorno **OPS de operación real interna** levantado, paritario, seguro y conectado a n8n (Etapa 8A). Sobre OPS ya funciona la **capa de carga interna de reservas** (Etapa 8B): un formulario n8n con el que el equipo carga reservas reales en una acción. El sistema **ya está tomando reservas reales** (primera reserva real cargada en el smoke de 8B). Sobre esa base se construyó la **capa de calendarios visuales** (Etapa 8C): tres vistas de solo lectura — calendario operativo del equipo, calendario de limpieza para Jennifer (sin montos) y un Sheet de resguardo — que presentan el estado del sistema sin tocar el motor, hoy activas y en uso real. Por último, la **capa de bloqueos operativos** (Etapa 8D) agrega un formulario n8n para que el equipo bloquee una cabaña (mantenimiento, uso propio, clima) en una acción. **Con 8D se cierra la Etapa 8 (operación real interna):** el equipo opera el complejo con tres acciones autoservicio sobre OPS — cargar reservas, ver el estado y crear bloqueos —, todo sobre Supabase como fuente de verdad. Sobre esa base se sumó la **sub-etapa 8C-bis** (alerta por reserva próxima): un aviso automático por mail al equipo y a Jennifer cuando se confirma una reserva con check-in dentro de los próximos 7 días, disparado en rama lateral desde el formulario de carga sin afectar la reserva si el envío falla.
 
 > La IA conversa. n8n orquesta. PostgreSQL decide y persiste. Los humanos auditan.
 
@@ -48,8 +48,9 @@ Todas las etapas de diseño están cerradas. No se reabren.
 | 8B | Capa de carga interna de reservas (Form Trigger n8n) | Cerrada (2026-05-30) |
 | 8C | Calendarios visuales por evento (HTML operativo + limpieza + Sheet resguardo) | Cerrada (2026-06-01, TEST + OPS) |
 | 8D | Capa de bloqueos operativos (Form Trigger n8n) | Cerrada (2026-06-04, TEST + OPS) — **cierra la Etapa 8** |
+| 8C-bis | Alerta por reserva próxima por mail (sub-workflow, rama lateral en 8B) | Cerrada (2026-06-04, TEST + OPS activo) |
 
-**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. DEV, TEST y OPS están alineados funcionalmente: TEST se reconstruyó desde el canónico en 7B (paridad 10/10 vs DEV) y OPS en 8A (paridad P01-P10 10/10). 8B no modificó el schema: la capa de carga usa las funciones existentes tal cual. 8C tampoco lo modificó: los calendarios son de solo lectura. 8D tampoco: la capa de bloqueos usa la función `crear_bloqueo()` existente tal cual.
+**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. DEV, TEST y OPS están alineados funcionalmente: TEST se reconstruyó desde el canónico en 7B (paridad 10/10 vs DEV) y OPS en 8A (paridad P01-P10 10/10). 8B no modificó el schema: la capa de carga usa las funciones existentes tal cual. 8C tampoco lo modificó: los calendarios son de solo lectura. 8D tampoco: la capa de bloqueos usa la función `crear_bloqueo()` existente tal cual. 8C-bis tampoco: es solo lectura (consulta una reserva por id) + envío de mail.
 
 ---
 
@@ -99,7 +100,7 @@ Tres vistas **derivadas de solo lectura** desde Supabase, sin tocar el motor ni 
 - `vita_w8c_html_limpieza` — calendario de Jennifer. Grilla de 7 días **sin montos**, con mascotas y notas operativas. Basic Auth propia y separada de la del operativo y la del formulario 8B. También ventana en vivo.
 - `vita_w8c_sheet_resguardo` — el calendario operativo volcado a un Google Sheet como respaldo offline (grilla con meses apilados, sin colores). A diferencia de los HTML, es una **foto estática** que se regenera por ejecución (hoy por disparo manual); se escribe vía HTTP a la API REST de Google Sheets. Diseñado autónomo para que el punto de extensión de 8B pueda invocarlo a futuro.
 
-Pintado en la capa de presentación (no se lee 1:1 del campo `estado`): operativo **rojo > gris > verde > blanco**; limpieza **rojo > gris > amarillo (salida) > verde > blanco**. Validados en TEST y activos en OPS (los HTML en uso real por el equipo; el resguardo es manual). La alerta por reserva próxima (8C-bis) queda como trabajo posterior independiente.
+Pintado en la capa de presentación (no se lee 1:1 del campo `estado`): operativo **rojo > gris > verde > blanco**; limpieza **rojo > gris > amarillo (salida) > verde > blanco**. Validados en TEST y activos en OPS (los HTML en uso real por el equipo; el resguardo es manual). La alerta por reserva próxima (8C-bis) se resolvió después como sub-etapa propia (ver abajo).
 
 ### Capa de bloqueos operativos (Etapa 8D)
 
@@ -109,6 +110,15 @@ Un formulario n8n (Form Trigger, Basic Auth propia, usable desde celular) para q
 
 La función `crear_bloqueo()` valida todo (cabaña, fechas, motivo, y los conflictos con reservas, pre-reservas y otros bloqueos), así que el formulario es solo capa de UX. Un bloqueo no convive con reservas: si hay una reserva en esas fechas, se rechaza. **8D solo crea bloqueos**: corregir o levantar uno requiere intervención manual (no hay desbloqueo desde el formulario). Una cabaña por vez; no hay bloqueo total del complejo ni selección múltiple en esta versión.
 
+### Alerta por reserva próxima (Sub-etapa 8C-bis)
+
+Un sub-workflow n8n (`vita_w8cbis_alerta`) que avisa por mail cuando se confirma una reserva con check-in dentro de los próximos 7 días.
+
+- **Disparo en rama lateral desde el formulario de carga 8B:** al confirmarse una reserva, el punto de extensión de 8B invoca el sub-workflow en paralelo a la respuesta al operador. Si el envío del mail falla, la reserva confirmada no se ve afectada — el operador siempre recibe su "Reserva confirmada". Validado end-to-end.
+- **Solo lectura + envío:** consulta la reserva por `id_reserva` (sin tocar el motor ni el schema) y manda dos correos de texto plano: uno al equipo operativo (Franco + Rodrigo, enlaza al calendario operativo) y uno a Jennifer (enlaza al calendario de limpieza).
+- **Privacidad por construcción:** el mail solo informa cabaña, entrada y salida, más el enlace al calendario; no incluye montos, datos del huésped, teléfono ni notas. El detalle se ve abriendo el calendario, que ya tiene su propio control de acceso.
+- **Canal = mail** (no Telegram ni WhatsApp). Remitente temporal sobre un Gmail propio del proyecto, migrable al mail de las cabañas sin rediseño. Variantes `__TEST` (validado con envío real) y `__OPS` (publicado y activo, con destinatarios reales). La primera ejecución real quedará registrada con la próxima reserva en ventana.
+
 ---
 
 ## Entornos
@@ -117,7 +127,7 @@ La función `crear_bloqueo()` valida todo (cabaña, fechas, motivo, y los confli
 |---|---|---|
 | DEV | `vita-delta-dev` | Backend completo v1.7.3 + hardening + 8 workflows validados + permisos EXECUTE endurecidos (7E). IDs de cabaña 17-21. |
 | TEST | `vita-delta-test` | Schema reconstruido desde canónico, paritario, validado y reseteado a estado limpio (7D). IDs de cabaña 1-5. |
-| OPS | `vita-delta-ops` | **Operación real interna.** Levantado en 8A: schema paritario (P01-P10 10/10), seeds reales, seguridad cerrada (nació más cerrado que TEST), `pg_cron` activo, credencial n8n `vita_supabase_ops` verificada por identidad. IDs de cabaña 1-5. **Capa de carga 8B operativa** (primera reserva real, id 1, Tokio), **calendarios 8C activos** (operativo y limpieza en uso real) y **bloqueos 8D activos** (formulario en uso). |
+| OPS | `vita-delta-ops` | **Operación real interna.** Levantado en 8A: schema paritario (P01-P10 10/10), seeds reales, seguridad cerrada (nació más cerrado que TEST), `pg_cron` activo, credencial n8n `vita_supabase_ops` verificada por identidad. IDs de cabaña 1-5. **Capa de carga 8B operativa** (primera reserva real, id 1, Tokio), **calendarios 8C activos** (operativo y limpieza en uso real), **bloqueos 8D activos** (formulario en uso) y **alerta 8C-bis activa** (aviso por mail al confirmar reserva próxima). |
 | PROD | — | No creado. Etapa futura (público). |
 
 **IDs de cabaña no portables entre entornos** (DEV 17-21; TEST y OPS 1-5 cada uno en su propia base). Cada workflow usa los IDs del ambiente al que apunta. En el form de carga de 8B la cabaña se elige por nombre, no por ID.
@@ -173,9 +183,9 @@ Pendientes documentados al cierre de 7E:
 
 ## Próximas etapas — opciones disponibles
 
-Con DEV, TEST, OPS, 6C, 6D, 7A, 7B, 7C, 7D, 7E, **8A, 8B, 8C y 8D cerradas, la Etapa 8 (operación real interna) está completa**. El sistema está **operativo**: el equipo carga reservas, ve el estado en los calendarios y crea bloqueos, todo autoservicio sobre OPS. Las opciones a priorizar de acá en más (orden sugerido, no comprometidas):
+Con DEV, TEST, OPS, 6C, 6D, 7A, 7B, 7C, 7D, 7E, **8A, 8B, 8C y 8D cerradas, la Etapa 8 (operación real interna) está completa**, más la **sub-etapa 8C-bis** (alerta por reserva próxima por mail) también cerrada y activa en OPS. El sistema está **operativo**: el equipo carga reservas, ve el estado en los calendarios y crea bloqueos (todo autoservicio sobre OPS), y recibe avisos automáticos por mail cuando se confirma una reserva próxima. Las opciones a priorizar de acá en más (orden sugerido, no comprometidas):
 
-- **8C-bis — Alerta por reserva próxima** (trabajo independiente, documento propio): dispara post-`confirmar_reserva` si el check-in cae en [hoy, hoy+7]; notificación interna a Rodrigo y Jennifer por mail o Telegram (no requiere esperar WhatsApp, que es comunicación externa). Engancha en el punto de extensión de 8B, junto con el disparo automático del resguardo.
+- **Registrar la primera ejecución real de 8C-bis** con la próxima reserva en ventana y verificar la entrega; luego, migrar el remitente SMTP al mail propio de las cabañas (sin rediseño).
 - **Edición / baja de bloqueos:** hoy 8D solo crea; levantar o corregir un bloqueo es manual. Si se vuelve frecuente, sería una capa posterior con su propio formulario.
 - **Apertura al exterior (etapas futuras grandes, sobre TEST primero):** webhook MercadoPago real, bot conversacional (Claude API), web pública de reservas, WhatsApp/Instagram (Meta API), y eventualmente el entorno PROD público. Es el salto más ambicioso del proyecto.
 - **Residual de permisos de tabla en DEV** (hallazgo A5 / pendiente 1.7): revocar el set amplio de SELECT/escritura a roles Data API para alinear con TEST, o aceptarlo y documentarlo como definitivo. No urgente; OPS ya nació sin ese problema.
@@ -216,11 +226,12 @@ No avanzar a PROD público, MercadoPago real, bot o frontend público sin decisi
 - `Docs/Implementacion/6B_SCHEMA_SQL.md` — schema canónico SQL vigente (v1.7.3).
 - `Docs/Implementacion/6B_PLAN_FASES.md` — plan de ejecución, conservado como referencia.
 - `Docs/Arquitectura/` — documentos de arquitectura de Etapas 1-6B, `ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md` (diseño del arranque OPS), `ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md` (diseño de la capa de carga, v3.5), `ARQUITECTURA_ETAPA_8C_CALENDARIOS_VISUALES.md` (diseño de los calendarios visuales, v1.3) y `ARQUITECTURA_ETAPA_8D_BLOQUEOS_OPERATIVOS.md` (diseño de la capa de bloqueos, v1.1).
-- `Docs/Bitacora/` — cierres formales (`6C_CIERRE`, `6D_CIERRE`, `7A_CIERRE`, `7B_CIERRE`, `7C_CIERRE`, `7D_CIERRE`, `7E_CIERRE`, `8A_CIERRE`, `8B_CIERRE`, `8C_CIERRE`, `8D_CIERRE`) y bitácoras de ejecución (`6B_EJECUCION_DEV`, `6C_EJECUCION`, `8C_EJECUCION`, `8D_EJECUCION`, `HARDENING_PRE_PRODUCCION_EJECUCION`).
+- `Docs/Bitacora/` — cierres formales (`6C_CIERRE`, `6D_CIERRE`, `7A_CIERRE`, `7B_CIERRE`, `7C_CIERRE`, `7D_CIERRE`, `7E_CIERRE`, `8A_CIERRE`, `8B_CIERRE`, `8C_CIERRE`, `8D_CIERRE`, `8C-bis_CIERRE`) y bitácoras de ejecución (`6B_EJECUCION_DEV`, `6C_EJECUCION`, `8C_EJECUCION`, `8D_EJECUCION`, `HARDENING_PRE_PRODUCCION_EJECUCION`).
 - `Workflows/n8n/supabase/*.template.json` — 8 templates sanitizados de los workflows contra Supabase.
 - `Workflows/n8n/8B/` — workflows de la capa de carga: `vita_w8b_carga_reserva__TEST.json` (validado), `__OPS.json` (productivo), `__TEMPLATE.json` (sanitizado).
 - `Workflows/n8n/8C/` — workflows de los calendarios visuales: `vita_w8c_html_operativo__TEST.json`, `vita_w8c_html_limpieza__TEST.json`, `vita_w8c_sheet_resguardo__TEST.json` (los tres validados en TEST, inactivos) y los templates sanitizados `vita_w8c_html_operativo__TEMPLATE.json` y `vita_w8c_sheet_resguardo__TEMPLATE.json`.
 - `Workflows/n8n/8D/` — workflows de la capa de bloqueos: `vita_w8d_bloqueo__TEST.json` (validado), `__OPS.json` (activo en producción) y `__TEMPLATE.json` (sanitizado).
+- `Workflows/n8n/8Cbis/` — workflows de la alerta por reserva próxima: `vita_w8cbis_alerta__TEST.json` (validado con envío real) y `vita_w8cbis_alerta__OPS.json` (activo en producción).
 - `CLAUDE.md` — reglas de trabajo y orden de lectura para Claude.
 
 ---

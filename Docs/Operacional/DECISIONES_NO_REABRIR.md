@@ -641,6 +641,40 @@ Se mantiene el modelo `[)` (fecha hasta exclusive). El campo se llama "Fecha has
 ### D-8D-09 — 8D SOLO CREA bloqueos; corregir/levantar es manual controlado
 El formulario 8D solo crea bloqueos. No hay edición ni baja desde el formulario. Para corregir un bloqueo cargado por error o levantarlo antes de tiempo, se requiere intervención manual controlada (`activo=false` vía SQL aprobado, o un workflow dedicado futuro). Riesgo operativo aceptado conscientemente para el MVP; una capa de edición/baja sería una etapa posterior si se vuelve necesaria.
 
+## Alerta por reserva próxima (Sub-etapa 8C-bis — cerrada 2026-06-04)
+
+Decisiones de la sub-etapa que recoge el item 3.1 de `Pendiente_pre_produccion.md` (notificación a Jennifer / equipo por reserva próxima). No reabren los cierres de 8B, 8C ni 8D. Detalle en `8C-bis_CIERRE.md`.
+
+### D-8Cbis-01 — Canal de notificación = mail (SMTP)
+La alerta se envía por **mail** (nodo SMTP de n8n), no por Telegram ni WhatsApp. WhatsApp queda reservado para comunicación externa con huéspedes (PROD). Remitente SMTP a título temporal = Gmail personal de Franco (credencial n8n "SMTP gmail"); migrable al futuro mail propio de las cabañas cambiando solo la credencial/remitente, sin rediseño (ver D-8Cbis-09).
+
+### D-8Cbis-02 — Disparo en rama lateral desde 8B, nunca en serie
+8C-bis se invoca desde el PUNTO EXTENSION de 8B (post-`confirmar_reserva` OK) mediante Execute Workflow, **en rama lateral**: el PUNTO EXTENSION alimenta `Build Response` (rama principal, item original) y el Call (rama lateral) en paralelo, y el Call queda como hoja sin salida. Motivo: Execute Workflow emite el output del sub-workflow, no el item original; conectarlo en serie hacia `Build Response` rompería la respuesta al operador. Garantía estructural: si el aviso falla, la reserva confirmada no se ve afectada (validado end-to-end en TEST). El Call lleva `onError: continueRegularOutput` y los nodos de mail `Continue On Fail`.
+
+### D-8Cbis-03 — Sub-workflow independiente con `workflowInputs` explícitos
+La alerta es un sub-workflow separado (`vita_w8cbis_alerta__TEST`/`__OPS`) invocado por Execute Workflow con contrato explícito de 5 entradas (`id_reserva`, `id_pre_reserva`, `entorno`, `source`, `operador`), no passthrough. El `entorno` es valor fijo en el Call: `"test"` en 8B TEST, `"ops"` en 8B OPS.
+
+### D-8Cbis-04 — Fuente de datos = query read-only por `id_reserva` a `reservas`+`cabanas`
+`confirmar_reserva()` solo devuelve `{ ok, id_reserva, id_pre_reserva }` (schema §10.6): no trae cabaña, fechas ni huésped. Por eso 8C-bis consulta los datos con su propia query (`SELECT` sobre `reservas` JOIN `cabanas` por `id_reserva`, sin join a `huespedes`). NO se usan `vista_calendario` ni `vista_limpieza_semana` porque filtran por ventana temporal en su WHERE y no sirven para lookup puntual. 8C-bis es solo lectura: no invoca funciones del motor ni escribe en ninguna tabla.
+
+### D-8Cbis-05 — Privacidad por construcción del mail
+El correo solo informa **cabaña, entrada y salida**, y enlaza al calendario correspondiente (operativo o de limpieza). NO incluye montos, nombre/teléfono del huésped ni notas. El detalle sensible se consulta abriendo el calendario, que ya tiene su propio control de acceso (Basic Auth, D-8C-20). Esto reemplaza lo bosquejado originalmente en el item 3.1 ("datos del huésped, teléfono, mascotas"), que se descartó por privacidad.
+
+### D-8Cbis-06 — Ventana [hoy, hoy+7] inclusive, TZ America/Argentina/Buenos_Aires
+El aviso se envía solo si `fecha_checkin ∈ [hoy, hoy+7]` calculado en zona horaria de Buenos Aires. Las fechas se normalizan a `YYYY-MM-DD` con helper `ymd()` antes de comparar (robusto a timestamps, consistente con L-8C-02).
+
+### D-8Cbis-07 — Sin deduplicación persistente ni tabla nueva
+No se crea tabla de control ni mecanismo de deduplicación. El disparo normal (una confirmación = un aviso) no duplica; una reejecución manual de una reserva ya confirmada podría reenviar el aviso. Riesgo aceptado conscientemente para esta sub-etapa.
+
+### D-8Cbis-08 — Configuración por entorno dentro del nodo, con bloque `test` de seguridad
+El nodo "Ventana + armar mail" tiene un objeto `CFG` con bloques `test` y `ops`. El bloque `test` apunta al mail de Franco (red de seguridad para pruebas manuales del workflow OPS sin molestar a destinatarios reales); el bloque `ops` a los destinatarios reales (operativo: Franco + Rodrigo; limpieza: Jennifer). El bloque elegido lo determina el `entorno` recibido del Call.
+
+### D-8Cbis-09 — Remitente SMTP migrable sin rediseño
+El remitente actual (Gmail personal de Franco) es temporal. Cuando exista el mail propio de las cabañas, se cambia la credencial/remitente SMTP en los nodos de mail sin tocar la lógica ni la topología. Queda como pendiente menor futuro.
+
+### D-8Cbis-10 — Validación de entrada estricta en el sub-workflow
+Si `id_reserva` no es entero positivo o `entorno` no es válido, el sub-workflow corta sin enviar (rama "Stop: entrada inválida"). Si la reserva no se encuentra por id, corta en "Stop: reserva no encontrada". Defensa en profundidad además de la validación que ya hace 8B.
+
 
 - **D3** — Mantener solo `hora_checkin` y `hora_checkout` en tablas (sin "hora base" vs "hora real").
 - **D27** — Horarios = lo elegido por cliente, validado contra margen.
