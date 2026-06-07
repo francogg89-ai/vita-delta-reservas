@@ -1294,3 +1294,42 @@ el cambio (o re-leer el workflow por MCP), no solo que está guardado.
 
 **Verificado:** 2026-06-04, diferencia draft vs. `activeVersion` detectada por lectura del
 workflow OPS; se confirmó la publicación antes del cierre.
+
+## Lecciones de la cobranza posterior — Etapa 9B / Fase 3b
+
+### L-9B-01 — `registrar_pago()` persiste el `source_event` del payload tal cual
+Verificado empíricamente (el pago `id_pago=15` quedó con el `source_event` enviado en el
+payload, `n8n_test_w09_cobranza_franco_ex1582`). Esto habilita verificar y agrupar un evento
+multi-línea por ese campo en la verificación posterior (N6 relee por `source_event`).
+
+**Verificado:** 2026-06-07, SELECT directo sobre `pagos`.
+
+### L-9B-02 — Rollback todo-o-nada de varias llamadas a una función SQL en n8n
+Patrón: un helper SQL que convierte `ok:false` / estado no-confirmado en `RAISE EXCEPTION` +
+`queryBatching: transaction` en un **único** nodo Postgres que recibe N ítems (todo-o-nada).
+El helper debe exigir `ok ∧ estado='confirmado' ∧ sin warning`, no solo `ok` (coherente con
+L-8B-03 / D-8B-15): si mira solo `ok`, deja pasar un `estado='en_revision'` y contamina la
+conciliación. Ver `public.abortar_si_falla(jsonb)` (D-9B-19).
+
+### L-9B-03 — No mezclar coma (cross join) con `LEFT JOIN` en el mismo `FROM` (Postgres)
+`FROM a x, b LEFT JOIN c ON c.k = x.k` falla con `invalid reference to FROM-clause entry for
+table "x"`: el `ON` (y un `WHERE` asociado) del JOIN no puede referenciar la tabla traída por
+la coma, porque el JOIN se asocia solo con la tabla inmediata a su izquierda. Separar el JOIN
+y usar subquery escalar para la condición: `FROM a x LEFT JOIN c ON c.k = x.k WHERE x.k =
+(SELECT k FROM b)`. Detectado en N6 de 3b (el pago se registraba pero la verificación
+explotaba con error genérico de n8n). Se añadió un control estructural al verificador para
+prevenir la reaparición de la mezcla coma+JOIN.
+
+**Verificado:** 2026-06-07, corregido y validado con `sqlglot` (parseo + resolución de scope).
+
+### L-9B-04 — En `pagos` el timestamp es `created_at`/`updated_at`
+No `fecha_hora` (esa columna es de `log_cambios`). Las tablas del schema no son uniformes en
+la convención de nombres de timestamp; verificar por `information_schema.columns` antes de
+asumir. Un SELECT con `fecha_hora` sobre `pagos` aborta con `42703: column does not exist`.
+
+### L-9B-05 — `onError: continueErrorOutput` en Postgres transaccional puede ejecutar ambas salidas
+Ante un rollback de la transacción, el nodo Postgres puede emitir por la salida de error **y**
+por la de éxito, produciendo un doble-mensaje final (en 3b: N8b un instante y luego N8a). La
+**integridad no se ve afectada** (la transacción revierte igual; 0 pagos verificado). Un nodo
+Filter intermedio simple no lo corrige (se intentó N5.5 y se revirtió). Tenerlo en cuenta en
+futuros workflows transaccionales con doble final humano; aceptado como cosmético en 3b.

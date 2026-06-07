@@ -1,0 +1,534 @@
+{
+  "name": "vita_w09_cobranza_posterior__TEMPLATE",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "basicAuth",
+        "formTitle": "Vita Delta — Cobranza posterior multi-porción",
+        "formDescription": "Registrá el saldo cobrado después de confirmada la reserva. Cargá hasta 3 porciones; dejá en 0 las que no uses. La transferencia aplica recargo 5% automático.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "ID de reserva (del listado)",
+              "fieldName": "id_reserva",
+              "fieldType": "number",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Porción EFECTIVO (ARS, 0 si no aplica)",
+              "fieldName": "monto_efectivo",
+              "fieldType": "number",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Porción TRANSFERENCIA (ARS, 0 si no aplica)",
+              "fieldName": "monto_transferencia",
+              "fieldType": "number",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Tipo de transferencia (opcional; por defecto bancaria)",
+              "fieldName": "subtipo_transferencia",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "(bancaria)"
+                  },
+                  {
+                    "option": "MP"
+                  }
+                ]
+              },
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Porción OTROS (equivalente en ARS, 0 si no aplica)",
+              "fieldName": "monto_otros",
+              "fieldType": "number",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Origen de OTROS (obligatorio si hay otros)",
+              "fieldName": "origen_otros",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "(ninguno)"
+                  },
+                  {
+                    "option": "USD"
+                  },
+                  {
+                    "option": "cripto"
+                  },
+                  {
+                    "option": "otro"
+                  }
+                ]
+              },
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Descripción de OTROS (obligatoria si hay otros)",
+              "fieldName": "desc_otros",
+              "fieldType": "text",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Validado por",
+              "fieldName": "validado_por",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Vicky"
+                  },
+                  {
+                    "option": "Rodrigo"
+                  },
+                  {
+                    "option": "Franco"
+                  },
+                  {
+                    "option": "Remo"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Notas (opcional)",
+              "fieldName": "notas",
+              "fieldType": "textarea",
+              "requiredField": false
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "path": "PATH_PLACEHOLDER",
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        0
+      ],
+      "id": "N1-trigger-form-3b",
+      "name": "N1 Form Trigger (porciones)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_BASIC_AUTH_PLACEHOLDER",
+          "name": "CRED_BASIC_AUTH"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH entrada AS (\n  SELECT ($1)::BIGINT AS id_buscado\n),\npagos_reserva_normalizados AS (\n  SELECT\n    p.id_pago, p.tipo, p.estado, p.monto_recibido,\n    COALESCE(\n      p.id_reserva,\n      (SELECT r.id_reserva FROM reservas r WHERE r.id_pre_reserva = p.id_prereserva)\n    ) AS id_reserva_normalizado\n  FROM pagos p\n),\nsaldo AS (\n  SELECT\n    r.id_reserva,\n    c.nombre AS cabana,\n    r.fecha_checkin,\n    r.fecha_checkout,\n    r.monto_total,\n    COALESCE(SUM(prn.monto_recibido) FILTER (\n      WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena','saldo')\n    ), 0) AS cobrado_alojamiento,\n    r.monto_total - COALESCE(SUM(prn.monto_recibido) FILTER (\n      WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena','saldo')\n    ), 0) AS saldo_real\n  FROM reservas r\n  JOIN cabanas c ON c.id_cabana = r.id_cabana\n  LEFT JOIN pagos_reserva_normalizados prn\n         ON prn.id_reserva_normalizado = r.id_reserva\n  GROUP BY r.id_reserva, c.nombre, r.fecha_checkin, r.fecha_checkout, r.monto_total\n)\nSELECT\n  e.id_buscado,\n  (s.id_reserva IS NOT NULL) AS reserva_encontrada,\n  s.id_reserva, s.cabana, s.fecha_checkin, s.fecha_checkout,\n  s.monto_total, s.cobrado_alojamiento, s.saldo_real\nFROM entrada e\nLEFT JOIN saldo s ON s.id_reserva = e.id_buscado;",
+        "options": {
+          "queryReplacement": "={{ $json.id_reserva }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "id": "N2-query-saldo-3b",
+      "name": "N2 Consulta saldo real",
+      "credentials": {
+        "postgres": {
+          "id": "CRED_POSTGRES_PLACEHOLDER",
+          "name": "CRED_POSTGRES"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// N3 (3b) — Validación multi-porción + armado de líneas REALES.\n// Genera el source_event ÚNICO del evento y deja cada línea lista para N4.5/N5.\n// NO registra nada acá. El registro ocurre en N5 (transaccional).\n\nfunction esc(v){ if(v===null||v===undefined) return '';\n  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')\n    .replace(/\"/g,'&quot;').replace(/'/g,'&#39;'); }\nconst fmt = n => Number(n).toLocaleString('es-AR');\n\nconst form = $('N1 Form Trigger (porciones)').item.json;\nconst row = items[0].json;  // N2 SIEMPRE 1 fila\n\nfunction errNeg(m){ return [{ json:{ _error_negocio:true, mensaje:m, mensaje_html:esc(m) } }]; }\n\n// 1) ID inexistente\nif (!row.reserva_encontrada) {\n  return errNeg('No encontré una reserva con ese ID. Revisá el listado.');\n}\nconst saldo_real = Number(row.saldo_real);\n\n// 2) Normalizar montos (vacío -> 0)\nconst ef = Number(form.monto_efectivo || 0);\nconst tr = Number(form.monto_transferencia || 0);\nconst ot = Number(form.monto_otros || 0);\n\n// 3) Cada monto numérico y >= 0\nfor (const [nombre, val] of [['efectivo',ef],['transferencia',tr],['otros',ot]]) {\n  if (!Number.isFinite(val) || val < 0) {\n    return errNeg('El monto de la porción ' + nombre + ' debe ser un número mayor o igual a cero.');\n  }\n}\n\n// 4) Suma de porciones de saldo\nconst suma_saldo = ef + tr + ot;\nif (suma_saldo <= 0) {\n  return errNeg('Tenés que cargar al menos una porción de saldo mayor a cero.');\n}\nif (suma_saldo > saldo_real) {\n  return errNeg('La suma de las porciones ($' + fmt(suma_saldo) + ') supera el saldo pendiente ($' + fmt(saldo_real) + ').');\n}\n\n// 5) Subtipo de transferencia: opcional, default bancaria; MP solo si se elige.\nconst MEDIO_TRANSFERENCIA = (form.subtipo_transferencia === 'MP')\n  ? 'transferencia_mp'\n  : 'transferencia_bancaria';\n\n// 6) Otros: si monto>0 exige origen Y descripción (3b, alineado a 9B §7.1/§10.1)\nconst origen = form.origen_otros;\nconst origen_valido = (origen === 'USD' || origen === 'cripto' || origen === 'otro');\nconst desc = (form.desc_otros || '').trim();\nif (ot > 0) {\n  if (!origen_valido) {\n    return errNeg('Cargaste una porción \"otros\" pero no elegiste el origen (USD, cripto u otro).');\n  }\n  if (desc === '') {\n    return errNeg('La porción \"otros\" exige una descripción (por ejemplo: USDT, pago en especie).');\n  }\n}\nif (ot === 0 && origen_valido) {\n  return errNeg('Elegiste un origen para \"otros\" pero el monto de otros es 0.');\n}\n\n// 7) Recargo 5% sobre la porción de transferencia (interno, no lo carga el operador)\nconst recargo = tr > 0 ? Math.round(tr * 0.05) : 0;\nconst total_paga = suma_saldo + recargo;\nconst saldo_proyectado = saldo_real - suma_saldo;\n\n// 8) source_event ÚNICO del evento (mismo para TODAS las líneas — R4).\n//    Preferir execution.id si n8n lo expone en Code; si no, ms + random corto.\n//    Evita colisión si el mismo operador registra dos cobranzas en el mismo segundo.\nconst validado_por = form.validado_por;\nconst op = String(validado_por || 'desconocido').toLowerCase();\nlet uniq;\ntry {\n  const exId = (typeof $execution !== 'undefined' && $execution && $execution.id) ? String($execution.id) : null;\n  uniq = exId ? ('ex' + exId) : (Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8));\n} catch (e) {\n  uniq = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);\n}\nconst source_event = 'n8n_test_w09_cobranza_' + op + '_' + uniq;\n\n// Nota de \"otros\" con trazabilidad clara (medio_original + registrado_como)\nconst nota_otros = ot > 0\n  ? ('medio_original=otros; origen_otros=' + origen + '; descripcion_otros=' + desc + '; registrado_como=efectivo_ars')\n  : '';\n\n// 9) Armar la LISTA de líneas payload-ready.\n//    Orden confirmado: efectivo -> otros -> transferencia(saldo) -> transferencia(extra).\n//    El `extra` queda inmediatamente después de su `saldo` de transferencia.\nconst lineas = [];\n\nfunction baseLinea(tipo, medio_pago, monto, notas_linea) {\n  return {\n    tipo,\n    medio_pago,\n    monto_esperado: monto,\n    monto_recibido: monto,        // capa fuerza recibido = esperado\n    estado_inicial: 'confirmado', // capa fuerza confirmado\n    moneda: 'ARS',\n    id_reserva: row.id_reserva,\n    validado_por,\n    source_event,\n    notas: notas_linea\n  };\n}\n\nif (ef > 0) {\n  lineas.push(baseLinea('saldo', 'efectivo', ef, 'porcion_efectivo'));\n}\nif (ot > 0) {\n  lineas.push(baseLinea('saldo', 'efectivo', ot, nota_otros));\n}\nif (tr > 0) {\n  lineas.push(baseLinea('saldo', MEDIO_TRANSFERENCIA, tr, 'porcion_transferencia'));\n  lineas.push(baseLinea('extra', MEDIO_TRANSFERENCIA, recargo, 'recargo_5_saldo_transferencia'));\n}\n\n// 10) Filas HTML del resumen (escapadas) para N4\nlet lineas_html = '';\nif (ef > 0) lineas_html += '<tr><td>Efectivo</td><td>$' + esc(fmt(ef)) + '</td></tr>';\nif (tr > 0) {\n  const etq = (MEDIO_TRANSFERENCIA === 'transferencia_mp') ? 'Transferencia (MP)' : 'Transferencia (bancaria)';\n  lineas_html += '<tr><td>' + etq + '</td><td>$' + esc(fmt(tr)) + '</td></tr>';\n}\nif (ot > 0) lineas_html += '<tr><td>Otros (' + esc(origen) + ': ' + esc(desc) + ')</td><td>$' + esc(fmt(ot)) + '</td></tr>';\n\n// Conteos esperados para la verificación posterior (N6)\nconst cant_saldo = (ef > 0 ? 1 : 0) + (ot > 0 ? 1 : 0) + (tr > 0 ? 1 : 0);\nconst cant_extra = (tr > 0 ? 1 : 0);\n\nreturn [{ json: {\n  _error_negocio: false,\n  id_reserva: row.id_reserva, cabana: row.cabana,\n  fecha_checkin: row.fecha_checkin, fecha_checkout: row.fecha_checkout,\n  saldo_real, suma_saldo, recargo, total_paga, saldo_proyectado,\n  lineas, validado_por, notas: form.notas || '',\n  source_event,\n  medio_transferencia: MEDIO_TRANSFERENCIA,\n  // esperados para N6\n  cant_lineas: lineas.length,\n  cant_saldo, cant_extra,\n  suma_saldo_esperada: suma_saldo,\n  suma_extra_esperada: recargo,\n  // campos escapados para N4\n  cabana_html: esc(row.cabana),\n  fecha_checkin_html: esc(row.fecha_checkin),\n  fecha_checkout_html: esc(row.fecha_checkout),\n  id_reserva_html: esc(row.id_reserva),\n  saldo_real_html: esc(fmt(saldo_real)),\n  suma_saldo_html: esc(fmt(suma_saldo)),\n  recargo_html: esc(fmt(recargo)),\n  total_paga_html: esc(fmt(total_paga)),\n  saldo_proyectado_html: esc(fmt(saldo_proyectado)),\n  lineas_html\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "id": "N3-code-validacion-3b",
+      "name": "N3 Validación multi-porción"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-err",
+              "leftValue": "={{ $json._error_negocio }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "NIF-branch-3b",
+      "name": "¿Error de negocio?"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ '<h3>No se puede continuar</h3><p>' + $json.mensaje_html + '</p>' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        -140
+      ],
+      "id": "N9-error-negocio-3b",
+      "name": "N9 Error de negocio"
+    },
+    {
+      "parameters": {
+        "operation": "page",
+        "defineForm": "fields",
+        "formFields": {
+          "values": [
+            {
+              "fieldType": "html",
+              "elementName": "resumen",
+              "html": "={{ '<h3>Confirmá la cobranza</h3>' + '<p><b>Reserva:</b> #' + $json.id_reserva_html + ' — ' + $json.cabana_html + ' (' + $json.fecha_checkin_html + ' al ' + $json.fecha_checkout_html + ')</p>' + '<p><b>Saldo actual:</b> $' + $json.saldo_real_html + '</p>' + '<table border=1 cellpadding=4 cellspacing=0><tr><th>Porción</th><th>Monto</th></tr>' + $json.lineas_html + '</table>' + '<p><b>Total que reduce saldo:</b> $' + $json.suma_saldo_html + '</p>' + '<p><b>Recargo 5%:</b> $' + $json.recargo_html + '</p>' + '<p><b>Total que paga el cliente:</b> $' + $json.total_paga_html + '</p>' + '<p><b>Saldo proyectado:</b> $' + $json.saldo_proyectado_html + '</p>' + '<p style=\"color:#888\">Al confirmar se registran ' + $json.cant_lineas + ' línea(s) de pago en una sola transacción (todo o nada).</p>' }}"
+            }
+          ]
+        },
+        "options": {
+          "buttonLabel": "Confirmar y registrar"
+        }
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        60
+      ],
+      "id": "N4-resumen-3b",
+      "name": "N4 Resumen + Confirmar"
+    },
+    {
+      "parameters": {
+        "jsCode": "// N4.5 (3b) — Expandir lineas[] a N ítems, uno por línea de pago.\n// Recién acá (post-confirmación de N4) se pasa de 1 evento a N payloads.\n// Cada ítem lleva el payload JSONB completo para registrar_pago + metadatos.\n\nconst ev = $('N3 Validación multi-porción').item.json;\nconst lineas = ev.lineas || [];\n\nif (!Array.isArray(lineas) || lineas.length === 0) {\n  // Defensa: no debería ocurrir (N3 ya valida suma_saldo>0).\n  throw new Error('N4.5: no hay líneas para registrar.');\n}\n\nreturn lineas.map((l, idx) => {\n  const payload = {\n    id_reserva:     l.id_reserva,\n    tipo:           l.tipo,\n    medio_pago:     l.medio_pago,\n    monto_esperado: l.monto_esperado,\n    monto_recibido: l.monto_recibido,   // = esperado (forzado en N3)\n    moneda:         l.moneda || 'ARS',\n    estado_inicial: l.estado_inicial,   // 'confirmado'\n    validado_por:   l.validado_por,\n    notas:          l.notas,\n    source_event:   l.source_event      // ÚNICO del evento, sin mutar (R4)\n  };\n  return { json: {\n    payload,\n    _idx: idx,\n    _tipo: l.tipo,\n    _medio: l.medio_pago,\n    _monto: l.monto_esperado,\n    source_event: l.source_event,\n    id_reserva: l.id_reserva\n  } };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        60
+      ],
+      "id": "N45-expandir-lineas-3b",
+      "name": "N4.5 Expandir líneas"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.abortar_si_falla(public.registrar_pago($1::jsonb)) AS resultado;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.payload) }}",
+          "queryBatching": "transaction"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1320,
+        60
+      ],
+      "id": "N5-registro-transaccional-3b",
+      "name": "N5 Registro transaccional",
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "postgres": {
+          "id": "CRED_POSTGRES_PLACEHOLDER",
+          "name": "CRED_POSTGRES"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ev AS (\n  SELECT ($1)::TEXT AS source_event, ($2)::BIGINT AS id_reserva\n),\npagos_ev AS (\n  SELECT p.id_pago, p.tipo, p.estado, p.medio_pago, p.monto_recibido,\n         p.notas, p.source_event\n  FROM pagos p, ev\n  WHERE p.source_event = ev.source_event\n),\npagos_reserva_normalizados AS (\n  SELECT\n    p.estado, p.tipo, p.monto_recibido,\n    COALESCE(\n      p.id_reserva,\n      (SELECT r.id_reserva FROM reservas r WHERE r.id_pre_reserva = p.id_prereserva)\n    ) AS id_reserva_normalizado\n  FROM pagos p\n),\nsaldo_post AS (\n  SELECT\n    r.monto_total\n    - COALESCE(SUM(prn.monto_recibido) FILTER (\n        WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena','saldo')\n      ), 0) AS saldo_real_post\n  FROM reservas r\n  LEFT JOIN pagos_reserva_normalizados prn\n         ON prn.id_reserva_normalizado = r.id_reserva\n  WHERE r.id_reserva = (SELECT id_reserva FROM ev)\n  GROUP BY r.monto_total\n)\nSELECT\n  (SELECT source_event FROM ev) AS source_event,\n  COUNT(*) AS cant_pagos,\n  COUNT(*) FILTER (WHERE estado = 'confirmado') AS cant_confirmados,\n  COUNT(*) FILTER (WHERE estado <> 'confirmado') AS cant_no_confirmados,\n  COALESCE(SUM(monto_recibido) FILTER (WHERE tipo = 'saldo'), 0) AS suma_saldo,\n  COALESCE(SUM(monto_recibido) FILTER (WHERE tipo = 'extra'), 0) AS suma_extra,\n  COUNT(*) FILTER (\n    WHERE tipo = 'extra'\n      AND source_event LIKE '%cobranza%'\n      AND notas LIKE '%recargo_5_saldo_transferencia%'\n  ) AS cant_extra_marcado_ok,\n  COUNT(*) FILTER (WHERE tipo = 'extra') AS cant_extra_total,\n  (SELECT saldo_real_post FROM saldo_post) AS saldo_real_post\nFROM pagos_ev;",
+        "options": {
+          "queryReplacement": "={{ $('N4.5 Expandir líneas').first().json.source_event }},{{ $('N4.5 Expandir líneas').first().json.id_reserva }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1540,
+        60
+      ],
+      "id": "N6-verificacion-3b",
+      "name": "N6 Verificación posterior",
+      "credentials": {
+        "postgres": {
+          "id": "CRED_POSTGRES_PLACEHOLDER",
+          "name": "CRED_POSTGRES"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// N6b (3b) — Control de la verificación posterior.\n// Lee la fila de N6 desenvolviendo la columna (item.resultado / alias),\n// y la compara contra los esperados calculados en N3.\n\nconst raw = items[0].json;\n// El nodo Postgres devuelve la fila directamente; por robustez, desenvolver\n// si viniera anidada bajo una columna (consistente con L-8D-01).\nconst v = (raw && raw.resultado !== undefined) ? raw.resultado : raw;\n\nconst ev = $('N3 Validación multi-porción').item.json;\n\nconst fmt = n => Number(n).toLocaleString('es-AR');\n\nconst cant_pagos          = Number(v.cant_pagos || 0);\nconst cant_confirmados    = Number(v.cant_confirmados || 0);\nconst cant_no_confirmados = Number(v.cant_no_confirmados || 0);\nconst suma_saldo          = Number(v.suma_saldo || 0);\nconst suma_extra          = Number(v.suma_extra || 0);\nconst cant_extra_total    = Number(v.cant_extra_total || 0);\nconst cant_extra_marca_ok = Number(v.cant_extra_marcado_ok || 0);\nconst saldo_real_post     = Number(v.saldo_real_post);  // recalculado en N6 desde la base\n\nconst problemas = [];\n\n// 1) cantidad de pagos = esperada\nif (cant_pagos !== Number(ev.cant_lineas)) {\n  problemas.push('cantidad de pagos registrada (' + cant_pagos + ') ≠ esperada (' + ev.cant_lineas + ')');\n}\n// 2) todos confirmados\nif (cant_no_confirmados > 0 || cant_confirmados !== cant_pagos) {\n  problemas.push('hay pagos no confirmados (' + cant_no_confirmados + ')');\n}\n// 3) SUM(saldo) = suma de porciones que reducen saldo\nif (suma_saldo !== Number(ev.suma_saldo_esperada)) {\n  problemas.push('suma saldo registrada ($' + fmt(suma_saldo) + ') ≠ esperada ($' + fmt(ev.suma_saldo_esperada) + ')');\n}\n// 4) SUM(extra) = 5% calculado\nif (suma_extra !== Number(ev.suma_extra_esperada)) {\n  problemas.push('suma extra registrada ($' + fmt(suma_extra) + ') ≠ recargo esperado ($' + fmt(ev.suma_extra_esperada) + ')');\n}\n// 5) extra marcado correctamente (si hubo extra)\nif (cant_extra_total !== cant_extra_marca_ok) {\n  problemas.push('el recargo no quedó marcado recargo_5_saldo_transferencia en source_event y notas');\n}\n\nconst saldo_anterior = Number(ev.saldo_real);\nconst saldo_proyectado = saldo_anterior - suma_saldo;  // proyección (baja solo por saldo)\n\n// 6) El saldo REAL recalculado desde la base debe coincidir con la proyección.\n//    Si coincide, queda probado que el `extra` NO redujo el saldo de alojamiento.\nif (!Number.isFinite(saldo_real_post)) {\n  problemas.push('no se pudo recalcular el saldo real post-write de la reserva');\n} else if (saldo_real_post !== saldo_proyectado) {\n  problemas.push('saldo real recalculado ($' + fmt(saldo_real_post) +\n                 ') ≠ proyección saldo_anterior - suma_saldo ($' + fmt(saldo_proyectado) +\n                 '). Posible contaminación del saldo por el extra u otro pago.');\n}\n\nif (problemas.length > 0) {\n  // No revertimos acá (la transacción de N5 ya cerró). Señalamos verificación fallida.\n  return [{ json: {\n    _verif_ok: false,\n    _problemas: problemas,\n    _problemas_html: problemas.map(p =>\n      String(p).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')\n    ).join('<br>'),\n    source_event: ev.source_event\n  } }];\n}\n\nreturn [{ json: {\n  _verif_ok: true,\n  id_reserva: ev.id_reserva,\n  id_reserva_html: ev.id_reserva_html,\n  cabana_html: ev.cabana_html,\n  cant_lineas: ev.cant_lineas,\n  suma_saldo, suma_extra,\n  suma_saldo_html: fmt(suma_saldo),\n  suma_extra_html: fmt(suma_extra),\n  saldo_anterior, saldo_nuevo: saldo_real_post,\n  saldo_anterior_html: fmt(saldo_anterior),\n  saldo_nuevo_html: fmt(saldo_real_post),\n  saldada: (saldo_real_post === 0),\n  source_event: ev.source_event\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        60
+      ],
+      "id": "N6b-control-verif-3b",
+      "name": "N6b Control verificación"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-verif",
+              "leftValue": "={{ $json._verif_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        60
+      ],
+      "id": "NIF6-branch-verif-3b",
+      "name": "¿Verificación OK?"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ '<h3>Cobranza registrada</h3>' + '<p>Reserva #' + $json.id_reserva_html + ' — ' + $json.cabana_html + '.</p>' + '<p>Se registraron ' + $json.cant_lineas + ' línea(s) de pago.</p>' + '<p><b>Saldo de alojamiento:</b> $' + $json.saldo_anterior_html + ' → $' + $json.saldo_nuevo_html + '</p>' + ( $json.suma_extra > 0 ? '<p>Recargo 5% registrado aparte: $' + $json.suma_extra_html + ' (no reduce saldo).</p>' : '' ) + ( $json.saldada ? '<p><b>✅ Reserva saldada.</b></p>' : '<p>Queda saldo pendiente; la reserva sigue en el listado.</p>' ) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2200,
+        -40
+      ],
+      "id": "N7-exito-3b",
+      "name": "N7 Éxito"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ '<h3>No se registró la cobranza</h3>' + '<p>La cobranza fue revertida: <b>no quedó ningún pago registrado</b> para esta carga (todo o nada).</p>' + '<p>Revisá los montos y volvé a intentar. Si el problema persiste, revisá el saldo de la reserva en el listado antes de reintentar, o avisá a Franco.</p>' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2200,
+        200
+      ],
+      "id": "N8a-error-transaccional-3b",
+      "name": "N8a Error transaccional"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ '<h3>La cobranza necesita revisión manual</h3>' + '<p>La cobranza <b>pudo haberse registrado</b>, pero la verificación posterior no cerró correctamente.</p>' + '<p><b>No vuelvas a cargarla.</b> Avisá a Franco y revisá los pagos de esta reserva por su <code>source_event</code> antes de hacer nada más, para no duplicar.</p>' + ( $json._problemas_html ? '<p>Detalle de la verificación:</p><p>' + $json._problemas_html + '</p>' : '' ) + ( $json.source_event ? '<p>source_event: <code>' + $json.source_event + '</code></p>' : '' ) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2200,
+        160
+      ],
+      "id": "N8b-error-verificacion-3b",
+      "name": "N8b Error de verificación posterior"
+    }
+  ],
+  "connections": {
+    "N1 Form Trigger (porciones)": {
+      "main": [
+        [
+          {
+            "node": "N2 Consulta saldo real",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N2 Consulta saldo real": {
+      "main": [
+        [
+          {
+            "node": "N3 Validación multi-porción",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N3 Validación multi-porción": {
+      "main": [
+        [
+          {
+            "node": "¿Error de negocio?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Error de negocio?": {
+      "main": [
+        [
+          {
+            "node": "N9 Error de negocio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "N4 Resumen + Confirmar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N4 Resumen + Confirmar": {
+      "main": [
+        [
+          {
+            "node": "N4.5 Expandir líneas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N4.5 Expandir líneas": {
+      "main": [
+        [
+          {
+            "node": "N5 Registro transaccional",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N5 Registro transaccional": {
+      "main": [
+        [
+          {
+            "node": "N6 Verificación posterior",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "N8a Error transaccional",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N6 Verificación posterior": {
+      "main": [
+        [
+          {
+            "node": "N6b Control verificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N6b Control verificación": {
+      "main": [
+        [
+          {
+            "node": "¿Verificación OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Verificación OK?": {
+      "main": [
+        [
+          {
+            "node": "N7 Éxito",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "N8b Error de verificación posterior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

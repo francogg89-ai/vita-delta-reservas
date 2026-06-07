@@ -49,8 +49,10 @@ Todas las etapas de diseño están cerradas. No se reabren.
 | 8C | Calendarios visuales por evento (HTML operativo + limpieza + Sheet resguardo) | Cerrada (2026-06-01, TEST + OPS) |
 | 8D | Capa de bloqueos operativos (Form Trigger n8n) | Cerrada (2026-06-04, TEST + OPS) — **cierra la Etapa 8** |
 | 8C-bis | Alerta por reserva próxima por mail (sub-workflow, rama lateral en 8B) | Cerrada (2026-06-04, TEST + OPS activo) |
+| 9A | Diagnóstico de ingresos (read-only) | Cerrada |
+| 9B / 3b | Cobranza posterior multi-porción (Form Trigger transaccional) | Cerrada **en TEST** (2026-06-07); **no promovida a OPS** |
 
-**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. DEV, TEST y OPS están alineados funcionalmente: TEST se reconstruyó desde el canónico en 7B (paridad 10/10 vs DEV) y OPS en 8A (paridad P01-P10 10/10). 8B no modificó el schema: la capa de carga usa las funciones existentes tal cual. 8C tampoco lo modificó: los calendarios son de solo lectura. 8D tampoco: la capa de bloqueos usa la función `crear_bloqueo()` existente tal cual. 8C-bis tampoco: es solo lectura (consulta una reserva por id) + envío de mail.
+**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. DEV, TEST y OPS están alineados funcionalmente: TEST se reconstruyó desde el canónico en 7B (paridad 10/10 vs DEV) y OPS en 8A (paridad P01-P10 10/10). 8B no modificó el schema: la capa de carga usa las funciones existentes tal cual. 8C tampoco lo modificó: los calendarios son de solo lectura. 8D tampoco: la capa de bloqueos usa la función `crear_bloqueo()` existente tal cual. 8C-bis tampoco: es solo lectura (consulta una reserva por id) + envío de mail. **9B / 3b tampoco modifica el canónico:** la única adición es la función de orquestación `public.abortar_si_falla(jsonb)`, aditiva y **solo en TEST** (no toca tablas, enums ni `registrar_pago()`); su incorporación al canónico se evaluará en el trabajo de schema de contabilidad.
 
 ---
 
@@ -119,6 +121,16 @@ Un sub-workflow n8n (`vita_w8cbis_alerta`) que avisa por mail cuando se confirma
 - **Privacidad por construcción:** el mail solo informa cabaña, entrada y salida, más el enlace al calendario; no incluye montos, datos del huésped, teléfono ni notas. El detalle se ve abriendo el calendario, que ya tiene su propio control de acceso.
 - **Canal = mail** (no Telegram ni WhatsApp). Remitente temporal sobre un Gmail propio del proyecto, migrable al mail de las cabañas sin rediseño. Variantes `__TEST` (validado con envío real) y `__OPS` (publicado y activo, con destinatarios reales). La primera ejecución real quedará registrada con la próxima reserva en ventana.
 
+### Cobranza posterior multi-porción (Etapa 9B / Fase 3b)
+
+Un formulario n8n (`vita_w09_cobranza_posterior`) con el que el equipo registra el **saldo cobrado después** de confirmada una reserva. Es la primera pieza de la etapa de contabilidad que escribe pagos (el diagnóstico 9A y el listado de saldos eran de solo lectura).
+
+- **Hasta tres porciones en una sola carga:** efectivo, transferencia (bancaria o MercadoPago) y "otros" (USD/cripto/otro, registrado por su equivalente en pesos). La transferencia aplica un **recargo interno del 5%** que se registra como una línea separada y **no reduce** el saldo de alojamiento (es entrada de caja aparte).
+- **Todo o nada:** todas las líneas de una cobranza se registran dentro de una sola transacción. Si cualquier línea falla, se revierte la cobranza completa y no queda ningún pago a medias. El operador recibe un mensaje claro: cobranza registrada (con saldo anterior → nuevo, e indica si la reserva quedó saldada), o un aviso de que la operación se revirtió.
+- **Verificación posterior:** tras registrar, el sistema relee los pagos de esa cobranza y recalcula el saldo real desde la base, confirmando que el recargo no contaminó el saldo y que todo quedó confirmado.
+- **Selección por listado:** el operador identifica la reserva desde un listado HTML interno de reservas con saldo pendiente (workflow `vita_w09_listado_saldos`), y carga su número en el formulario.
+- **Estado:** validado en TEST con batería completa (incluido el caso de reversión). **No promovido a OPS todavía** — la promoción es un paso posterior con su propia preparación. Variantes: workflow validado en TEST + plantillas sanitizadas reutilizables.
+
 ---
 
 ## Entornos
@@ -167,6 +179,7 @@ Decisiones que **no deben reabrirse** salvo contradicción crítica explícita:
 
 Pendientes documentados al cierre de 7E:
 
+- **Promoción de la cobranza posterior (9B / 3b) a OPS** — 3b quedó validada en TEST, no en OPS. Antes de promover hay que crear en OPS la función de orquestación `public.abortar_si_falla(jsonb)` (aditiva; si falta, la cobranza falla), importar el workflow apuntando a OPS y hacer una prueba con datos reales. `Pendiente_pre_produccion.md`, sección de promoción 9B.
 - **Residual amplio de permisos de tabla a roles Data API en DEV** — hallazgo de 7E (snapshot A5): `anon`/`authenticated`/`service_role` tienen SELECT/escritura completos sobre todas las tablas/vistas de DEV, más amplio que el `Dxtm` de TEST. Fuera de alcance de 7E por decisión (Opción 1). **Acotado a DEV:** OPS nació sin este problema (switch correcto desde el día cero, confirmado en 8A). A decidir solo para DEV: revocar para alinear con TEST/OPS o aceptar como definitivo. `Pendiente_pre_produccion.md` 1.7.
 - **Contrato SQL de `registrar_pago` frente a entradas no-vacías mal tipadas** (hoy mitigado por `nv()` en n8n). `Pendiente_pre_produccion.md` 1.6.
 - `tipo_valor` sin poblar en `configuracion_general` (1.4).
@@ -183,8 +196,11 @@ Pendientes documentados al cierre de 7E:
 
 ## Próximas etapas — opciones disponibles
 
-Con DEV, TEST, OPS, 6C, 6D, 7A, 7B, 7C, 7D, 7E, **8A, 8B, 8C y 8D cerradas, la Etapa 8 (operación real interna) está completa**, más la **sub-etapa 8C-bis** (alerta por reserva próxima por mail) también cerrada y activa en OPS. El sistema está **operativo**: el equipo carga reservas, ve el estado en los calendarios y crea bloqueos (todo autoservicio sobre OPS), y recibe avisos automáticos por mail cuando se confirma una reserva próxima. Las opciones a priorizar de acá en más (orden sugerido, no comprometidas):
+Con DEV, TEST, OPS, 6C, 6D, 7A-7E, **8A-8D cerradas y la Etapa 8 (operación real interna) completa**, la **sub-etapa 8C-bis** cerrada y activa en OPS, y la **Etapa 9 / Carril A** en marcha (diagnóstico 9A + listado de saldos + **cobranza posterior 9B/3b cerrada y validada en TEST**), el sistema está **operativo**: el equipo carga reservas, ve el estado en los calendarios y crea bloqueos (autoservicio sobre OPS), y recibe avisos automáticos por mail. Las opciones a priorizar de acá en más (orden sugerido, no comprometidas):
 
+- **Promover la cobranza posterior (9B / 3b) a OPS** — crear primero la función `public.abortar_si_falla(jsonb)` en OPS, importar el workflow apuntando a OPS y probar con datos reales. TEST antes que OPS.
+- **Contabilidad — Carril B (políticas de liquidación):** split operativo 75/25, reparto entre socios, y el tratamiento del recargo del 5% (si es repartible, gasto financiero, comisión o ingreso aparte). Abierto, sin iniciar.
+- **Contabilidad — capas siguientes (schema futuro):** gastos, caja por lugar, conversión de monedas, cancelaciones con cargo, facturación (AFIP/ARCA). Implicará una nueva versión del schema canónico.
 - **Registrar la primera ejecución real de 8C-bis** con la próxima reserva en ventana y verificar la entrega; luego, migrar el remitente SMTP al mail propio de las cabañas (sin rediseño).
 - **Edición / baja de bloqueos:** hoy 8D solo crea; levantar o corregir un bloqueo es manual. Si se vuelve frecuente, sería una capa posterior con su propio formulario.
 - **Apertura al exterior (etapas futuras grandes, sobre TEST primero):** webhook MercadoPago real, bot conversacional (Claude API), web pública de reservas, WhatsApp/Instagram (Meta API), y eventualmente el entorno PROD público. Es el salto más ambicioso del proyecto.
@@ -201,7 +217,7 @@ No avanzar a PROD público, MercadoPago real, bot o frontend público sin decisi
 - Bot conversacional conectado a canales reales.
 - Web pública de reservas conectada al backend.
 - Panel administrativo y dashboard operativo.
-- Contabilidad automatizada.
+- Contabilidad automatizada completa (gastos, liquidaciones 75/25, reparto entre socios, conversión de monedas, facturación). *La cobranza posterior de saldos — 9B/3b — es el primer ladrillo, validado en TEST.*
 - RLS final para frontend público.
 - Tarifas y feriados productivos completos.
 - Entorno PROD (público). _(OPS, operación interna, ya está levantado en 8A.)_

@@ -3,7 +3,7 @@
 Lista de cambios y configuraciones a aplicar antes del despliegue de
 producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
 
-**Estado del archivo:** actualizado al cierre de la Sub-etapa 8C-bis (sesión 2026-06-04). **Con 8D se cerró la Etapa 8 completa** (operación real interna); **8C-bis** (alerta por reserva próxima, recoge el item 3.1) quedó cerrada después como sub-etapa propia.
+**Estado del archivo:** actualizado al cierre de la **Fase 3b (Etapa 9B — cobranza posterior, validada en TEST)** (sesión 2026-06-07). Previamente: cierre de la Sub-etapa 8C-bis (2026-06-04). **Con 8D se cerró la Etapa 8 completa** (operación real interna); **8C-bis** (alerta por reserva próxima, recoge el item 3.1) quedó cerrada como sub-etapa propia. **9B / 3b** agregó la cobranza posterior multi-porción transaccional (helper aditivo en TEST; promoción a OPS pendiente — ver sección propia abajo).
 Items cerrados durante Etapas 6D, 7A, 7B, 8A, 8B, 8C, 8D y la sub-etapa 8C-bis listados en los resúmenes de abajo;
 detalle histórico de los items 6D en el Apéndice al final del documento.
 
@@ -127,6 +127,35 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
 **Bitácora del hardening:** `Docs/Bitacora/HARDENING_PRE_PRODUCCION_EJECUCION.md` (H1-H7 cerrados; H8 cerrado).
 **Cierre Etapa 7A:** `7A_CIERRE.md`.
 **Cierre Etapa 7B:** `7B_CIERRE.md`.
+
+---
+
+## Items cerrados / tocados en Etapa 9B / Fase 3b — resumen
+
+| Item | Estado | Bloque que lo cerró | Referencia |
+|---|---|---|---|
+| Cobranza posterior multi-porción (Form Trigger transaccional) | ✅ Cerrado **en TEST** | 3b, batería completa en TEST | `9B_CIERRE.md` |
+| Helper SQL `public.abortar_si_falla(jsonb)` | ✅ Creado y micro-testeado en TEST | 3b | `9B_CIERRE.md` §3 |
+| Rollback todo-o-nada (D-9B-19) | ✅ Validado en TEST (0 pagos tras abort) | 3b smoke 10 | `9B_CIERRE.md` §6-7 |
+
+## Pendiente — Promoción de 9B / Fase 3b a OPS
+
+- **Crear `public.abortar_si_falla(jsonb)` en OPS antes de importar 3b.** Es aditiva (no
+  toca tablas, enums ni `registrar_pago()`), pero si falta, 3b falla en runtime: el rollback
+  transaccional depende de ella. DDL documentada en `9B_CIERRE.md` §3. Al crearla en OPS,
+  aplicar `SET search_path = public, pg_temp` + `REVOKE EXECUTE … FROM PUBLIC, anon,
+  authenticated, service_role` (paridad con D-7B-05) y verificar grants en 0 filas.
+- **Promover el workflow 3b a OPS** (`__OPS`, credencial `vita_supabase_ops`, Basic Auth
+  propia, path propio, marcador de entorno `ops`). TEST antes que OPS; smoke con datos
+  reales antes de considerar la cobranza posterior productiva. Revisar marcadores de entorno
+  embebidos en el código, no solo la credencial (L-8D-03).
+- **Heredado de D-9B-15:** conversión / tabla de ahorro de monedas (la porción "otros" hoy
+  se registra en ARS por equivalente, con trazabilidad en notas). Queda fuera de 3b; se
+  define en la arquitectura global de contabilidad (Carril B).
+- **Liquidación del `extra` (recargo 5%):** definir si es repartible, gasto financiero,
+  comisión interna o ingreso separado. Fuera de 3b; Carril B.
+
+**Bitácoras / cierres recientes:** `8D_CIERRE.md`, `9B_CIERRE.md`.
 
 ---
 

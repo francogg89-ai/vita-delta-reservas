@@ -1,0 +1,137 @@
+{
+  "name": "vita_w09_listado_saldos__TEMPLATE",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "basicAuth",
+        "formTitle": "Vita Delta — Reservas con saldo pendiente",
+        "formDescription": "Listado interno (solo lectura). Copiá el #ID de la reserva a cobrar.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Ver listado",
+              "fieldName": "ver",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Mostrar reservas con saldo"
+                  }
+                ]
+              },
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "path": "PATH_PLACEHOLDER",
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        0
+      ],
+      "id": "L1-trigger-listado",
+      "name": "L1 Form Trigger (listado)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_BASIC_AUTH_PLACEHOLDER",
+          "name": "CRED_BASIC_AUTH"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH pagos_reserva_normalizados AS (\n  SELECT\n    p.id_pago, p.tipo, p.estado, p.monto_recibido,\n    COALESCE(\n      p.id_reserva,\n      (SELECT r.id_reserva FROM reservas r WHERE r.id_pre_reserva = p.id_prereserva)\n    ) AS id_reserva_normalizado\n  FROM pagos p\n),\nreservas_con_saldo AS (\n  SELECT\n    r.id_reserva,\n    c.nombre AS cabana,\n    r.fecha_checkin::TEXT AS fecha_checkin,\n    r.fecha_checkout::TEXT AS fecha_checkout,\n    r.monto_total - COALESCE(SUM(prn.monto_recibido) FILTER (\n      WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena','saldo')\n    ), 0) AS saldo_real\n  FROM reservas r\n  JOIN cabanas c ON c.id_cabana = r.id_cabana\n  LEFT JOIN pagos_reserva_normalizados prn\n         ON prn.id_reserva_normalizado = r.id_reserva\n  WHERE r.estado IN ('confirmada','activa')\n  GROUP BY r.id_reserva, c.nombre, r.fecha_checkin, r.fecha_checkout, r.monto_total\n  HAVING r.monto_total - COALESCE(SUM(prn.monto_recibido) FILTER (\n           WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena','saldo')\n         ), 0) > 0\n)\nSELECT FALSE AS es_centinela, id_reserva, cabana, fecha_checkin, fecha_checkout, saldo_real\nFROM reservas_con_saldo\nUNION ALL\nSELECT TRUE AS es_centinela, NULL::BIGINT, NULL::TEXT, NULL::TEXT, NULL::TEXT, NULL::NUMERIC\nORDER BY es_centinela ASC, fecha_checkin, id_reserva;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "id": "L2-query-listado",
+      "name": "L2 Consulta reservas con saldo",
+      "credentials": {
+        "postgres": {
+          "id": "CRED_POSTGRES_PLACEHOLDER",
+          "name": "CRED_POSTGRES"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Arma tabla HTML legible. Solo campos minimos, sin datos sensibles.\n// Escape HTML basico para todo valor textual insertado.\nfunction esc(v) {\n  if (v === null || v === undefined) return '';\n  return String(v)\n    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\n}\nconst fmt = n => Number(n).toLocaleString('es-AR');\n// L2 SIEMPRE devuelve >=1 fila (incluye centinela). Filtramos la centinela.\nconst all = items.map(i => i.json);\nconst rows = all.filter(r => r.es_centinela === false || r.es_centinela === 'false');\nlet html = `<h2>Reservas con saldo pendiente</h2>`;\nif (!rows.length) {\n  html += '<p>No hay reservas con saldo pendiente.</p>';\n} else {\n  html += '<table border=1 cellpadding=6 cellspacing=0>';\n  html += '<tr><th>#ID</th><th>Cabaña</th><th>Check-in</th><th>Check-out</th><th>Saldo</th></tr>';\n  for (const r of rows) {\n    html += `<tr><td><b>#${esc(r.id_reserva)}</b></td><td>${esc(r.cabana)}</td>`;\n    html += `<td>${esc(r.fecha_checkin)}</td><td>${esc(r.fecha_checkout)}</td>`;\n    html += `<td>$${esc(fmt(r.saldo_real))}</td></tr>`;\n  }\n  html += '</table>';\n}\nreturn [{ json: { html } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "id": "L3-code-html",
+      "name": "L3 Armar HTML"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        660,
+        0
+      ],
+      "id": "L4-show-html",
+      "name": "L4 Mostrar listado"
+    }
+  ],
+  "connections": {
+    "L1 Form Trigger (listado)": {
+      "main": [
+        [
+          {
+            "node": "L2 Consulta reservas con saldo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "L2 Consulta reservas con saldo": {
+      "main": [
+        [
+          {
+            "node": "L3 Armar HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "L3 Armar HTML": {
+      "main": [
+        [
+          {
+            "node": "L4 Mostrar listado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -683,6 +683,66 @@ Si `id_reserva` no es entero positivo o `entorno` no es válido, el sub-workflow
 - **D38** — Triggers leen contexto vía `current_setting('app.modificado_por', TRUE)`.
 - **D47** — Regla operativa de domingo: check-in 18:00 y check-out 16:00. Implementada en `crear_prereserva()` por hotfix v1.7 y propagada a `obtener_disponibilidad_rango()` en la alineación v1.7.1 (ejecutada en DEV el 2026-05-25).
 
+## Etapa 9 — Contabilidad / Carril A
+
+### Diagnóstico de ingresos (9A — cerrada)
+- **9A fue read-only.** Diagnóstico de cómo se registran ingresos sobre el modelo
+  existente (`registrar_pago`, `confirmar_reserva`), sin cambios de schema ni de
+  funciones. Documento: `9A_DIAGNOSTICO_INGRESOS.md`. No reabrir el diagnóstico.
+
+### Cobranza posterior multi-porción (9B / Fase 3b — cerrada en TEST 2026-06-07)
+Decisiones de diseño 9B (promovidas desde `ARQUITECTURA_ETAPA_9B_COBRANZA_POSTERIOR.md v2`;
+detalle histórico completo D-9B-01 a D-9B-19 en ese documento y en `9B_CIERRE.md`).
+
+- **D-9B-01** — Co-responsabilidad contable de la capa (no solo UX).
+- **D-9B-02** — Recargo 5%: solo porción de transferencia (bancaria/MP por igual),
+  calculado interno, línea `extra` separada, marcada `recargo_5_saldo_transferencia`.
+- **D-9B-04** — Alcance MVP: `saldo` multi-porción + `extra` (5% interno); resto diferido.
+- **D-9B-05** — Saldo calculado desde pagos confirmados (`tipo IN ('sena','saldo')`),
+  nunca desde `reservas.monto_saldo`.
+- **D-9B-06** — Parciales permitidos como pagos confirmados por su monto exacto.
+- **D-9B-07** — Riesgo de no-atomicidad de la anti-duplicación por capa, aceptado para
+  el MVP (la atomicidad de D-9B-19 protege dentro de una carga, no entre dos cargas
+  concurrentes de la misma reserva).
+- **D-9B-08** — Porciones visibles: efectivo / transferencia (bancaria/MP) / otros.
+  Subtipo de transferencia **opcional con default bancaria** (refinado en 3b); `mp_link`
+  no expuesto.
+- **D-9B-10** — Listado solo reservas con `saldo_real > 0` y estado `confirmada`/`activa`.
+- **D-9B-12** — Listado HTML interno obligatorio en el MVP (mecanismo principal de
+  selección); selector dinámico nativo descartado.
+- **D-9B-13** — Multi-step confirmado viable (probado en 3a).
+- **D-9B-14** — Modelo multi-porción (hasta 3) con recargo 5% interno sobre transferencia.
+- **D-9B-16** — *(histórica)* Fallo parcial informado sin auto-revertir. **Reemplazada
+  para la Fase 3b por D-9B-19.**
+- **D-9B-17** — Parciales en el tiempo: varias cargas sobre la misma reserva hasta saldar.
+- **D-9B-18** — Porción "otros" (USD/cripto/otro): se registra en ARS como `efectivo`
+  pero marcada obligatoriamente `medio_original` en notas/source, con descripción
+  obligatoria si monto > 0, para no contaminar la caja efectivo.
+- **D-9B-19 🔒** — **Atomicidad transaccional en 3b.** La Fase 3b adopta
+  `queryBatching: transaction` + helper SQL `public.abortar_si_falla(jsonb)` que convierte
+  cualquier pago no confirmado en excepción P0001, reemplazando para esta fase el modelo
+  de fallo parcial informado de D-9B-16. Si una línea falla o queda no-confirmada, se
+  revierte **todo** el evento. Éxito operativo = `ok=true AND estado='confirmado' AND
+  warning IS NULL` (coherente con D-8B-15). El helper es **aditivo** (no toca tablas,
+  enums ni `registrar_pago()`), vive en TEST y debe crearse en OPS antes de promover 3b.
+
+### Comportamiento conocido aceptado (3b)
+- **Doble-mensaje ante rollback:** con `onError: continueErrorOutput` en el nodo Postgres
+  transaccional, un rollback puede disparar **ambas** salidas (error→N8a y éxito→N6→N8b),
+  mostrando N8b un instante y luego N8a. **La integridad no se ve afectada** (0 pagos tras
+  rollback, verificado). Se intentó un nodo Filter intermedio (N5.5); no lo corrigió y fue
+  revertido. **Decisión (Franco): aceptado como está**; no se invierte más esfuerzo en esta
+  fase. N8b es el lado conservador (nunca conduce a estado peligroso).
+
+### Alcance NO reabierto en 3b
+- 3b **no** promovida a OPS (solo validada en TEST). 3b **no** tocó `registrar_pago()`,
+  tablas ni enums. Quedan para Carril B / arquitectura global de contabilidad: gastos,
+  caja por lugar, liquidaciones 75/25, reparto entre socios, conversión de monedas,
+  cancelaciones con cargo, AFIP/ARCA/IVA, MercadoPago automático, bancos, frontend, bot,
+  WhatsApp, Airbnb/Booking, y la liquidación del `extra`.
+
+---
+
 ## Lecciones operativas n8n consolidadas (L-6C-XX)
 
 Reglas firmes derivadas de la ejecución de la Etapa 6C. Detalle completo en `Lecciones_Aprendidas.md`.
