@@ -743,6 +743,88 @@ detalle histórico completo D-9B-01 a D-9B-19 en ese documento y en `9B_CIERRE.m
 
 ---
 
+## Etapa 9 — Contabilidad / Carril B (capa derivada: 9C–9G — cerrada en TEST 2026-06-11)
+
+Implementación de la capa derivada de la contabilidad interna sobre TEST, en cinco sub-etapas aditivas (9C catálogo+zonas+seam → 9D activación operativa → 9E matriz+reparto → 9F gasto rediseñado → 9G cascada read-only). Nada promovido a OPS; canónico v1.7.3 intacto (objetos aditivos solo en TEST; incorporación con bump único en la promoción coordinada). Detalle completo en `9C_CIERRE.md`, `9D_CIERRE.md`, `9E_CIERRE.md`, `9F_CIERRE.md`, `9G_CIERRE.md`.
+
+### Catálogo enriquecido, zonas y seam (9C — cerrada)
+
+D-9C-01..13 son las decisiones conceptuales del Carril B (en `ARQUITECTURA_ETAPA_9_CARRIL_B_CONCEPTUAL.md v0.8`).
+
+- **D-9C-14** — `valor_relativo` (NUMERIC(6,2), CHECK > 0) e `id_socio_beneficiario` como **columnas en `cabanas`** (nullable → backfill → NOT NULL); sin DEFAULT/generated/trigger.
+- **D-9C-15** — FK beneficiario → `socios`, NOT NULL, ON DELETE RESTRICT, nombre con rol explícito.
+- **D-9C-16** — `zonas`: catálogo plano sin `activa` (PK + unique nombre + no vacío).
+- **D-9C-17** — `cabana_zona`: M2M con PK compuesta; FKs CASCADE cabaña / RESTRICT zona; índice inverso.
+- **D-9C-18** — Seam `resolver_beneficiario(id_cabana, fecha)` STABLE SECURITY INVOKER, fecha **incluida pero ignorada** en el MVP; REVOKE de los 4 roles (ownership sigue ejecutando).
+- **D-9C-19** — Gate anti-OPS por marcador `configuracion_general('ambiente','test')`; `'ops'` se siembra recién en la promoción coordinada.
+- **D-9C-20** — Seed sin ambigüedad: unicidad de Franco/Rodrigo/Remo re-asegurada en transacción; resolución por nombre, nunca ids literales.
+- **D-9C-21** — Completar el placeholder `Socio 3` → `Remo` como prerequisito de Carril B (UPDATE idempotente guardado).
+
+### Activación operativa por rango (9D — cerrada)
+
+- **D-9D-01** — Tabla independiente `activaciones_operativas` (eje propio; no deriva de `bloqueos` ni de `cabanas.activa`).
+- **D-9D-02** — Rango `fecha_desde`/`fecha_hasta DATE` + CHECK; sin columna `daterange` almacenada.
+- **D-9D-03** — `fecha_hasta NULL` = activación abierta; desactivar = dejar hueco; reactivar = nuevo rango.
+- **D-9D-04** — EXCLUDE gist no-solapamiento por cabaña (adyacencia `[)` permitida); primer EXCLUDE de Carril B.
+- **D-9D-05** — FK `id_cabana` ON DELETE RESTRICT (paridad con `bloqueos`/`reservas`).
+- **D-9D-06** — La política mensual ("cubre el mes completo") se aplica en 9E, no en 9D.
+- **D-9D-07** — Auditoría `creado_por`+`comentario`+`created_at`; **sin `source_event`** (carga SQL controlada).
+- **D-9D-08** — Carga por SQL controlado, sin formulario en el MVP.
+- **D-9D-09** — Estructura primero; carga inicial en bloque separado con decisión explícita.
+- **D-9D-10** — **Pool inicial real:** Bamboo, Madre Selva, Arrebol, Tokio activas desde `2026-07-01`; **Guatemala desde `2026-11-01`** (ambas con `fecha_hasta NULL`).
+
+### Matriz dinámica y reparto (9E — cerrada)
+
+- **D-9E-01** — Solo funciones read-only; la matriz se deriva, jamás se persiste.
+- **D-9E-02** — `matriz_participacion(p_periodo)` normaliza internamente al mes (cualquier día sirve).
+- **D-9E-03** — Regla "cubre el mes completo" vía `daterange @> mes`; titularidad vía el seam; `detalle_participacion` a nivel cabaña para auditoría.
+- **D-9E-04** — `participacion` como fracción 0..1 exponiendo `valor_socio` y `valor_pool` (transparencia).
+- **D-9E-05** — `repartir_por_matriz` vive en 9E; reparte un monto dado, no lee `pagos` ni hace cascada.
+- **D-9E-06** — Pool vacío ⇒ matriz vacía (0 filas) y reparto vacío; sin división por cero.
+- **D-9E-07** — REVOKE de los 4 roles; SECURITY INVOKER (paridad con el seam).
+- **D-9E-08** — **Centavo residual:** al de mayor participación; en empate del máximo, Rodrigo si está, sino menor `id_socio` (`ORDER BY participacion DESC, (nombre='Rodrigo') DESC, id_socio ASC LIMIT 1`). Rodrigo no recibe el residual fuera del empate.
+
+### Gasto interno rediseñado (9F — cerrada 2026-06-10)
+
+- **D-9F-01** — Tabla nueva `gastos_internos`; la `gastos` legacy queda **congelada/deprecada e intacta**; su destino (DROP/rename) se decide en la promoción coordinada con el bump único del canónico.
+- **D-9F-02** — Nombre `gastos_internos` (ancla con la contabilidad operativa interna).
+- **D-9F-03** — `clase` TEXT + CHECK ('A','C','D','E'), no enum nativo.
+- **D-9F-04** — **Alcance condicional por clase** vía CHECK: D ⇒ zona sin cabaña; E ⇒ cabaña sin zona; A/C ⇒ ninguno. El alcance no se elige: lo deriva la clase.
+- **D-9F-05** — Pagador `socio|caja` + `id_socio_pagador` FK RESTRICT + CHECK de consistencia (materializa D-9C-03).
+- **D-9F-06** — **La incidencia NO se persiste**: se deriva por clase+alcance+período vía seam (9C), activaciones (9D) y matriz (9E).
+- **D-9F-07** — `etiqueta` TEXT libre no vacía; sin catálogo en 9F.
+- **D-9F-08** — Override derivado (`clase <> clase_sugerida`); un CHECK exige comentario no vacío en override y en carga sin sugerencia.
+- **D-9F-09** — Horas de socio por etiqueta literal `'horas de trabajo'` + CHECK pagador socio (`lower(btrim())`); no protege typos (fila sin guarda, nunca rechazo falso).
+- **D-9F-10** — `fecha` + `periodo` explícito normalizado a día 1 ("cuándo se pagó" ≠ "a qué liquidación entra").
+- **D-9F-11** — `moneda` TEXT NOT NULL DEFAULT 'ARS' con CHECK ARS-only.
+- **D-9F-12** — Sin función de expansión de incidencia en 9F (es 9G).
+- **D-9F-13** — 18 constraints nombradas (14 CHECK + 3 FK + PK), todas ejercitadas en el Bloque C.
+- **D-9F-14** — `creado_por` NOT NULL no vacío + `created_at`; sin `source_event` (más estricto que 9D: acá hay plata).
+- **D-9F-15** — Sin soft-delete; corrección por SQL controlado.
+- **D-9F-16** — `medio_pago` TEXT nullable, sin FK a `cuentas_cobro`.
+- **D-9F-17** — Fixture técnico (ids 30–34, `creado_por='seed_9f_validacion'`) conservado y borrable por marcador; **no viaja a OPS** (conservación extendida hasta 9H por D-9G-13).
+- **D-9F-18** — Un solo índice `(periodo, clase)` en el MVP.
+- **D-9F-19** — Higiene TEXT NULL-safe en todos los CHECK de texto.
+- **D-9F-20** — Frontera de las consultas semánticas: destinatarios por nombre, jamás saldos/montos finales/porcentajes/cascada (eso fue 9G).
+- **D-9F-21** — No resetear secuencias por estética (gaps de smokes = normal; coherente con D-7D-01).
+
+### Cascada de liquidación read-only (9G — cerrada 2026-06-11)
+
+- **D-9G-01** — `p_pct_operativo` parámetro explícito (fracción 0..1, sin default, sin congelar). Inválido/NULL ⇒ **fila guard explícita** (`paso=0` en cascada; `socio` marcado en saldos); jamás 0 filas mudas.
+- **D-9G-02** — Paso 1 = `sena`+`saldo` confirmados; paso 6 = `extra` confirmado; monto = `monto_recibido`. `reembolso`/`ajuste` fuera del MVP.
+- **D-9G-03** — **Criterio de caja percibida:** período = mes calendario de `created_at`; devengado/estadía **DESCARTADO**. Cobros pre-arranque caen en pool vacío y no se reparten salvo política manual de socios; cambio futuro re-bucketiza toda la historia. Precisión: bucket en TZ de sesión (UTC); refinamiento argentino diferible y re-derivable.
+- **D-9G-04** — Paso 4 = `−ROUND(GREATEST(base,0)×pct,2)` como número único agregado. El residual de la matriz global existe solo en el paso 9 (D-9E-08); los gastos D tienen su residual interno de zona (D-9G-05).
+- **D-9G-05** — Expansión D: activas de la zona en el mes → `valor_relativo` → ROUND por cabaña + residual interno a mayor `valor_relativo` (empate: menor `id_cabana`) → seam → socio.
+- **D-9G-06** — **Incidencia no derivable NO se resta y se reporta** (`pool_vacio` para A/C; `zona_sin_activas` para D); E siempre derivable (seam, independiente de la activación).
+- **D-9G-07** — `GREATEST(base,0)` solo en el paso 4; debajo, signo sin clamps; negativos visibles.
+- **D-9G-08** — Universo de socios del período = matriz ∪ incidencias D/E (solo-incidencia entra con bruto 0).
+- **D-9G-09** — `desembolsado_periodo` informativo; desembolso ≠ incidencia; la compensación pagador↔incidido es 9H.
+- **D-9G-10** — Set de 6 funciones `sql STABLE SECURITY INVOKER`, sin vistas/tablas/persistencia, REVOKE de los 4 roles.
+- **D-9G-11** — Lado fiscal del reporte 5-vs-fiscal: etiqueta literal `'monotributo'` (lower/btrim, patrón D-9F-09).
+- **D-9G-12** — Seed por INSERT directo (excepción de laboratorio, sin `registrar_pago()`): 5 pagos `seed_9g_%`, gates G1–G9 pineando la foto del Bloque A + RUN 0 diagnóstico + WHERE atómico; borrable por marcador escapado; sin reset de secuencia.
+- **D-9G-13** — **Fixtures 9F+9G = banco conjunto de laboratorio conservado hasta 9H**: fixture técnico, no datos reales; distorsionan saldos derivados de las reservas 5/6/7/10 mientras existan (aceptado y documentado); **no viajan a OPS**; la promoción recrea estructura por DDL sin copiar datos; DELETEs documentados sin ejecutar.
+- **D-9G-14** — `incidencia_gasto()` clase A = una fila estructural `pool_pre_operativo` **sin expansión por porcentajes** (la incidencia marginal de A es contextual al período por el GREATEST del paso 4); firma sin pct. Asimetría deliberada con C, que sí expande exacto por socio (§4.2, vía `repartir_por_matriz`).
+
 ## Lecciones operativas n8n consolidadas (L-6C-XX)
 
 Reglas firmes derivadas de la ejecución de la Etapa 6C. Detalle completo en `Lecciones_Aprendidas.md`.

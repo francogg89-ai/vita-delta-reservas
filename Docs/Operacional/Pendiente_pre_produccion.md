@@ -138,7 +138,22 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
 | Helper SQL `public.abortar_si_falla(jsonb)` | ✅ Creado y micro-testeado en TEST | 3b | `9B_CIERRE.md` §3 |
 | Rollback todo-o-nada (D-9B-19) | ✅ Validado en TEST (0 pagos tras abort) | 3b smoke 10 | `9B_CIERRE.md` §6-7 |
 
-## Pendiente — Promoción de 9B / Fase 3b a OPS
+## Items cerrados / tocados en Etapas 9C–9G (Carril B — capa derivada) — resumen
+
+| Item | Estado | Etapa | Referencia |
+|---|---|---|---|
+| Catálogo enriquecido (`valor_relativo`, beneficiario) + zonas + seam | ✅ Cerrado en TEST | 9C | `9C_CIERRE.md` |
+| Placeholder `Socio 3` → `Remo` (prerequisito Carril B) | ✅ Resuelto en TEST | 9C (D-9C-21) | `9C_CIERRE.md` |
+| Activación operativa por rango + pool real (Guatemala desde nov-2026) | ✅ Cerrado en TEST | 9D (D-9D-10) | `9D_CIERRE.md` |
+| Matriz dinámica + reparto con centavo residual | ✅ Cerrado en TEST | 9E (D-9E-08) | `9E_CIERRE.md` |
+| Gasto interno rediseñado (`gastos_internos`; legacy congelada) | ✅ Cerrado en TEST | 9F (D-9F-01) | `9F_CIERRE.md` |
+| Cascada de liquidación read-only (6 funciones, 11 pasos, 40/40) | ✅ Cerrado en TEST | 9G | `9G_CIERRE.md` |
+| Liquidación del `extra` (5%) | ✅ Resuelta por diseño: ingreso post-operativo (paso 6) | conceptual §4.3 / 9G | `9G_CIERRE.md` |
+| Fixtures de laboratorio (9F ids 30–34; 9G pagos ids 39–43) | ⏸ Conservados hasta 9H; **no viajan a OPS** | D-9F-17 / D-9G-13 | cierres 9F/9G |
+
+## Pendiente — Promoción coordinada del Carril B a OPS (incluye 9B / Fase 3b)
+
+(El alcance original de esta sección era solo 3b; con la capa derivada 9C→9G cerrada, la promoción es un **paquete único** — decisión vigente desde 9B, ratificada en el cierre de 9G.)
 
 - **Crear `public.abortar_si_falla(jsonb)` en OPS antes de importar 3b.** Es aditiva (no
   toca tablas, enums ni `registrar_pago()`), pero si falta, 3b falla en runtime: el rollback
@@ -154,8 +169,19 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
   define en la arquitectura global de contabilidad (Carril B).
 - **Liquidación del `extra` (recargo 5%):** definir si es repartible, gasto financiero,
   comisión interna o ingreso separado. Fuera de 3b; Carril B.
+  → **Resuelto en 9G:** el `extra` es ingreso **post-operativo** (paso 6 de la cascada,
+  conceptual §4.3); no integra la base del % operativo y se compara contra el monotributo
+  sin netear vía `reporte_5_vs_fiscal_periodo` (D-9G-11).
+- **Paquete Carril B (9C→9G):** además de `abortar_si_falla` y el workflow 3b, la promoción
+  coordinada recrea por DDL: columnas de `cabanas` + `zonas`/`cabana_zona` + seam (9C),
+  `activaciones_operativas` + pool real (9D), las 3 funciones de matriz/reparto (9E),
+  `gastos_internos` (9F) y las 6 funciones de cascada (9G), con **bump único del canónico**,
+  marcador `'ambiente'='ops'` (D-9C-19), destino de la `gastos` legacy (D-9F-01) y GRANTs/RLS
+  operativos a decidir en ese momento. **Los fixtures (`seed_9f_validacion`, `seed_9g_%`) NO
+  viajan** (D-9F-17 / D-9G-13): se recrea estructura, no se copian datos. Verificar socios
+  reales en OPS (L-9C-01).
 
-**Bitácoras / cierres recientes:** `8D_CIERRE.md`, `9B_CIERRE.md`.
+**Bitácoras / cierres recientes:** `9C_CIERRE.md`, `9D_CIERRE.md`, `9E_CIERRE.md`, `9F_CIERRE.md`, `9G_CIERRE.md` (Carril B — capa derivada); previos: `8D_CIERRE.md`, `9B_CIERRE.md`.
 
 ---
 

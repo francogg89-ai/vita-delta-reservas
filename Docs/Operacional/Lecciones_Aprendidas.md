@@ -1333,3 +1333,91 @@ por la de éxito, produciendo un doble-mensaje final (en 3b: N8b un instante y l
 **integridad no se ve afectada** (la transacción revierte igual; 0 pagos verificado). Un nodo
 Filter intermedio simple no lo corrige (se intentó N5.5 y se revirtió). Tenerlo en cuenta en
 futuros workflows transaccionales con doble final humano; aceptado como cosmético en 3b.
+
+## Lecciones del catálogo enriquecido y el seam — Etapa 9C
+
+### L-9C-01 — El seed canónico ships `Socio 3` como placeholder
+El seed de 6B trae el tercer socio como `Socio 3`. Cada entorno requiere completarlo con el
+nombre real (`Remo`) **antes** del seed de beneficiarios de 9C. El gate de unicidad de socios
+del Bloque A lo detecta y frena; resolverlo es prerequisito (D-9C-21). Verificar lo mismo en
+OPS antes de promover (OPS nació con los tres nombres reales en 8A; re-chequear igual en el
+gate de promoción).
+
+### L-9C-02 — Columnas `"char"` del catálogo requieren cast a `text` en UNION
+Columnas internas de tipo `"char"` (ej. `pg_proc.provolatile`) fallan dentro de un `UNION`
+con `ERROR 42804: UNION types text and "char" cannot be matched` si no se castean
+explícitamente a `text`.
+
+### L-9C-03 — Contar EXCLUDE por `conrelid`, no global
+Para verificar que una sub-etapa no introdujo `EXCLUDE`/rangos, contar filtrando por
+`conrelid` de sus tablas, no `COUNT(*) WHERE contype='x'` global: el schema base ya tiene
+2 EXCLUDE anti-overbooking (`reservas`, `bloqueos`) que inflan el conteo global.
+
+## Lecciones de la activación operativa — Etapa 9D
+
+### L-9D-01 — Estado por rango con presencia/ausencia
+Para "activo/inactivo por período" sin booleano: rangos `[)` + `EXCLUDE USING gist`
+(no-solapamiento por entidad). La adyacencia `[)` permite rangos pegados sin gaps
+obligatorios; el solapamiento se rechaza con `23P01`. "Desactivar" = dejar un hueco entre
+rangos. La participación mensual se verifica con
+`daterange(desde, hasta, '[)') @> daterange(mes_inicio, mes_siguiente, '[)')`.
+
+## Lecciones de la matriz y el reparto — Etapa 9E
+
+### L-9E-01 — Reparto proporcional con cierre exacto al centavo
+Redondear solo el reparto base por entidad y sumar el **residual una sola vez** al ganador
+(no redondear en pasos intermedios). El desempate del ganador se codifica en el
+`ORDER BY ... LIMIT 1` (participación DESC, luego preferencia nombrada, luego id), lo que
+permite expresar reglas de negocio de desempate en SQL puro sin lógica imperativa.
+Garantiza `Σ asignado = monto`.
+
+## Lecciones del gasto interno — Etapa 9F
+
+### L-9F-01 — El orden de evaluación de múltiples CHECK no es el de declaración
+Cuando una fila viola varias CHECK a la vez, PostgreSQL reporta **una sola**, y no
+necesariamente la "más específica". En smokes multi-violación, validar solo el SQLSTATE;
+reservar la validación por nombre de constraint para intentos que violan exactamente una.
+
+### L-9F-02 — Patrón de smoke transaccional con sentinel
+Dentro de un `DO`, `EXECUTE` del intento + `RAISE ... USING ERRCODE` propio para revertir los
+inserts aceptados; handler con `GET STACKED DIAGNOSTICS ... CONSTRAINT_NAME` para capturar la
+constraint exacta del rechazo. Garantiza 0 filas residuales y precisión por constraint, con
+resultados acumulados en una tabla `TEMP` (efímera, muere con la sesión).
+
+### L-9F-03 — El SQL Editor de Supabase cierra la sesión por run
+Una transacción no puede quedar abierta esperando una decisión humana, y un `ROLLBACK` final
+taparía el último `SELECT` (solo se muestra el último). Para seeds con decisión diferida:
+separar en runs independientes (seed+COMMIT / verificación / borrado por marcador) y
+convertir la decisión en "*cuándo* correr el borrado", no en "commitear o no".
+
+### L-9F-04 — Gate de diagnóstico progresivo
+Ordenar los chequeos de más específico a más genérico (marcador del seed **antes** que
+tabla-no-vacía) para que cada freno conserve su diagnóstico y remediación propios. El orden
+inverso vuelve inalcanzable el chequeo específico justo en el caso más probable.
+
+## Lecciones de la cascada — Etapa 9G
+
+### L-9G-01 — Marcadores con underscore exigen LIKE escapado
+`source_event LIKE 'seed\_9g\_%' ESCAPE '\'` — el `_` es comodín de un carácter en LIKE.
+Aplica a chequeos de presencia/ausencia y al DELETE de limpieza; sin escape, el patrón
+matchea de más (falsos positivos plausibles en gates).
+
+### L-9G-02 — Todo run DDL lleva gate programático de ambiente
+Primer statement del run: `DO $$ ... RAISE EXCEPTION ... $$` si el marcador de ambiente no es
+el esperado; al fallar, el resto del batch no se aplica. La protección por comentario de
+header no es protección. Tres sabores del mismo principio en 9G: chequeo con veredicto
+(Bloque A), condición en el WHERE del write (B), `DO+RAISE` por run DDL (C).
+
+### L-9G-03 — RUN 0 de diagnóstico ante writes con muchos gates
+Un `INSERT 0 0` con nueve gates en el WHERE no dice cuál falló. Patrón: pre-chequeo read-only
+con una fila OK/FALLO por gate + re-validación atómica de los mismos gates en el WHERE del
+write. El diagnóstico no reemplaza al enforcement ni viceversa.
+
+### L-9G-04 — Harness local como banco de pre-validación
+Réplica PostgreSQL local con el DDL exacto de los cierres + datos espejados a los agregados
+reales del entorno permitió validar cada bloque antes de entregarlo, correr tests negativos
+de gates imposibles de ejercitar en TEST (intruso en la foto, ambiente equivocado), y cubrir
+casos que exigirían writes mediante datos sintéticos bajo `BEGIN/ROLLBACK` (caso positivo de
+D-9G-06). El costo es mantener la fidelidad del espejo; el retorno fue cero FALLOs en TEST en
+los cinco bloques de 9G.
+
