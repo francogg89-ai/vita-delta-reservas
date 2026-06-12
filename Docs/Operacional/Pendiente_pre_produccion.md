@@ -3,8 +3,9 @@
 Lista de cambios y configuraciones a aplicar antes del despliegue de
 producción. Incluye pendientes que no se hicieron en DEV, ajustes ya cerrados en DEV que deben replicarse en TEST/PROD, y decisiones postergadas explícitamente.
 
-**Estado del archivo:** actualizado al cierre de la **Fase 3b (Etapa 9B — cobranza posterior, validada en TEST)** (sesión 2026-06-07). Previamente: cierre de la Sub-etapa 8C-bis (2026-06-04). **Con 8D se cerró la Etapa 8 completa** (operación real interna); **8C-bis** (alerta por reserva próxima, recoge el item 3.1) quedó cerrada como sub-etapa propia. **9B / 3b** agregó la cobranza posterior multi-porción transaccional (helper aditivo en TEST; promoción a OPS pendiente — ver sección propia abajo).
-Items cerrados durante Etapas 6D, 7A, 7B, 8A, 8B, 8C, 8D y la sub-etapa 8C-bis listados en los resúmenes de abajo;
+**Estado del archivo:** actualizado al cierre de la **Etapa 9H — cuenta corriente interna / capa con estado** (sesión 2026-06-12). Con 9H queda completo en TEST el **Carril B / contabilidad operativa interna**: capa derivada 9C–9G + capa con estado 9H. La promoción a OPS queda pendiente como **paquete coordinado único**, por DDL, sin copiar fixtures ni datos de laboratorio de TEST.
+
+Items cerrados durante Etapas 6D, 7A, 7B, 8A, 8B, 8C, 8D, sub-etapa 8C-bis, 9B/3b y Carril B 9C–9H listados en los resúmenes de abajo;
 detalle histórico de los items 6D en el Apéndice al final del documento.
 
 ---
@@ -138,7 +139,7 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
 | Helper SQL `public.abortar_si_falla(jsonb)` | ✅ Creado y micro-testeado en TEST | 3b | `9B_CIERRE.md` §3 |
 | Rollback todo-o-nada (D-9B-19) | ✅ Validado en TEST (0 pagos tras abort) | 3b smoke 10 | `9B_CIERRE.md` §6-7 |
 
-## Items cerrados / tocados en Etapas 9C–9G (Carril B — capa derivada) — resumen
+## Items cerrados / tocados en Etapas 9C–9H (Carril B completo) — resumen
 
 | Item | Estado | Etapa | Referencia |
 |---|---|---|---|
@@ -149,11 +150,12 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
 | Gasto interno rediseñado (`gastos_internos`; legacy congelada) | ✅ Cerrado en TEST | 9F (D-9F-01) | `9F_CIERRE.md` |
 | Cascada de liquidación read-only (6 funciones, 11 pasos, 40/40) | ✅ Cerrado en TEST | 9G | `9G_CIERRE.md` |
 | Liquidación del `extra` (5%) | ✅ Resuelta por diseño: ingreso post-operativo (paso 6) | conceptual §4.3 / 9G | `9G_CIERRE.md` |
-| Fixtures de laboratorio (9F ids 30–34; 9G pagos ids 39–43) | ⏸ Conservados hasta 9H; **no viajan a OPS** | D-9F-17 / D-9G-13 | cierres 9F/9G |
+| Cuenta corriente interna: snapshots congelados + mayor + revaluación (capa con estado) | ✅ Cerrado en TEST | 9H | `9H_CIERRE.md` |
+| Fixtures de laboratorio (9F ids 30–34; 9G pagos ids 39–43; 9H carga `seed_9h_d`) | ⏸ Conservados hasta la promoción coordinada; **no viajan a OPS** | D-9F-17 / D-9G-13 / D-9H-20 | cierres 9F/9G/9H |
 
 ## Pendiente — Promoción coordinada del Carril B a OPS (incluye 9B / Fase 3b)
 
-(El alcance original de esta sección era solo 3b; con la capa derivada 9C→9G cerrada, la promoción es un **paquete único** — decisión vigente desde 9B, ratificada en el cierre de 9G.)
+(El alcance original de esta sección era solo 3b; con el Carril B completo —capa derivada 9C→9G + capa con estado 9H— cerrado, la promoción es un **paquete único** — decisión vigente desde 9B, ratificada en los cierres de 9G y 9H.)
 
 - **Crear `public.abortar_si_falla(jsonb)` en OPS antes de importar 3b.** Es aditiva (no
   toca tablas, enums ni `registrar_pago()`), pero si falta, 3b falla en runtime: el rollback
@@ -172,16 +174,18 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
   → **Resuelto en 9G:** el `extra` es ingreso **post-operativo** (paso 6 de la cascada,
   conceptual §4.3); no integra la base del % operativo y se compara contra el monotributo
   sin netear vía `reporte_5_vs_fiscal_periodo` (D-9G-11).
-- **Paquete Carril B (9C→9G):** además de `abortar_si_falla` y el workflow 3b, la promoción
+- **Paquete Carril B (9C→9H):** además de `abortar_si_falla` y el workflow 3b, la promoción
   coordinada recrea por DDL: columnas de `cabanas` + `zonas`/`cabana_zona` + seam (9C),
   `activaciones_operativas` + pool real (9D), las 3 funciones de matriz/reparto (9E),
-  `gastos_internos` (9F) y las 6 funciones de cascada (9G), con **bump único del canónico**,
-  marcador `'ambiente'='ops'` (D-9C-19), destino de la `gastos` legacy (D-9F-01) y GRANTs/RLS
-  operativos a decidir en ese momento. **Los fixtures (`seed_9f_validacion`, `seed_9g_%`) NO
-  viajan** (D-9F-17 / D-9G-13): se recrea estructura, no se copian datos. Verificar socios
-  reales en OPS (L-9C-01).
+  `gastos_internos` (9F), las 6 funciones de cascada (9G) y la **capa con estado de 9H** (las 5
+  tablas `liquidaciones_periodo`/`liquidacion_cascada`/`liquidacion_socio`/`movimientos_socio`/
+  `revaluaciones` + la función y 10 triggers de inmutabilidad + las 9 funciones), con **bump único
+  del canónico**, marcador `'ambiente'='ops'` (D-9C-19), destino de la `gastos` legacy (D-9F-01) y
+  GRANTs/RLS operativos a decidir en ese momento. **Los fixtures (`seed_9f_validacion`, `seed_9g_%`,
+  `seed_9h_d`) NO viajan** (D-9F-17 / D-9G-13 / D-9H-20): se recrea estructura, no se copian datos.
+  Verificar socios reales en OPS (L-9C-01).
 
-**Bitácoras / cierres recientes:** `9C_CIERRE.md`, `9D_CIERRE.md`, `9E_CIERRE.md`, `9F_CIERRE.md`, `9G_CIERRE.md` (Carril B — capa derivada); previos: `8D_CIERRE.md`, `9B_CIERRE.md`.
+**Bitácoras / cierres recientes:** `9C_CIERRE.md`, `9D_CIERRE.md`, `9E_CIERRE.md`, `9F_CIERRE.md`, `9G_CIERRE.md` (Carril B — capa derivada), `9H_CIERRE.md` (Carril B — capa con estado, cierra el carril); previos: `8D_CIERRE.md`, `9B_CIERRE.md`.
 
 ---
 

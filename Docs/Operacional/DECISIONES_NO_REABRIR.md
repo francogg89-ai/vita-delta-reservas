@@ -825,6 +825,49 @@ D-9C-01..13 son las decisiones conceptuales del Carril B (en `ARQUITECTURA_ETAPA
 - **D-9G-13** — **Fixtures 9F+9G = banco conjunto de laboratorio conservado hasta 9H**: fixture técnico, no datos reales; distorsionan saldos derivados de las reservas 5/6/7/10 mientras existan (aceptado y documentado); **no viajan a OPS**; la promoción recrea estructura por DDL sin copiar datos; DELETEs documentados sin ejecutar.
 - **D-9G-14** — `incidencia_gasto()` clase A = una fila estructural `pool_pre_operativo` **sin expansión por porcentajes** (la incidencia marginal de A es contextual al período por el GREATEST del paso 4); firma sin pct. Asimetría deliberada con C, que sí expande exacto por socio (§4.2, vía `repartir_por_matriz`).
 
+### Cuenta corriente interna — capa con estado (9H — cerrada 2026-06-12)
+
+Última sub-etapa del Carril B: la capa **con estado** que congela la salida derivada de 9C–9G y agrega lo no derivable (mayor de movimientos, revaluación). Cierra el Carril B en TEST. No promovida a OPS (promoción coordinada única). Numeración completa D-9H-01 a D-9H-38, sin saltos.
+
+- **D-9H-01** — Snapshot = fila completa de `saldo_socios_periodo` por socio + cascada agregada de 8 pasos, congeladas en tablas propias (`liquidacion_socio`, `liquidacion_cascada`).
+- **D-9H-02** — La cabecera del snapshot (`liquidaciones_periodo`) guarda los metadatos de la corrida: `pct_operativo` y `creado_por` (más `created_at`).
+- **D-9H-03** — El congelado se dispara por **función SQL controlada** (`registrar_snapshot_periodo`), nunca por automatismo ni trigger; el período a congelar es decisión humana.
+- **D-9H-04** — Append-only **estricto**: sin columna `estado`, sin UPDATE en todo el diseño. La vigencia de una foto se **deriva** por `NOT EXISTS` supersesor, no se marca.
+- **D-9H-05** — La compensación pagador↔incidido (la deuda Rodrigo↔Franco del termotanque, Remo↔Rodrigo de las horas) es **derivada** leyendo `desembolsado_periodo`; **no** hay tabla de deuda.
+- **D-9H-06** — El arranque de junio (base de ganancia sin destinatarios, pool vacío) se maneja —si los socios lo deciden— con un movimiento manual de tipo `ajuste_arranque`, no con lógica especial en la cascada.
+- **D-9H-07** — Retiros: saldos negativos **por liquidación/incidencia** permitidos; un `retiro` que dejaría el saldo vivo < 0 va **bloqueado por la función**; el negativo solo se logra con un movimiento `adelanto` o `ajuste_manual`, con **comentario obligatorio**.
+- **D-9H-08** — La revaluación ARS→USD es un **evento aparte** (tabla `revaluaciones`); valúa o convierte, **no re-contabiliza** el saldo en ARS.
+- **D-9H-09** — La capa se implementa con **tablas + funciones**, sin vistas.
+- **D-9H-10** — El mayor de movimientos es **ARS-only**; el USD aparece únicamente en `revaluaciones`.
+- **D-9H-11** — Paso 4 (retribución operativa), **opción (c)**: la foto **congela y muestra** el paso 4 en `liquidacion_cascada`; el destino se registra después con un movimiento `retribucion_operativo`. **Sin caja operativa, sin asignación automática a ningún socio.**
+- **D-9H-12** — `saldo_vivo = saldo_final + desembolsado_periodo + Σ movimientos`. En `liquidacion_socio` van **columnas separadas**; la suma vive **solo** en la función `saldo_corriente_socio` (sin columna materializada de crédito).
+- **D-9H-13** — El paso 4 / retribución operativa **no tiene beneficiario predefinido** ni se asigna automáticamente por rol operativo. La foto de liquidación lo congela y lo muestra como magnitud calculada; el destino real se decide entre socios y se registra después mediante un movimiento manual de tipo `retribucion_operativo`. El sistema controla la no-duplicación con `reporte_retribucion_operativo_periodo`, pero **no decide el beneficiario**. (No agrega regla nueva: documenta explícitamente lo ya resuelto por D-9H-11 y D-9H-14.)
+- **D-9H-14** — Reporte anti-duplicación: `reporte_retribucion_operativo_periodo(periodo)` compara **calculado** (paso 4 de la foto vigente) vs **asignado** (Σ de movimientos `retribucion_operativo` del período, neto de reversas).
+- **D-9H-15** — Inmutabilidad **estructural**: función `trg_9h_inmutable()` + triggers `BEFORE UPDATE OR DELETE` (row) y `BEFORE TRUNCATE` (statement) en las 5 tablas. Append-only deja de ser disciplina y pasa a ser estructural; el único bypass es DDL visible (DROP del trigger).
+- **D-9H-16** — Cierre de seguridad: `REVOKE ALL` de PUBLIC + `anon`/`authenticated`/`service_role` en las 5 tablas **y** en las 3 secuencias BIGSERIAL.
+- **D-9H-17** — Reversa **única por movimiento**: índice parcial único `uq_mov_reversa_unica` + validación funcional de **monto opuesto** en la función.
+- **D-9H-18** — `retribucion_operativo` es **positivo** (acredita); su corrección solo por reversa.
+- **D-9H-19** — `revaluaciones.id_movimiento_origen` (FK nullable): NULL = valuación de saldo; no-NULL = conversión ligada a un movimiento concreto (el retiro/adelanto).
+- **D-9H-20** — Limpieza de la capa por **teardown DROP** en orden explícito (`revaluaciones` → `movimientos_socio` → `liquidacion_socio` → `liquidacion_cascada` → `liquidaciones_periodo` → función), **sin CASCADE**. Como las tablas son inmutables, **no hay DELETE**.
+- **D-9H-21** — `REVOKE ALL ON FUNCTION trg_9h_inmutable()` de PUBLIC + 3 roles (higiene + defensa en profundidad; no afecta el enforcement del trigger).
+- **D-9H-22** — Pertenencia de socio **estructural**: `UNIQUE (id_movimiento, id_socio)` como target de FK compuestas `(id_movimiento_revertido, id_socio)` y `(id_movimiento_origen, id_socio)` (MATCH SIMPLE: si el origen es NULL no se chequea). Una reversa o conversión no se puede ligar al movimiento de otro socio; se eliminan las FK de una sola columna.
+- **D-9H-23** — Verificación de seguridad **exhaustiva** en B.2: 7 privilegios de tabla (SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER) y 3 de secuencia (USAGE/SELECT/UPDATE) para PUBLIC + 3 roles, más EXECUTE de la función de trigger.
+- **D-9H-24** — Re-snapshot **explícito**: si el período ya tiene foto vigente, `registrar_snapshot_periodo` **falla** salvo que se pase `p_supersede_id` = cola actual + comentario obligatorio. Apunta la sucesora a la cola, no a un nodo medio.
+- **D-9H-25** — Retiro a saldo **exactamente 0** permitido; bloquea solo si el resultado es < 0.
+- **D-9H-26** — Doble defensa del pct operativo: validación temprana del rango + filtro en los pasos 1-8 (nunca congela un paso guard).
+- **D-9H-27** — Permitir **congelar junio** (cascada de 8 pasos, 0 filas de socio: anomalía de arranque real, pool vacío).
+- **D-9H-28** — La reversa recibe solo `id_movimiento_revertido` + fecha + comentario + `creado_por`; la función **calcula el monto opuesto** internamente.
+- **D-9H-29** — Conversión parcial ligada con **tope acumulado**: Σ `monto_ars` convertido ≤ `|monto|` del movimiento origen.
+- **D-9H-30** — Valuación `total` **no atada al saldo vivo** en el MVP (informativa, no certificada).
+- **D-9H-31** — Funciones de escritura específicas (`registrar_retiro` / `registrar_reversa` / `registrar_revaluacion`) + una genérica `registrar_movimiento_manual` para los 4 tipos manuales.
+- **D-9H-32** — **Advisory locks** transaccionales: `pg_advisory_xact_lock(919001, hashtext(periodo))` en el snapshot; `pg_advisory_xact_lock(919002, id_socio)` en retiro / movimiento manual / reversa / revaluación. Necesarios porque los guards y topes son **derivados** (se leen y se decide en la misma transacción).
+- **D-9H-33** — `registrar_revaluacion` calcula `monto_usd = ROUND(monto_ars / tipo_cambio, 2)` internamente (no se pasa por fuera).
+- **D-9H-34** — La conversión ligada se permite **solo** sobre movimientos `retiro` o `adelanto` (débitos ARS efectivamente entregados al socio); excluye `retribucion_operativo` / `ajuste_arranque` / `ajuste_manual` / `reversa`.
+- **D-9H-35** — `registrar_snapshot_periodo` exige **exactamente 8 filas** insertadas en `liquidacion_cascada` (`GET DIAGNOSTICS ROW_COUNT`); si no, `RAISE`.
+- **D-9H-36** — Endurecimiento de escala: ARS rechaza precisión sub-centavo (`valor <> ROUND(valor, 2)`); `tipo_cambio := ROUND(., 4)` antes de calcular USD (corrige un bug latente del CHECK de coherencia con TC > 4 decimales); el pct rechaza > 4 decimales.
+- **D-9H-37** — `registrar_snapshot_periodo` valida las filas de `liquidacion_socio`: **0** (junio) o **exactamente `COUNT(socios)`**. Asume que todo período con matriz incluye a todos los socios (cierto hoy: cada socio tiene ≥1 cabaña activa desde julio). Salvedad: si una cabaña grande se desactivara, refinar a `WHERE activo`.
+- **D-9H-38** — Smokes C.3 **efímeros**: `BEGIN → seed mínimo → smokes → veredicto → ROLLBACK`; no persisten filas. Las secuencias BIGSERIAL pueden avanzar (nextval no transaccional), sin significado contable y sin resetearse.
+
 ## Lecciones operativas n8n consolidadas (L-6C-XX)
 
 Reglas firmes derivadas de la ejecución de la Etapa 6C. Detalle completo en `Lecciones_Aprendidas.md`.

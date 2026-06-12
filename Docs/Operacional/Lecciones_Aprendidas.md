@@ -1421,3 +1421,35 @@ casos que exigirían writes mediante datos sintéticos bajo `BEGIN/ROLLBACK` (ca
 D-9G-06). El costo es mantener la fidelidad del espejo; el retorno fue cero FALLOs en TEST en
 los cinco bloques de 9G.
 
+## Lecciones de la cuenta corriente interna — Etapa 9H
+
+### L-9H-01 — Cast `::text` en concatenación de tipos internos
+`pg_constraint.contype` es `"char"` interno; `contype || ', '` no resuelve un operador único y
+aborta con `ERROR 42725: operator is not unique`. Hay que castear explícitamente (`contype::text`)
+cuando el tipo interno se **concatena**, no solo cuando se compara. Es pariente de L-9C-02 (que
+era sobre `UNION`), pero acá el disparador es la concatenación. Detectado en B.2 v3 (tres lugares:
+FK compuesta de período, reversa, conversión) y corregido en B.2 v3.1.
+
+### L-9H-02 — Un smoke negativo que viola dos defensas reporta solo la primera evaluada
+Cuando un intento viola dos restricciones a la vez, PostgreSQL aborta en la primera que evalúa, y
+no necesariamente la que el smoke quiere probar. Hay que aislar el caso para que viole **una sola**
+defensa. Descubierto: una reversa cross-socio sobre un movimiento **ya revertido** chocaba primero
+`uq_mov_reversa_unica` (reversa única) en vez de `fk_mov_reversa_mismo_socio` (pertenencia de socio);
+el smoke se reescribió sobre un movimiento no revertido para ejercitar la FK correcta. Análogo a
+L-9F-01, pero entre una constraint y un índice único en vez de entre dos CHECK.
+
+### L-9H-03 — Las secuencias BIGSERIAL avanzan con `nextval` no transaccional bajo ROLLBACK
+`nextval` no se revierte con la transacción, y solo avanza si la operación llega a evaluar el serial
+(un INSERT rechazado por una defensa previa no lo consume). Por eso el postcheck de un bloque efímero
+(`BEGIN…ROLLBACK`) debe separar dos cosas: las **filas** (transaccionales, deben quedar en 0 tras el
+rollback) y las **secuencias** (no transaccionales, pueden haber avanzado por diseño y no se resetean).
+Confirmar "0 filas persistidas" sin pretender que las secuencias vuelvan atrás.
+
+### L-9H-04 — Todo `RAISE` de plpgsql es SQLSTATE `P0001`
+Las excepciones lanzadas por las funciones (`RAISE EXCEPTION '...'`) comparten el código `P0001`,
+así que un smoke negativo sobre la **lógica de una función** (guard de saldo, re-snapshot, escala,
+conversión cross-socio) no puede distinguirse por SQLSTATE: hay que verificar además un fragmento del
+`MESSAGE_TEXT` (vía `GET STACKED DIAGNOSTICS`). Validar solo el SQLSTATE haría pasar el smoke aunque
+falle la defensa equivocada. (Las violaciones de constraint sí traen su `CONSTRAINT_NAME` y SQLSTATE
+específico; la distinción aplica a los `RAISE` de cuerpo de función.)
+

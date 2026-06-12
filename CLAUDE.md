@@ -7,29 +7,37 @@ Antes de trabajar, leer en este orden:
 1. Docs/Operacional/ESTADO_ACTUAL_VITA_DELTA.md
 2. Docs/Operacional/DECISIONES_NO_REABRIR.md
 3. Docs/Implementacion/6B_SCHEMA_SQL.md (schema canónico actual: **v1.7.3**)
-4. Docs/Arquitectura/ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md (diseño Etapa 8 — arranque OPS; subetapas 8A-8D)
-5. Docs/Arquitectura/ARQUITECTURA_ETAPA_8D_BLOQUEOS_OPERATIVOS.md (diseño Etapa 8D — capa de bloqueos; **v1.1**)
-6. Docs/Bitacora/8D_CIERRE.md (cierre formal Etapa 8D — bloqueos validados en TEST + OPS; **cierra la Etapa 8 completa**)
-6-bis. Docs/Bitacora/8C-bis_CIERRE.md (cierre formal Sub-etapa 8C-bis — alerta por reserva próxima por mail, validada en TEST + activa en OPS; recoge el item 3.1)
-7. Docs/Arquitectura/ARQUITECTURA_ETAPA_8C_CALENDARIOS_VISUALES.md (diseño Etapa 8C — calendarios visuales; **v1.3**)
-8. Docs/Bitacora/8C_CIERRE.md (cierre formal Etapa 8C — tres calendarios validados en TEST y activos en OPS; 8C-bis posterior)
-9. Docs/Arquitectura/ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md (diseño Etapa 8B — capa de carga interna; **v3.5**)
-10. Docs/Bitacora/8B_CIERRE.md (cierre formal Etapa 8B — capa de carga validada en TEST + smoke OPS con primera reserva real)
-11. Docs/Bitacora/8A_CIERRE.md (cierre formal Etapa 8A — levantamiento del entorno OPS)
-12. Docs/Bitacora/7E_CIERRE.md (cierre formal Etapa 7E — endurecimiento de permisos Data API en DEV)
-13. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
-14. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
-15. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
-16. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
-17. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
-18. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
-19. Docs/Implementacion/6B_PLAN_FASES.md
-20. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a PROD)
-21. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
-22. Docs/Bitacora/8D_EJECUCION.md (bitácora de ejecución de 8D, si necesitás el detalle de construcción/incidencias)
-23. Docs/Bitacora/8C_EJECUCION.md (bitácora de ejecución de 8C)
-24. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
-25. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
+4. Docs/Bitacora/9H_CIERRE.md (cierre formal Etapa 9H — cuenta corriente interna / capa con estado; cierra el Carril B en TEST)
+5. Docs/Bitacora/9G_CIERRE.md (cierre formal Etapa 9G — cascada de liquidación read-only)
+6. Docs/Bitacora/9F_CIERRE.md (cierre formal Etapa 9F — gasto interno rediseñado)
+7. Docs/Bitacora/9E_CIERRE.md (cierre formal Etapa 9E — matriz dinámica y reparto)
+8. Docs/Bitacora/9D_CIERRE.md (cierre formal Etapa 9D — activación operativa por rango)
+9. Docs/Bitacora/9C_CIERRE.md (cierre formal Etapa 9C — catálogo enriquecido, zonas y seam)
+10. Docs/Bitacora/9B_CIERRE.md (cierre formal Etapa 9B / Fase 3b — cobranza posterior multi-porción)
+11. Docs/Arquitectura/ARQUITECTURA_ETAPA_9_CARRIL_B_CONCEPTUAL.md (base conceptual de contabilidad operativa interna)
+12. Docs/Arquitectura/ARQUITECTURA_ETAPA_8_ARRANQUE_OPS.md (diseño Etapa 8 — arranque OPS; subetapas 8A-8D)
+13. Docs/Arquitectura/ARQUITECTURA_ETAPA_8D_BLOQUEOS_OPERATIVOS.md (diseño Etapa 8D — capa de bloqueos; **v1.1**)
+14. Docs/Bitacora/8D_CIERRE.md (cierre formal Etapa 8D — bloqueos validados en TEST + OPS; **cierra la Etapa 8 completa**)
+14-bis. Docs/Bitacora/8C-bis_CIERRE.md (cierre formal Sub-etapa 8C-bis — alerta por reserva próxima por mail, validada en TEST + activa en OPS; recoge el item 3.1)
+15. Docs/Arquitectura/ARQUITECTURA_ETAPA_8C_CALENDARIOS_VISUALES.md (diseño Etapa 8C — calendarios visuales; **v1.3**)
+16. Docs/Bitacora/8C_CIERRE.md (cierre formal Etapa 8C — tres calendarios validados en TEST y activos en OPS; 8C-bis posterior)
+17. Docs/Arquitectura/ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md (diseño Etapa 8B — capa de carga interna; **v3.5**)
+18. Docs/Bitacora/8B_CIERRE.md (cierre formal Etapa 8B — capa de carga validada en TEST + smoke OPS con primera reserva real)
+19. Docs/Bitacora/8A_CIERRE.md (cierre formal Etapa 8A — levantamiento del entorno OPS)
+20. Docs/Bitacora/7E_CIERRE.md (cierre formal Etapa 7E — endurecimiento de permisos Data API en DEV)
+21. Docs/Bitacora/7D_CIERRE.md (cierre formal Etapa 7D — limpieza/reset del entorno TEST)
+22. Docs/Bitacora/7C_CIERRE.md (cierre formal Etapa 7C — validación funcional ampliada sobre TEST)
+23. Docs/Bitacora/7B_CIERRE.md (cierre formal Etapa 7B — levantamiento del entorno TEST)
+24. Docs/Bitacora/7A_CIERRE.md (cierre formal Etapa 7A — correcciones pre-TEST/pre-OPS)
+25. Docs/Bitacora/6D_CIERRE.md (cierre formal Etapa 6D — hardening pre-producción)
+26. Docs/Bitacora/6C_CIERRE.md (cierre formal de workflows n8n contra Supabase DEV)
+27. Docs/Implementacion/6B_PLAN_FASES.md
+28. Docs/Operacional/Pendiente_pre_produccion.md (items para deploy a PROD)
+29. Docs/Operacional/Lecciones_Aprendidas.md (gotchas operativos)
+30. Docs/Bitacora/8D_EJECUCION.md (bitácora de ejecución de 8D, si necesitás el detalle de construcción/incidencias)
+31. Docs/Bitacora/8C_EJECUCION.md (bitácora de ejecución de 8C)
+32. Docs/Bitacora/6B_EJECUCION_DEV.md (si necesitás contexto histórico de implementación de backend)
+33. Docs/Bitacora/6C_EJECUCION.md (si necesitás contexto histórico de implementación de workflows)
 
 No cargar contexto histórico largo salvo pedido explícito del usuario.
 
@@ -37,7 +45,7 @@ No cargar contexto histórico largo salvo pedido explícito del usuario.
 
 Actuás como arquitecto técnico, diseñador de automatizaciones y copiloto de implementación para el sistema de reservas y operación digital de Complejo Vita Delta.
 
-El objetivo es construir un sistema escalable para reservas automáticas, disponibilidad, precios, pagos, coordinación operativa, bot conversacional, web de reservas y futura contabilidad.
+El objetivo es construir un sistema escalable para reservas automáticas, disponibilidad, precios, pagos, coordinación operativa, contabilidad operativa interna, bot conversacional, web de reservas y futuras capas contables/fiscales.
 
 ## Equipo de Vita Delta
 
@@ -196,7 +204,7 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - **Smoke OPS exitoso = primer write real del sistema:** reserva id 1 (Tokio, Paula Lugo, 06→07 jun 2026, total 150000, seña 75000, saldo 75000, `created_by`/`validado_por` = vicky, `source_event` `n8n_ops_w8b_carga_vicky_manual`). Trazabilidad multiusuario verificada en producción.
 - Punto de extensión para el repintado de calendario (8C) marcado pero NO construido.
 - Artefactos: workflows `__TEST`/`__OPS`/`__TEMPLATE` (sanitizado). Decisiones D-8B-01 a D-8B-21; lecciones L-8B-01 a L-8B-07. Diseño: `ARQUITECTURA_ETAPA_8B_CAPA_CARGA.md v3.5`. Documento de cierre: `8B_CIERRE.md`.
-- **Pendiente operativo:** activar el workflow `__OPS` para uso por URL sin ejecución manual (el smoke se hizo con ejecución observada).
+- **Estado operativo:** al cierre de 8C-bis, `vita_w8b_carga_reserva__OPS` quedó activo y publicado para uso por URL; el pendiente operativo de activación quedó cubierto.
 
 **Etapa 8C — Calendarios visuales por evento ✅ Cerrada (2026-06-01, TEST + OPS):**
 
@@ -243,22 +251,22 @@ El objetivo es construir un sistema escalable para reservas automáticas, dispon
 - Incidencias resueltas: bug de SQL en N6 (mezcla coma+`LEFT JOIN` → `invalid reference to FROM-clause entry`; corregido y blindado con un control del verificador — L-9B-03); aclaración `created_at`/`updated_at` vs `fecha_hora` en `pagos` (L-9B-04). **Comportamiento conocido aceptado:** doble-mensaje N8b→N8a ante rollback (con `onError: continueErrorOutput` el nodo transaccional dispara ambas salidas; cosmético, integridad intacta; se intentó un Filter N5.5 y se revirtió — L-9B-05).
 - Artefactos: `cobranza_posterior_3b.json`, `generar_3b.py`, `verificar_3b.py`, templates sanitizados `vita_w09_cobranza_posterior__TEMPLATE.json` y `vita_w09_listado_saldos__TEMPLATE.json`. Decisiones: bloque 9B + D-9B-19 (en `DECISIONES_NO_REABRIR.md`); lecciones L-9B-01 a L-9B-05. Cierre: `9B_CIERRE.md`. No reabre 8B/8C/8D/8C-bis ni el diagnóstico 9A.
 
-**Etapas 9C→9G / Carril B — capa derivada ✅ Cerradas en TEST (9F 2026-06-10, 9G 2026-06-11):**
+**Etapas 9C→9H / Carril B — contabilidad operativa interna completa ✅ Cerradas en TEST (9F 2026-06-10, 9G 2026-06-11, 9H 2026-06-12):**
 - **9C:** `cabanas.valor_relativo` + `cabanas.id_socio_beneficiario` (NOT NULL, FK RESTRICT); `zonas` + `cabana_zona` (grandes/chicas); seam `resolver_beneficiario(id_cabana, fecha)` (fecha incluida e ignorada en el MVP); marcador `configuracion_general('ambiente','test')` como gate anti-OPS (D-9C-19); placeholder `Socio 3`→`Remo` resuelto (D-9C-21).
 - **9D:** `activaciones_operativas` (rangos `[)`, EXCLUDE gist por cabaña, `fecha_hasta NULL`=abierta; desactivar = hueco); pool real D-9D-10: 4 cabañas desde 2026-07-01, **Guatemala desde 2026-11-01**.
 - **9E:** `matriz_participacion` / `repartir_por_matriz` / `detalle_participacion`, read-only; matriz derivada, jamás persistida; centavo residual D-9E-08 (mayor participación; empate del máximo: Rodrigo si está, sino menor id).
 - **9F:** `gastos_internos` (17 col, 18 constraints; clase A/C/D/E ⇒ momento+alcance por CHECK; override derivado con comentario obligatorio; `periodo` normalizado a día 1; pagador socio|caja); legacy `gastos` congelada e intacta (D-9F-01); fixture ids 30–34.
-- **9G:** cascada de 11 pasos en 6 funciones `sql STABLE SECURITY INVOKER` (`cascada_periodo`, `saldo_socios_periodo`, `incidencia_gasto`, `reporte_overrides_periodo`, `reporte_5_vs_fiscal_periodo`, `gastos_sin_incidencia_periodo`); % operativo por parámetro con guard explícito (D-9G-01); **caja percibida** = mes de `created_at` (D-9G-03); `GREATEST(base,0)` solo en paso 4 (D-9G-07); no-derivable se reporta sin restar (D-9G-06); `desembolsado_periodo` informativo, la compensación es 9H (D-9G-09). Validación 40/40 en TEST reproduciendo el ejemplo canónico al centavo; junio quedó como anomalía de arranque real ($1.345.000 con pool vacío, sin destinatarios). Seed de 5 pagos (único write, gates G1–G9) conservado junto al fixture 9F como **banco de laboratorio hasta 9H** (D-9G-13: no datos reales, distorsión declarada, **no viajan a OPS**).
-- Decisiones D-9C-14..21 / D-9D-01..10 / D-9E-01..08 / D-9F-01..21 / D-9G-01..14; lecciones L-9C, L-9D, L-9E, L-9F, L-9G (en los satélites). Cierres `9C_CIERRE.md` … `9G_CIERRE.md`. **Próximo: 9H** (saldos acumulados, retiros, revaluación, compensación pagador↔incidido) en conversación nueva.
+- **9G:** cascada de 11 pasos en 6 funciones `sql STABLE SECURITY INVOKER` (`cascada_periodo`, `saldo_socios_periodo`, `incidencia_gasto`, `reporte_overrides_periodo`, `reporte_5_vs_fiscal_periodo`, `gastos_sin_incidencia_periodo`); % operativo por parámetro con guard explícito (D-9G-01); **caja percibida** = mes de `created_at` (D-9G-03); `GREATEST(base,0)` solo en paso 4 (D-9G-07); no-derivable se reporta sin restar (D-9G-06); `desembolsado_periodo` informativo, la compensación es 9H (D-9G-09). Validación 40/40 en TEST reproduciendo el ejemplo canónico al centavo; junio quedó como anomalía de arranque real ($1.345.000 con pool vacío, sin destinatarios). Seed de 5 pagos (único write, gates G1–G9) conservado junto al fixture 9F como **banco de laboratorio hasta la promoción coordinada** (D-9G-13: no datos reales, distorsión declarada, **no viajan a OPS**).
+- **9H:** capa **con estado** — 5 tablas append-only (`liquidaciones_periodo`, `liquidacion_cascada`, `liquidacion_socio`, `movimientos_socio`, `revaluaciones`) con inmutabilidad por 10 triggers y cadena de supersesión lineal (re-snapshot sin borrar; una raíz/una vigente por período) + 9 funciones (4 lectura `STABLE` + 5 escritura solo-INSERT con advisory locks) que congelan la foto de 9G, llevan el mayor de movimientos (retiros/ajustes/reversas/retribución) y la revaluación ARS→USD; **saldo vivo derivado** (D-9H-12, nunca almacenado; columnas separadas, suma solo en la función). Paso 4 sin beneficiario predefinido, destino por movimiento manual (D-9H-11/13/14). Validación seis bloques verdes (A0 + B + C + C.3 smokes 20/20 + D + E 38 OK), canónicos jul/ago/nov al centavo + saldos vivos finales (Franco $24.158,16 · Rodrigo $351.957,49 · Remo $213.284,35); limpieza por **teardown DROP**, nunca DELETE (D-9H-20). Carga `seed_9h_d` conservada con el banco 9F/9G (no viaja a OPS).
+- Decisiones D-9C-14..21 / D-9D-01..10 / D-9E-01..08 / D-9F-01..21 / D-9G-01..14 / D-9H-01..38; lecciones L-9C, L-9D, L-9E, L-9F, L-9G, L-9H (en los satélites). Cierres `9C_CIERRE.md` … `9H_CIERRE.md`. **Próximo: promoción coordinada del Carril B completo (9C→9H) a OPS**, en conversación nueva.
 
-**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV, TEST y OPS están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B con paridad 10/10; OPS reconstruido en 8A con paridad P01-P10 10/10). Ni 8C ni 8D modificaron el schema: los calendarios son solo lectura y los bloqueos usan `crear_bloqueo()` tal cual. **8C-bis tampoco toca schema:** es solo lectura + envío de mail. **3b tampoco modifica el canónico:** la única adición es la función de orquestación `public.abortar_si_falla(jsonb)`, aditiva y **solo en TEST** (no toca tablas, enums ni `registrar_pago()`); su incorporación al canónico se evaluará en la promoción coordinada del Carril B. **El Carril B (9C→9G) agregó en TEST, en forma aditiva y no canónica:** columnas `valor_relativo`/`id_socio_beneficiario` en `cabanas`, tablas `zonas`/`cabana_zona`/`activaciones_operativas`/`gastos_internos`, el marcador `configuracion_general('ambiente')` y diez funciones read-only (seam + 3 de 9E + 6 de 9G). **Canónico v1.7.3 intacto y sin existencia de estos objetos en DEV/OPS**; incorporación con bump único en la promoción coordinada.
+**Schema canónico actual:** `6B_SCHEMA_SQL.md v1.7.3`. **DEV, TEST y OPS están alineados funcionalmente** (TEST reconstruido desde el canónico en 7B con paridad 10/10; OPS reconstruido en 8A con paridad P01-P10 10/10). Ni 8C ni 8D modificaron el schema: los calendarios son solo lectura y los bloqueos usan `crear_bloqueo()` tal cual. **8C-bis tampoco toca schema:** es solo lectura + envío de mail. **3b tampoco modifica el canónico:** la única adición es la función de orquestación `public.abortar_si_falla(jsonb)`, aditiva y **solo en TEST** (no toca tablas, enums ni `registrar_pago()`); su incorporación al canónico se evaluará en la promoción coordinada del Carril B. **El Carril B (9C→9H) agregó en TEST, en forma aditiva y no canónica:** columnas `valor_relativo`/`id_socio_beneficiario` en `cabanas`, tablas `zonas`/`cabana_zona`/`activaciones_operativas`/`gastos_internos` (capa derivada) más las **5 tablas con estado de 9H** (`liquidaciones_periodo`/`liquidacion_cascada`/`liquidacion_socio`/`movimientos_socio`/`revaluaciones`) con 10 triggers de inmutabilidad, el marcador `configuracion_general('ambiente')` y **diecinueve funciones** (seam + 3 de 9E + 6 read-only de 9G + 9 de 9H: 4 de lectura y 5 de escritura). **Canónico v1.7.3 intacto y sin existencia de estos objetos en DEV/OPS**; incorporación con bump único en la promoción coordinada.
 
 **Próxima etapa — opciones disponibles (orden sugerido):**
 
-Con DEV, TEST, OPS, 6D, 7A-7E, **8A-8D cerradas y la Etapa 8 (operación real interna) completa**, la **sub-etapa 8C-bis** cerrada y activa en OPS, la **Etapa 9 / Carril A** en marcha (9A diagnóstico + 3a-v2 listado + **9B/3b cobranza posterior cerrada y validada en TEST**) y el **Carril B con su capa derivada completa (9C→9G cerradas en TEST, cascada validada 40/40)**, el equipo opera el complejo con tres acciones autoservicio sobre OPS y recibe avisos automáticos por mail. Las opciones a priorizar por Franco de acá en más:
+Con DEV, TEST, OPS, 6D, 7A-7E, **8A-8D cerradas y la Etapa 8 (operación real interna) completa**, la **sub-etapa 8C-bis** cerrada y activa en OPS, la **Etapa 9 / Carril A** en marcha (9A diagnóstico + 3a-v2 listado + **9B/3b cobranza posterior cerrada y validada en TEST**) y el **Carril B completo (9C→9H cerradas en TEST: capa derivada con cascada validada 40/40 + capa con estado validada end-to-end)**, el equipo opera el complejo con tres acciones autoservicio sobre OPS y recibe avisos automáticos por mail. Las opciones a priorizar por Franco de acá en más:
 
-- **Etapa 9H — Carril B, capa acumulada:** saldos acumulados entre períodos, retiros, revaluación y compensación pagador↔incidido. Insumos listos: las 6 funciones de cascada, el banco de laboratorio (fixtures 9F+9G) y `PENDIENTE_CARRIL_B_9H_SALDOS_RETIROS_REVALUACION.md`. Conversación nueva.
-- **Promoción coordinada del Carril B a OPS (incluye 9B/3b):** paquete único por DDL — objetos 9C/9D/9E/9F/9G + `abortar_si_falla(jsonb)` + workflow 3b `__OPS` — con bump del canónico, marcador `'ambiente'='ops'`, GRANTs/RLS a decidir, verificación de socios reales (L-9C-01) y **sin datos de TEST**. TEST antes que OPS. Ver `Pendiente_pre_produccion.md`.
+- **Promoción coordinada del Carril B a OPS (incluye 9B/3b) — próximo hito del carril:** paquete único por DDL — objetos 9C/9D/9E/9F/9G + la **capa con estado de 9H** (5 tablas + 10 triggers + 9 funciones) + `abortar_si_falla(jsonb)` + workflow 3b `__OPS` — con bump del canónico, marcador `'ambiente'='ops'`, GRANTs/RLS a decidir, verificación de socios reales (L-9C-01) y **sin datos de TEST**. TEST antes que OPS. Ver `Pendiente_pre_produccion.md`.
 - **Decisiones de negocio del Carril B (socios, fuera del sistema):** valor real del % operativo (parámetro; 0,25 fue valor de trabajo) y política de arranque para lo percibido con pool vacío (junio 2026: $1.023.900 derivados sin destinatarios). La liquidación del `extra` quedó **resuelta por diseño**: ingreso post-operativo, paso 6 de la cascada (D-9G-02 / conceptual §4.3).
 - **Resto de la arquitectura global de contabilidad:** caja por lugar, conversión/tabla de ahorro de monedas, cancelaciones con cargo, AFIP/ARCA/IVA (carril fiscal, separado por diseño). El bump del canónico llega con la promoción coordinada del Carril B. Conversación aparte.
 - **Registrar la primera ejecución real de 8C-bis** cuando entre la próxima reserva con check-in en ventana. Pendiente menor: migrar el remitente SMTP al futuro mail propio de las cabañas (D-8Cbis-09).
