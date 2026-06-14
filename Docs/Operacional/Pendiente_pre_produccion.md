@@ -151,9 +151,11 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
 | Cascada de liquidación read-only (6 funciones, 11 pasos, 40/40) | ✅ Cerrado en TEST | 9G | `9G_CIERRE.md` |
 | Liquidación del `extra` (5%) | ✅ Resuelta por diseño: ingreso post-operativo (paso 6) | conceptual §4.3 / 9G | `9G_CIERRE.md` |
 | Cuenta corriente interna: snapshots congelados + mayor + revaluación (capa con estado) | ✅ Cerrado en TEST | 9H | `9H_CIERRE.md` |
-| Fixtures de laboratorio (9F ids 30–34; 9G pagos ids 39–43; 9H carga `seed_9h_d`) | ⏸ Conservados hasta la promoción coordinada; **no viajan a OPS** | D-9F-17 / D-9G-13 / D-9H-20 | cierres 9F/9G/9H |
+| Fixtures de laboratorio (9F ids 30–34; 9G pagos ids 39–43; 9H carga `seed_9h_d`) | ✅ Promoción hecha (jun-2026); **no viajaron a OPS** (estructura recreada por DDL, datos no copiados) | D-9F-17 / D-9G-13 / D-9H-20 | cierres 9F/9G/9H |
 
-## Pendiente — Promoción coordinada del Carril B a OPS (incluye 9B / Fase 3b)
+## ✅ CERRADO (2026-06-14) — Promoción coordinada del Carril B a OPS (incluye 9B / Fase 3b)
+
+> **✅ CERRADO (2026-06-14).** El Carril B completo (helper 9B + 9C→9H) fue **promovido a OPS** como paquete único, con bump del canónico a **v1.8.0**. Paridad estructural verificada (huella `TOTAL_CARRIL` de 31 objetos idéntica TEST↔OPS, `f5187092083451ceb5b182334bdb4a17`), hardening sin exposición a Data API (9 tablas + 6 secuencias + 21 funciones), smokes 18/18 read-only en OPS y el workflow `vita_w09_cobranza_posterior` (14 nodos) andando en OPS. Cierre: `PROMOCION_CARRIL_B_OPS_CIERRE.md` (D-PROMO-01..13 / L-PROMO-01..08). El contenido original se conserva abajo como referencia histórica.
 
 (El alcance original de esta sección era solo 3b; con el Carril B completo —capa derivada 9C→9G + capa con estado 9H— cerrado, la promoción es un **paquete único** — decisión vigente desde 9B, ratificada en los cierres de 9G y 9H.)
 
@@ -185,7 +187,18 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
   `seed_9h_d`) NO viajan** (D-9F-17 / D-9G-13 / D-9H-20): se recrea estructura, no se copian datos.
   Verificar socios reales en OPS (L-9C-01).
 
-**Bitácoras / cierres recientes:** `9C_CIERRE.md`, `9D_CIERRE.md`, `9E_CIERRE.md`, `9F_CIERRE.md`, `9G_CIERRE.md` (Carril B — capa derivada), `9H_CIERRE.md` (Carril B — capa con estado, cierra el carril); previos: `8D_CIERRE.md`, `9B_CIERRE.md`.
+**Bitácoras / cierres recientes:** `9C_CIERRE.md`, `9D_CIERRE.md`, `9E_CIERRE.md`, `9F_CIERRE.md`, `9G_CIERRE.md` (Carril B — capa derivada), `9H_CIERRE.md` (Carril B — capa con estado, cierra el carril), `PROMOCION_CARRIL_B_OPS_CIERRE.md` (promoción del Carril B a OPS + canónico v1.8.0); previos: `8D_CIERRE.md`, `9B_CIERRE.md`.
+
+---
+
+## Pendiente — Reconstrucción de DEV desde v1.8.0
+
+(DEV quedó **fuera del alcance** de la promoción del Carril B; la promoción tocó TEST y OPS. DEV se reconstruye en una etapa posterior, separada — no reabre 9C→9H ni la promoción.)
+
+- **DEV se rearma desde el canónico `6B_SCHEMA_SQL.md v1.8.0`**, que es autocontenido (Parte B + Parte C verificadas en bootstrap fresco). No depende de TEST/OPS ni de fixtures.
+- **No es bloqueante de OPS:** OPS ya está promovido y operativo. La reconstrucción de DEV es una etapa posterior, de menor riesgo.
+- **Pre-validable con harness local** (L-PROMO-08): un PostgreSQL local permite pre-correr el bootstrap antes de tocar DEV. Atención a diferencias de versión (PG16 local no tiene `MAINTAIN(m)` ni `pg_cron`; OPS es PG17), que no afectan la estructura del Carril B pero sí el ruido de permisos.
+- **Residual de permisos de tabla en DEV** (hallazgo A5 / pendiente 1.7): revocar o aceptar al reconstruir. No urgente; OPS ya nació sin ese problema.
 
 ---
 

@@ -1453,3 +1453,16 @@ conversión cross-socio) no puede distinguirse por SQLSTATE: hay que verificar a
 falle la defensa equivocada. (Las violaciones de constraint sí traen su `CONSTRAINT_NAME` y SQLSTATE
 específico; la distinción aplica a los `RAISE` de cuerpo de función.)
 
+## Lecciones de la promoción a OPS (L-PROMO-XX)
+
+Lecciones de **promoción, validación y documentación** (no de arquitectura productiva). Surgieron al promover el Carril B a OPS (junio 2026) y al actualizar los satélites. Detalle en `PROMOCION_CARRIL_B_OPS_CIERRE.md`.
+
+- **L-PROMO-01** — El DDL congelado en cierres markdown puede driftar cosméticamente del DDL vivo; la **huella `def` normalizada** (`md5` de `pg_get_functiondef` quitando `\r` y formato) lo detecta sin ruido.
+- **L-PROMO-02** — `ALTER DEFAULT PRIVILEGES` de Supabase deja grants residuales `Dxtm` en tablas creadas bajo ese contexto; `REVOKE ALL` explícito los saca.
+- **L-PROMO-03** — Barrer nodos *code* de n8n por **substring**, no por límite de palabra: `n8n_test_` no matchea `\btest\b` y se escapa de un barrido por `\b`.
+- **L-PROMO-04** — Para certificar paridad estructural entre dos entornos Supabase: **doble corrida del mismo script simétrico** (nada embebido), comparando una fila-huella agregada (`TOTAL_CARRIL`) + filas por objeto que localizan la diferencia; ACL por su texto (nombres de rol, owner=postgres en ambos), sin OIDs.
+- **L-PROMO-05** — En smokes post-promoción sobre OPS real, **no ejecutar funciones de escritura con secuencias ni bajo ROLLBACK**: `nextval` no es transaccional y consume secuencias reales; validar solo lectura + helpers con JSON sintético para no contaminar el arranque en 1.
+- **L-PROMO-06** — **Snapshot baseline read-only doble (evidencia + hardened) con gate por seed antes de habilitar DDL** en un entorno real; el baseline de EXECUTE debe contemplar `proacl NULL ⇒ PUBLIC ejecuta` y excluir extensiones por `pg_depend deptype='e'`.
+- **L-PROMO-07** *(validación/documentación)* — Finales de línea **heterogéneos/mezclados** en los satélites exigen detección por archivo leyendo bytes en Python (`b.count(b'\r\n')` vs `b.count(b'\n')`), no `grep $'\r'` (que bajo `sh`/dash da falso "LF" global); en archivos mixtos, anclar el `str_replace` al terminador real de la región del ancla.
+- **L-PROMO-08** *(validación/documentación)* — **Harness PostgreSQL local** como banco de pre-validación del bootstrap del canónico (Parte B + Parte C) antes de tocar el doc; PG16 local no tiene `MAINTAIN(m)` ni `pg_cron` (OPS real PG17 sí) y los roles cluster-level `anon`/`authenticated`/`service_role` sobreviven a `DROP SCHEMA`.
+

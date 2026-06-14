@@ -743,9 +743,9 @@ detalle histórico completo D-9B-01 a D-9B-19 en ese documento y en `9B_CIERRE.m
 
 ---
 
-## Etapa 9 — Contabilidad / Carril B (capa derivada: 9C–9G — cerrada en TEST 2026-06-11)
+## Etapa 9 — Contabilidad / Carril B (9C–9H — cerrada en TEST y promovida a OPS 2026-06-14)
 
-Implementación de la capa derivada de la contabilidad interna sobre TEST, en cinco sub-etapas aditivas (9C catálogo+zonas+seam → 9D activación operativa → 9E matriz+reparto → 9F gasto rediseñado → 9G cascada read-only). Nada promovido a OPS; canónico v1.7.3 intacto (objetos aditivos solo en TEST; incorporación con bump único en la promoción coordinada). Detalle completo en `9C_CIERRE.md`, `9D_CIERRE.md`, `9E_CIERRE.md`, `9F_CIERRE.md`, `9G_CIERRE.md`.
+Implementación de la capa derivada de la contabilidad interna sobre TEST, en cinco sub-etapas aditivas (9C catálogo+zonas+seam → 9D activación operativa → 9E matriz+reparto → 9F gasto rediseñado → 9G cascada read-only). Promovido a OPS en junio 2026 (promoción coordinada única por DDL, sin copiar datos; ver la sección "Promoción Carril B a OPS" más abajo y `PROMOCION_CARRIL_B_OPS_CIERRE.md`); incorporado al canónico v1.8.0 (sección 24 + PARTE C). Detalle completo en `9C_CIERRE.md`, `9D_CIERRE.md`, `9E_CIERRE.md`, `9F_CIERRE.md`, `9G_CIERRE.md`.
 
 ### Catálogo enriquecido, zonas y seam (9C — cerrada)
 
@@ -867,6 +867,35 @@ D-9C-01..13 son las decisiones conceptuales del Carril B (en `ARQUITECTURA_ETAPA
 - **D-9H-36** — Endurecimiento de escala: ARS rechaza precisión sub-centavo (`valor <> ROUND(valor, 2)`); `tipo_cambio := ROUND(., 4)` antes de calcular USD (corrige un bug latente del CHECK de coherencia con TC > 4 decimales); el pct rechaza > 4 decimales.
 - **D-9H-37** — `registrar_snapshot_periodo` valida las filas de `liquidacion_socio`: **0** (junio) o **exactamente `COUNT(socios)`**. Asume que todo período con matriz incluye a todos los socios (cierto hoy: cada socio tiene ≥1 cabaña activa desde julio). Salvedad: si una cabaña grande se desactivara, refinar a `WHERE activo`.
 - **D-9H-38** — Smokes C.3 **efímeros**: `BEGIN → seed mínimo → smokes → veredicto → ROLLBACK`; no persisten filas. Las secuencias BIGSERIAL pueden avanzar (nextval no transaccional), sin significado contable y sin resetearse.
+
+## Promoción Carril B a OPS — cerrada 2026-06-14
+
+El Carril B completo (9C→9H + helper 9B) fue **promovido a OPS** en una operación coordinada bloque por bloque (junio 2026), **por DDL y sin copiar datos de TEST**, con el canónico bumpeado a **v1.8.0**. Paridad estructural TEST↔OPS certificada por huella (`TOTAL_CARRIL`, 31 objetos, idéntica), cero exposición a la Data API y smokes read-only 18/18 en OPS. El detalle bloque por bloque (A-bis→M) y la evidencia dura viven en **`PROMOCION_CARRIL_B_OPS_CIERRE.md`**; acá va la versión sintética de las decisiones.
+
+Decisiones de **promoción/ejecución** (no rediseño; las conceptuales 9C→9H conservan su numeración `D-9x`):
+
+- **D-PROMO-01** — Promoción por DDL bloque por bloque, **sin copiar datos de TEST**; los fixtures de laboratorio no viajan (materializa D-9F-17 / D-9G-13 / D-9H-20).
+- **D-PROMO-02** — Snapshot baseline doble (A + A-bis) read-only con gate por seed antes de habilitar DDL; baseline de EXECUTE contemplando `proacl NULL ⇒ PUBLIC ejecuta` y exclusión de extensiones (`pg_depend deptype='e'`).
+- **D-PROMO-03** — Marcador `ambiente='ops'` sembrado recién en la promoción + gate `DO+RAISE` de ambiente/seed (cabañas 1-5) en cada bloque (reconcilia D-9C-19).
+- **D-PROMO-04** — `Socio 3`→`Remo` + backfill de beneficiarios **por nombre** en el seed base del canónico (Bloque 21): **materializa D-9C-20 / D-9C-21**, no las duplica.
+- **D-PROMO-05** — Las 4 funciones 9C/9E quedaron **alineadas en OPS contra la versión de TEST** vía DROP+CREATE (diferencia 100% cosmética), con parche K1B + companion de revert (sin `CASCADE`).
+- **D-PROMO-06** — Limpieza de ACL residual `Dxtm` en las 4 tablas tempranas de TEST (`REVOKE ALL`); OPS ya estaba limpio (más hardened).
+- **D-PROMO-07** — GRANTs/RLS del Carril B = **cerrados sin grants y sin RLS** (REVOKE total sobre 9 tablas + 6 secuencias + 21 funciones; acceso solo por owner vía funciones). Resuelve el "GRANTs/RLS a decidir" de D-9C-19.
+- **D-PROMO-08** — Cierre estructural por **huella `TOTAL_CARRIL` (31 objetos) idéntica TEST↔OPS** (doble corrida del mismo script simétrico, sin nada embebido).
+- **D-PROMO-09** — Smokes K2 **read-only puros** (sin escritura 9H ni bajo ROLLBACK): se preservan tablas 9H vacías + secuencias en 1 para que la primera liquidación real arranque en 1.
+- **D-PROMO-10** — Gate de orden de promoción en el helper 9B (`abortar_si_falla` último; firma exacta de `registrar_pago` + 9H completo + 9G intacto + helper ausente; `search_path` + `REVOKE EXECUTE`).
+- **D-PROMO-11** — Port del workflow 3b a OPS (`vita_w09_cobranza_posterior`, 14 nodos) + listado de saldos read-only, revisando marcadores de entorno embebidos (L-8D-03).
+- **D-PROMO-12** — Bump único v1.8.0 (sección 24 + PARTE C, cuerpos post-K1), **excluyendo la maquinaria de promoción** (gates/asserts/snapshots/reversiones quedan en los `PROMO_BLOQUE_*`); PARTE C verificada en bootstrap fresco.
+- **D-PROMO-13** — **DEV fuera del alcance**; reconstrucción posterior desde v1.8.0.
+
+**Reconciliación (no son D-PROMO nuevas):** el desempate de centavo residual sigue siendo **D-9E-08** (transportado y reverificado); beneficiarios por nombre / `Socio 3`→`Remo` se referencian contra **D-9C-20 / D-9C-21**; pool (D-9D-10), matriz (9E), clases de gasto A/C/D/E (9F) y la capa con estado de 9H **no se renombran** como D-PROMO. La `gastos` legacy **se conserva** (D-9F-01); el Carril B opera sobre `gastos_internos`; **no se migran ni copian datos** de gastos legacy.
+
+## Reglas de negocio del Carril B — cerradas 2026-06-14
+
+Definiciones de negocio que los socios dejaron servidas en 9G/9H y que se **cierran** acá. Son reglas para operar; **revisables por decisión de socios más adelante**, pero no son pendientes para operar ahora.
+
+- **D-NEG-01 — % operativo del Carril B = 25%.** Se fija en **25%** (0,25), calculado sobre los **ingresos cobrados del período** (criterio de caja percibida, D-9G-03) **después de restar los gastos operativos/Carril B**. Las funciones de cascada ya lo reciben por parámetro (D-9G-01); este es su valor de negocio vigente (deja de ser "valor de trabajo sin carácter normativo").
+- **D-NEG-02 — Inicio oficial contable del Carril B = 2026-07-01.** El negocio contable operativo del Carril B arranca el **2026-07-01**. Todo período anterior a julio 2026 queda **fuera de alcance contable operativo**: no se liquida, no se arrastra, no se recontabiliza (etapa previa al inicio oficial). Esto **cierra** el pendiente de "política de arranque para períodos raros": el arranque de junio (pool vacío, base de ganancia sin destinatarios) queda fuera de alcance y **no requiere** `ajuste_arranque` ni congelado de junio (las capacidades de D-9H-06 / D-9H-27 permanecen como código, pero **no se ejercen para pre-julio**).
 
 ## Lecciones operativas n8n consolidadas (L-6C-XX)
 
