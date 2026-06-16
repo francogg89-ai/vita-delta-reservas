@@ -897,6 +897,39 @@ Definiciones de negocio que los socios dejaron servidas en 9G/9H y que se **cier
 - **D-NEG-01 — % operativo del Carril B = 25%.** Se fija en **25%** (0,25), calculado sobre los **ingresos cobrados del período** (criterio de caja percibida, D-9G-03) **después de restar los gastos operativos/Carril B**. Las funciones de cascada ya lo reciben por parámetro (D-9G-01); este es su valor de negocio vigente (deja de ser "valor de trabajo sin carácter normativo").
 - **D-NEG-02 — Inicio oficial contable del Carril B = 2026-07-01.** El negocio contable operativo del Carril B arranca el **2026-07-01**. Todo período anterior a julio 2026 queda **fuera de alcance contable operativo**: no se liquida, no se arrastra, no se recontabiliza (etapa previa al inicio oficial). Esto **cierra** el pendiente de "política de arranque para períodos raros": el arranque de junio (pool vacío, base de ganancia sin destinatarios) queda fuera de alcance y **no requiere** `ajuste_arranque` ni congelado de junio (las capacidades de D-9H-06 / D-9H-27 permanecen como código, pero **no se ejercen para pre-julio**).
 
+## Carril C — Portal Operativo Interno / Backend-API (diseño, cerrada 2026-06-15)
+
+Decisiones de la etapa de **diseño** del Backend/API del Portal Operativo Interno (Carril C). Carril **independiente del Carril B**: no reabre 9C→9H, no toca el canónico ni OPS. Etapa de **diseño puro — nada construido** (sin workflows, sin Edge Function, sin código, sin `portal_usuarios`). Cierre: `CARRIL_C_BACKEND_API_DISENO_CIERRE.md`. Algunas decisiones refinan a otras (se indica); se conservan ambas (principio en Fase 0/0.5 + realización concreta). Convención del archivo: no se marca 🔒 por línea; toda la sección es de no-reabrir.
+
+- **D-C-01** — Fuente de roles/permisos del portal: Sección 8 + Apéndice A del prompt de arranque + README + prompt actual. Sin brief específico por ahora; reconciliable si aparece, sin bloquear.
+- **D-C-02** — Jenny: usa el workflow de limpieza existente; ve cabaña/fechas/personas + **nombre y teléfono** del huésped (puede hacer check-in a futuro); sin datos contables/financieros; sin acceso al resto del portal.
+- **D-C-03** — Vicky: resumen operativo de cargas (reservas, pagos, saldos de cobranza, gastos cargados, histórico, ingresos). **No** ve cascada, matriz, participación, saldo por socio ni mayor.
+- **D-C-04** — `socio` (Franco/Rodrigo/Remo): acceso total. Contabilidad con escritura (A19–A23) fuera del MVP.
+- **D-C-05** — El portal **no** crea acciones de negocio nuevas; las nuevas (A11 gasto, A24 histórico, A25 ingresos) operan sobre el schema existente sin reabrir 9C→9H ni tocar el canónico.
+- **D-C-06** — A07: "Crear reserva manual (flujo completo)" vía form 8B (prereserva→pago→confirmación encadenados). El portal **no** expone "crear prereserva suelta".
+- **D-C-07** — Seguridad base: el navegador **no** llama directo a n8n para acciones sensibles; debe existir un componente server-side que guarde el secreto y firme/revalide. *(Concretado en D-C-13.)*
+- **D-C-08** — Entorno: el portal **no** elige TEST/OPS por payload. URLs/credenciales separadas por entorno + n8n valida `configuracion_general('ambiente')` antes de ejecutar. *(Concretado en D-C-16.)*
+- **D-C-09** — Calendarios: contrato temporal HTML (reusa, MVP) ≠ contrato formal JSON (frontend renderiza). El HTML no es contrato API definitivo.
+- **D-C-10** — A11 (gasto interno): **workflow controlado** con validaciones (rol, clase A/C/D/E, período, pagador, zona/cabaña, `creado_por`, entorno, constraints; `source_event` a nivel workflow). Sin idempotencia fuerte.
+- **D-C-11** — A24 (histórico): read-only; roles `vicky`+`socio` (Jenny sin acceso); fuente `reservas`+`huespedes`+`pagos`; **floor `fecha_in ≥ 2026-07-01` server-side** (no solo UI); nada pre-julio se muestra/importa/liquida/arrastra/recontabiliza; formato v1 listado/buscador; filtros recortables, floor no negociable.
+- **D-C-12** — A09 (editar/levantar bloqueo): no existe hoy (8D solo crea, D-8D-09); capa futura, fuera del MVP.
+- **D-C-13** — Frontera de confianza = **Supabase Edge Function** (BFF/gateway). El builder (Lovable) puede ser frontend visual, no frontera de confianza. Flujo: frontend → Supabase Auth → Edge Function (`portal-api`) → webhook n8n firmado → Postgres vía credencial n8n. *(Concreta D-C-07.)*
+- **D-C-14** — Identidad: **Supabase Auth + tabla `portal_usuarios`** (`user_id`→`auth.users`, `nombre`, `rol ∈ {jenny,vicky,socio}`, `activo`, `created_at`). La Edge Function valida el JWT, resuelve rol server-side, no confía en roles del navegador. **Tabla > custom claims**.
+- **D-C-15** — **Gateway único `portal-api`** (`action`+`payload`) + **workflows n8n separados por acción**. Validación primaria en la Edge Function; cada workflow **revalida** HMAC + rol + `ambiente` + payload (segunda defensa).
+- **D-C-16** — Entorno por **deploy/URL/credenciales**, no por payload; n8n valida `configuracion_general('ambiente')` antes de ejecutar. *(Concreta D-C-08.)*
+- **D-C-17** — Toda escritura registra `source_event` + `creado_por`: **siempre a nivel evento/workflow**, y a nivel **fila cuando la tabla lo soporte**. A11 es excepción a nivel fila (ver D-C-24).
+- **D-C-18** — Andamiaje común Fase 1: `POST /functions/v1/portal-api` + `Bearer` JWT + body `{action,payload}`; orden JWT→lookup `portal_usuarios`→allowlist rol×action→payload mínimo→ruteo HMAC+ts/nonce; n8n revalida HMAC+rol+`ambiente`+payload; éxito `{ok:true,data}`; error `{ok:false,error:{code,message,detail}}`; nunca error crudo de Postgres. Códigos base: `no_autorizado`, `rol_no_permitido`, `accion_desconocida`, `payload_invalido`, `no_encontrado`, `conflicto`, `error_entorno`, `error_interno`.
+- **D-C-19** — `pct_operativo` **nunca** del frontend; inyectado server-side desde config/decisión vigente (25%, D-NEG-01). Decisión de seguridad, no de comodidad.
+- **D-C-20** — A24 floor: el gateway **recorta** `fecha_desde` < 2026-07-01 a 2026-07-01 (no rechaza); el data layer tiene floor duro `fecha_in ≥ 2026-07-01`.
+- **D-C-21** — A13 `contab.gastos_periodo` entra al **MVP** (`vicky`+`socio`): lectura operativa de gastos cargados por período, sin cascada/matriz/saldo por socio/mayor. A14–A18 post-MVP solo `socio`; A19–A23 post-MVP solo `socio`.
+- **D-C-22** — Identidad del operador: `creado_por`/`validado_por` de la sesión autenticada = **identificador de la persona** (`vicky`/`franco`/`rodrigo`/`remo`), no el rol. En A10 reemplaza el dropdown del form; el usuario no elige validador.
+- **D-C-23** — A11 anti-duplicado: detección preventiva con clave natural `pagador+clase+monto+periodo+etiqueta+fecha`, ventana **24 h**, modo **advertir-y-confirmar** (no bloqueo). Confirmación explícita permite cargar igual (dos gastos legítimos iguales son posibles). Sin `idempotency_key` persistente; no reabre 9F.
+- **D-C-24** — A11 `source_event`: **excepción consciente a nivel fila** — `gastos_internos` no tiene columna `source_event` (D-9F-14); traza de fila = `creado_por`+`created_at`; el `source_event` vive en el log del workflow n8n; **no** se escribe en `comentario`.
+- **D-C-25** — Política de reintentos del gateway: **no auto-reintenta escrituras**; timeout / estado incierto / error de verificación → código conservador + el frontend indica verificar antes de reintentar; nunca recarga ni reenvía automático. A07 (idempotencia fuerte heredada): reintento manual/controlado, nunca auto-retry ciego.
+- **D-C-26** — Priorización MVP por slices verticales: **Slice 0** (espina de seguridad: Supabase Auth + `portal_usuarios` + Edge Function `portal-api` + JWT→rol→allowlist + HMAC→n8n + validación de ambiente + `sesion.contexto`) → **Slice 1** (lecturas reuse A03/A04/A05/A06/A12) → **Slice 2** (escrituras reuse A07/A08/A10) → **Slice 3a** (lecturas nuevas: A24 histórico; A25 ingresos se suma por D-C-27) → **Slice 3b** (gastos A11 + A13 verificación). Menor slice operable = **Slice 0 + A03**. Fuera del MVP: A09, A14–A18, A19–A23. A11 último.
+- **D-C-27** — A25 `ingresos.cobrados_periodo`: read-only, `vicky`+`socio`, MVP, fuente `reservas`+`pagos`, **Nuevo** (envuelve consulta/reporte simple, sin lógica societaria). Separación: **A25 ingresos** / **A13 gastos** / **A14–A18 societario**. No reparto, no matriz, no saldo por socio, no cascada (coherente con D-9F-20). Se prioriza junto a A24 en Slice 3a.
+- **D-C-28** — Pruebas TEST: `periodo='2099-01-01'` como **período sintético** para los gastos A11 de prueba (garantía extra anti-contaminación), siempre con sentinel + teardown verificado.
+
 ## Lecciones operativas n8n consolidadas (L-6C-XX)
 
 Reglas firmes derivadas de la ejecución de la Etapa 6C. Detalle completo en `Lecciones_Aprendidas.md`.
@@ -939,6 +972,17 @@ Reglas firmes derivadas de la ejecución de la Etapa 7C (validación funcional a
 Regla firme derivada de la ejecución de la Etapa 7E (endurecimiento de permisos Data API en DEV).
 
 - **L-7E-01:** En Supabase, el SQL Editor del Dashboard conecta como `postgres` directo (no por pooler), por lo que `current_user` allí devuelve `postgres` y NO el patrón `postgres.<project_ref>`. En ese contexto el discriminador fuerte de ambiente debe ser la identidad del seed (IDs exactos de cabaña), no `current_user` (consistente con L-7B-01). El veredicto de entorno por `(id_cabana, nombre)` cumplió ese rol como gate inequívoco en el snapshot, en el re-gate transaccional del cambio y en la verificación posterior.
+
+## Reconstrucción de DEV desde v1.8.0 — cerrada 2026-06-15
+
+Decisiones del **levantamiento de entorno** de la reconstrucción de DEV desde cero a partir del canónico v1.8.0 (proyecto Supabase nuevo `VITA_DELTA_DEV` / `wsrdzjmvnzxidjlovlja`). No reabre 9C→9H, la promoción a OPS ni el canónico. Cierre: `RECONSTRUCCION_DEV_v1.8.0_CIERRE.md`. **No reabrir.**
+
+- **D-RDEV-01** — DEV se reconstruye **desde cero desde v1.8.0** en un proyecto Supabase **nuevo**; no se reusa ni clona el DEV viejo. Materializa D-PROMO-13; consistente con D-7B-01 (reconstrucción desde canónico, nunca clonación física).
+- **D-RDEV-02** — El proyecto se crea **cerrado como OPS** (Data API ON, "Automatically expose new tables" OFF, "Enable automatic RLS" OFF). Resuelve el residual A5 / pendiente 1.7 **por construcción**.
+- **D-RDEV-03** — El **discriminador de entorno** del DEV nuevo es el marcador `configuracion_general('ambiente')='dev'`, **no** el ID de cabaña: el DEV nuevo nace con IDs 1-5 igual que TEST/OPS. Extiende L-7E-01.
+- **D-RDEV-04** — El **residual `Dxtm`** en tablas base/vistas (TRUNCATE/REFERENCES/TRIGGER/MAINTAIN a roles API) se **acepta por paridad OPS/TEST** y **no se revoca**. No incluye SELECT/INSERT/UPDATE/DELETE.
+- **D-RDEV-05** — Las **13 funciones del motor** se endurecen por **REVOKE EXECUTE** (espejo de 7E / 8A Opción B), gateado por `ambiente='dev'`. No es rediseño de schema.
+- **D-RDEV-06** — El **DEV viejo se conserva congelado** (no se borra) tras cerrar el nuevo. Su eliminación es decisión separada y posterior.
 
 ## Prototipos legacy
 

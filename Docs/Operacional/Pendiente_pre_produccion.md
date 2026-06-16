@@ -193,12 +193,35 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
 
 ## Pendiente — Reconstrucción de DEV desde v1.8.0
 
-(DEV quedó **fuera del alcance** de la promoción del Carril B; la promoción tocó TEST y OPS. DEV se reconstruye en una etapa posterior, separada — no reabre 9C→9H ni la promoción.)
+> **✅ CERRADA (2026-06-15).** DEV se reconstruyó desde cero en un proyecto Supabase nuevo (`VITA_DELTA_DEV`, `DEV_REF=wsrdzjmvnzxidjlovlja`, PG 17.6) desde el canónico v1.8.0 (Parte B + Parte C), **creado cerrado como OPS**, `ambiente='dev'`, validado al bootstrap (base = paridad 8A; Carril B 9/21/10/6; seam 5/5; matriz 378/456; reparto exacto) y endurecido (REVOKE de las 13 funciones del motor → 0 expuestas). OPS/TEST intactos; DEV viejo congelado. Surgió un **gap del canónico** (Parte B no endurece las funciones base) → **canonizado en v1.8.1** (Bloque 23; ver detalle abajo). Cierre: `RECONSTRUCCION_DEV_v1.8.0_CIERRE.md`.
+
+(DEV quedó **fuera del alcance** de la promoción del Carril B; la promoción tocó TEST y OPS. DEV se reconstruyó en una etapa posterior, separada — no reabrió 9C→9H ni la promoción.)
 
 - **DEV se rearma desde el canónico `6B_SCHEMA_SQL.md v1.8.0`**, que es autocontenido (Parte B + Parte C verificadas en bootstrap fresco). No depende de TEST/OPS ni de fixtures.
 - **No es bloqueante de OPS:** OPS ya está promovido y operativo. La reconstrucción de DEV es una etapa posterior, de menor riesgo.
 - **Pre-validable con harness local** (L-PROMO-08): un PostgreSQL local permite pre-correr el bootstrap antes de tocar DEV. Atención a diferencias de versión (PG16 local no tiene `MAINTAIN(m)` ni `pg_cron`; OPS es PG17), que no afectan la estructura del Carril B pero sí el ruido de permisos.
 - **Residual de permisos de tabla en DEV** (hallazgo A5 / pendiente 1.7): revocar o aceptar al reconstruir. No urgente; OPS ya nació sin ese problema.
+
+---
+
+## Carril C — Backend/API (pendientes de diseño → construcción)
+
+- **P-C-1** — Brief del portal: reconciliar roles/permisos contra el catálogo si aparece `Prompt_Portal_Operativo_Interno.md`. No bloqueante (D-C-01).
+- **P-C-2** — Confirmar al construir los nombres exactos de campos de los workflows reusados (8B/8D/9/calendarios) y la reutilizabilidad de la lectura 8C-bis para A05, contra los `__TEMPLATE.json` reales (no están en el repo).
+- **P-C-3** — Contrato formal JSON de calendarios (vs HTML temporal, D-C-09). Post-MVP.
+- **P-C-4** — Hardening del portal post-MVP: rate-limiting/abuso, rotación del secreto HMAC, expiración/refresh de sesión fino. Fuera del modelo mínimo (Fase 0.5).
+- **P-C-5** — A09 editar/levantar bloqueo: capa futura con su propio contrato/workflow (D-C-12 / D-8D-09).
+- **P-C-6** — Contabilidad societaria lectura (A14–A18) y escritura (A19–A23): fases posteriores, solo `socio`; arrancan con la operación de julio.
+
+## Pendiente — Corrección canónica v1.8.1 (hardening de funciones base en Parte B)
+
+**Estado:** ✅ CERRADA (canonizado en v1.8.1, jun-2026; el Bloque 23 incorpora el `REVOKE EXECUTE` de las 13 funciones base a PARTE B). Registrado 2026-06-15 en la reconstrucción de DEV.
+
+**Contexto:** un bootstrap fresco de `6B_SCHEMA_SQL.md v1.8.0` deja las **13 funciones del motor** (`crear_prereserva`, `registrar_pago`, `confirmar_reserva`, los triggers `set_*`/`log_*`, etc.) **PUBLIC-ejecutables por la NULL-acl** (`proacl IS NULL ⇒ PUBLIC ejecuta`). La PARTE C/C12 endurece el Carril B, pero **PARTE B no incorpora el REVOKE de las funciones del motor**. El hardening del motor se vino aplicando fuera de banda por entorno (7E en DEV viejo, 8A Opción B en OPS, 7B-GRANTS en TEST, REVOKE de la reconstrucción en DEV nuevo); un futuro PROD lo necesitaría igual.
+
+**Acción propuesta (a consultar antes):** agregar a PARTE B un bloque de hardening de funciones base —espejo de C12 para el motor— `REVOKE EXECUTE ON FUNCTION <las 13> FROM PUBLIC, anon, authenticated, service_role`, para que cualquier bootstrap futuro nazca cerrado sin paso manual. Bump a **v1.8.1**. No urgente; no bloquea operación.
+
+**Origen:** reconstrucción de DEV (L-RDEV-01); `RECONSTRUCCION_DEV_v1.8.0_CIERRE.md` §5.
 
 ---
 
@@ -463,6 +486,8 @@ asimetría).
 > switches que OPS para nacer cerrado. El item 1.7 sigue abierto **solo para DEV**:
 > decidir si se revoca el residual amplio de DEV o se acepta como definitivo. No
 > urgente (sin consumidores Data API activos en DEV).
+>
+> **Actualización (Reconstrucción DEV, 2026-06-15):** el DEV nuevo (`wsrdzjmvnzxidjlovlja`) se creó **cerrado** (expose new tables OFF) y **no hereda el residual amplio A5** — solo el `Dxtm` inocuo, igual que OPS/TEST (verificado en el barrido global de permisos). El item 1.7 queda **resuelto por construcción** para el DEV nuevo; persiste solo como histórico del **DEV viejo congelado**.
 
 ### 2.1 Schedule pg_cron — expirar_prereservas_vencidas
 

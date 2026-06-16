@@ -1466,3 +1466,16 @@ Lecciones de **promoción, validación y documentación** (no de arquitectura pr
 - **L-PROMO-07** *(validación/documentación)* — Finales de línea **heterogéneos/mezclados** en los satélites exigen detección por archivo leyendo bytes en Python (`b.count(b'\r\n')` vs `b.count(b'\n')`), no `grep $'\r'` (que bajo `sh`/dash da falso "LF" global); en archivos mixtos, anclar el `str_replace` al terminador real de la región del ancla.
 - **L-PROMO-08** *(validación/documentación)* — **Harness PostgreSQL local** como banco de pre-validación del bootstrap del canónico (Parte B + Parte C) antes de tocar el doc; PG16 local no tiene `MAINTAIN(m)` ni `pg_cron` (OPS real PG17 sí) y los roles cluster-level `anon`/`authenticated`/`service_role` sobreviven a `DROP SCHEMA`.
 
+## Lecciones del Carril C — Backend/API (diseño)
+
+- **L-C-01** — Sin documentos ancla (brief del portal, patrón de contratos API), el diseño avanza sobre prompt + README con supuestos explícitos marcados, reconciliables al cierre; se marca el supuesto, no se inventa el dato.
+- **L-C-02** — La idempotencia de una escritura es **heredada de la función SQL que envuelve**, no del contrato: caracterizar por función (A07 fuerte vía `idempotency_key`; A08 ninguna/EXCLUDE; A10 débil no-atómica entre eventos, D-9B-07; A11 ninguna sin guard). No asumir uniformidad.
+- **L-C-03** — `gastos_internos` no tiene columna `source_event` (D-9F-14): cuando la tabla no la soporta, la traza de evento queda a nivel workflow/log, no de fila; no contaminar campos de negocio con metadata técnica.
+- **L-C-04** — Los IDs de cabaña 1-5 no discriminan entorno (iguales TEST/OPS, L-7B-01): discriminar por marcador `ambiente` + credenciales/URLs separadas. El cruce de ambiente se prueba íntegro en TEST (firmar `ambiente_esperado='ops'` contra el workflow TEST) sin tocar OPS.
+
+## Lecciones de la reconstrucción de DEV (L-RDEV-XX)
+
+- **L-RDEV-01** *(canónico)* — v1.8.0 endurece el Carril B (C12) pero **no las funciones base** en PARTE B; un bootstrap fresco las deja PUBLIC-ejecutables (NULL-acl, `proacl IS NULL ⇒ PUBLIC ejecuta`). El hardening del motor se venía aplicando fuera de banda por entorno (7E/8A/7B-GRANTS). Canonizado el REVOKE del motor en v1.8.1 (Bloque 23) para que DEV/TEST/OPS/PROD no dependan de un paso manual.
+- **L-RDEV-02** *(entorno)* — En un proyecto Supabase nuevo el gate por **ID de cabaña no discrimina** (nace 1-5, igual que TEST/OPS). Usar el **marcador `ambiente`** como discriminador fuerte (el gate del REVOKE del motor aborta si `ambiente<>'dev'`). Extiende L-7E-01 / L-7B-01.
+- **L-RDEV-03** *(Supabase)* — El switch "Automatically expose new tables = OFF" cierra **las tablas** (solo `Dxtm` a roles API en el default de postgres) pero **no** la NULL-acl de **funciones** (PUBLIC ejecuta). Son dos exposiciones distintas; cerrar y verificar ambas por separado.
+- **L-RDEV-04** *(verificación)* — Un bloque `DO` (p. ej. C14) **no devuelve fila**; su veredicto vive en el panel de NOTICE del editor. Para capturarlo en la grilla, **espejarlo con un `SELECT` read-only** que reproduzca los asserts.

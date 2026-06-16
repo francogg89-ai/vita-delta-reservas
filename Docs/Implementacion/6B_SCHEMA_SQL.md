@@ -1,9 +1,9 @@
 # 6B_SCHEMA_SQL.md
 # Schema PostgreSQL — Vita Delta Reservas
 
-**Versión:** 1.8.0
+**Versión:** 1.8.1
 **Fecha:** Junio 2026
-**Estado:** `6B_SCHEMA_SQL.md v1.8.0` consolida el Carril B (contabilidad operativa interna, sub-etapas 9C→9H + helper 9B) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026. La base (Partes A y B) refleja el estado alineado DEV/TEST/OPS de v1.7.3; el Carril B (sección 24 y PARTE C) refleja el estado final TEST=OPS verificado por huella estructural (K1, `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17`). El canónico es autocontenido y apto para bootstrappear un entorno nuevo de cero. DEV queda fuera del alcance de esta promoción y se reconstruirá posteriormente desde v1.8.0 (ver changelog).
+**Estado:** Canónico vigente: **`6B_SCHEMA_SQL.md v1.8.1`**. v1.8.0 consolidó el **Carril B** (contabilidad operativa interna, sub-etapas 9C→9H + helper 9B) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026; **v1.8.1 canoniza el hardening de las funciones base del motor** (Bloque 23, `REVOKE EXECUTE`), que se venía aplicando fuera de banda por entorno. La base (Partes A y B) refleja el estado alineado DEV/TEST/OPS de v1.7.3; el Carril B (sección 24 y PARTE C) refleja el estado final TEST=OPS verificado por huella estructural (K1, `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17`). El canónico es autocontenido y apto para bootstrappear un entorno nuevo de cero. **DEV fue reconstruido desde cero desde v1.8.0** (jun-2026, proyecto nuevo `wsrdzjmvnzxidjlovlja`, cerrado como OPS); el hallazgo que motivó v1.8.1 surgió en esa reconstrucción (ver changelog).
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1
@@ -14,6 +14,16 @@
 > **NOTA — Carril B / contabilidad operativa interna (9C→9H), consolidado en el canónico v1.8.0:** El Carril B (sub-etapas 9C a 9H + helper 9B) fue **promovido a OPS** en una operación coordinada (junio 2026) y ahora **forma parte de este canónico**: nuevas columnas en `cabanas` (`valor_relativo`, `id_socio_beneficiario`), tablas `zonas`/`cabana_zona`/`activaciones_operativas`/`gastos_internos` y las cinco tablas de la cuenta corriente (`liquidaciones_periodo`/`liquidacion_cascada`/`liquidacion_socio`/`movimientos_socio`/`revaluaciones`), el marcador `configuracion_general('ambiente')`, los triggers de inmutabilidad y las funciones de matriz, cascada y cuenta corriente, más el helper `abortar_si_falla(jsonb)`. El **diseño conceptual** está en la **sección 24** y el **DDL ejecutable autocontenido** en la **PARTE C**. La paridad estructural TEST↔OPS quedó verificada (huella `TOTAL_CARRIL` idéntica, ver changelog v1.7.3 → v1.8.0). Cierres formales de referencia: `9B_CIERRE.md`, `9C_CIERRE.md` … `9H_CIERRE.md`.
 
 ---
+
+## RESUMEN DE CAMBIOS v1.8.0 → v1.8.1
+
+Patch-level que **canoniza el hardening de las funciones del motor** (Parte B), cerrando un gap detectado durante la reconstrucción de DEV: un bootstrap fresco de v1.8.0 dejaba las **13 funciones del motor** (`crear_prereserva`, `registrar_pago`, `confirmar_reserva`, los triggers `set_*`/`log_*`, etc.) **PUBLIC-ejecutables** por la NULL-acl (`proacl IS NULL ⇒ PUBLIC ejecuta`), porque la PARTE C/C12 endurecía el Carril B pero la PARTE B no incorporaba el `REVOKE EXECUTE` del motor (se venía aplicando fuera de banda por entorno: 7E/8A/7B-GRANTS y la reconstrucción de DEV).
+
+- **Nuevo Bloque 23 (PARTE B) — Hardening de funciones del motor:** `REVOKE EXECUTE` sobre las 13 funciones del motor a `PUBLIC`/`anon`/`authenticated`/`service_role` (espejo de C12 para la base). Un bootstrap fresco ahora nace cerrado sin paso manual.
+- **Sin cambios** de tablas, columnas, enums, triggers, secuencias, vistas, seed ni funciones (no agrega ni modifica objetos; solo revoca EXECUTE). Conteos de v1.8.0 intactos (29 tablas, 30 funciones).
+- **Entornos existentes (TEST/OPS/DEV) ya consistentes:** todos tienen el REVOKE aplicado fuera de banda; v1.8.1 lo canoniza, **no requiere re-ejecución**.
+
+Origen: reconstrucción de DEV (L-RDEV-01); `RECONSTRUCCION_DEV_v1.8.0_CIERRE.md` §5.
 
 ## RESUMEN DE CAMBIOS v1.7.3 → v1.8.0
 
@@ -49,14 +59,14 @@ Quedan **identificadas en este changelog** y serán **registradas formalmente en
 - **D-PROMO** — Alineación de las cuatro funciones 9C/9E en OPS a la versión de TEST (diferencia 100% cosmética: comentarios/formato, sin cambio de salida), vía DROP+CREATE para evitar la inyección espuria de RLS de Supabase en `CREATE OR REPLACE`.
 - **D-PROMO** — Limpieza de ACL residual en las cuatro tablas tempranas de TEST (`REVOKE ALL`) para sacar los grants `Dxtm` que dejó `ALTER DEFAULT PRIVILEGES`; OPS ya estaba limpio (más hardened).
 - **D-PROMO** — `Socio 3` → `Remo` en el seed base, requerido por la consistencia del seed de beneficiarios del Carril B (consolidación v1.8.0).
-- **D-PROMO** — DEV queda **fuera del alcance** de esta promoción y se reconstruirá posteriormente desde cero a partir del canónico v1.8.0 (ver más abajo).
+- **D-PROMO** — DEV queda **fuera del alcance** de esta promoción y se reconstruirá posteriormente desde cero a partir del canónico v1.8.0 (ver más abajo). *(Actualización v1.8.1: reconstruido en jun-2026; el hallazgo de hardening de funciones base quedó canonizado en v1.8.1.)*
 - **L-PROMO** — El DDL congelado en cierres markdown puede driftar cosméticamente del DDL vivo; la **huella `def` normalizada** (sin `\r`, sin formato) lo detecta sin ruido.
 - **L-PROMO** — `ALTER DEFAULT PRIVILEGES` de Supabase deja grants residuales `Dxtm` en tablas creadas bajo ese contexto; `REVOKE ALL` explícito los saca.
 - **L-PROMO** — Barrer nodos *code* de n8n por **substring**, no por palabra: el marcador `n8n_test_` no matchea `\btest\b` y se escapa de un barrido por límite de palabra.
 
 ### g) Nota operativa — DEV
 
-**DEV se reconstruirá posteriormente desde cero a partir del canónico v1.8.0; no forma parte de la promoción TEST→OPS.** Esta promoción cerró TEST→OPS. El DEV actual puede quedar temporalmente atrás. Por eso el canónico v1.8.0 es **autocontenido** y apto para levantar un DEV nuevo de cero (Parte B + Parte C), con el marcador `ambiente='dev'` como seed de bootstrap por-entorno (para TEST/OPS ese valor debe cambiarse al entorno correspondiente).
+**DEV se reconstruirá posteriormente desde cero a partir del canónico v1.8.0; no forma parte de la promoción TEST→OPS.** **(Actualización v1.8.1: DEV ya fue reconstruido en jun-2026 desde v1.8.0; el hallazgo de funciones base PUBLIC-ejecutables quedó canonizado en este v1.8.1.)** Esta promoción cerró TEST→OPS. El DEV actual puede quedar temporalmente atrás. Por eso el canónico v1.8.0 es **autocontenido** y apto para levantar un DEV nuevo de cero (Parte B + Parte C), con el marcador `ambiente='dev'` como seed de bootstrap por-entorno (para TEST/OPS ese valor debe cambiarse al entorno correspondiente).
 
 ---
 
@@ -742,6 +752,7 @@ Esta versión incorpora 17 ajustes derivados de la revisión técnica de Franco 
 - Bloque 20. Vistas SQL
 - Bloque 21. Datos seed mínimos
 - Bloque 22. Schedule de pg_cron
+- Bloque 23. Hardening de funciones del motor (REVOKE EXECUTE)
 
 ### PARTE C — SQL ejecutable Carril B (contabilidad operativa interna)
 
@@ -777,11 +788,11 @@ El schema implementa el modelo de datos cerrado en Etapa 5A sobre PostgreSQL, co
 - Triggers automáticos manejan `updated_at` y logs de cambios de estado.
 - Pre-reservas se crean exclusivamente vía `crear_prereserva()` con advisory lock; nunca por INSERT directo.
 
-**Tablas totales:** 29 tablas en el canónico v1.8.0 — 20 tablas base (Parte B) + 9 tablas del Carril B (sección 24 / Parte C).
+**Tablas totales:** 29 tablas en el canónico v1.8.1 — 20 tablas base (Parte B) + 9 tablas del Carril B (sección 24 / Parte C).
 
 **Vistas SQL:** 6 vistas operativas (incluyendo dos nuevas para los Sistemas 3 y 4 mencionados por Franco).
 
-**Funciones:** 9 funciones base críticas (8 transaccionales + 1 helper IMMUTABLE para normalización de teléfono), más 21 funciones del Carril B (sección 24 / Parte C). Total canónico v1.8.0: 30 funciones.
+**Funciones:** 9 funciones base críticas (8 transaccionales + 1 helper IMMUTABLE para normalización de teléfono), más 21 funciones del Carril B (sección 24 / Parte C). Total canónico v1.8.1: 30 funciones.
 
 **Principios rectores:**
 
@@ -5251,6 +5262,28 @@ LIMIT 20;
 ```sql
 SELECT cron.unschedule('expirar_prereservas');
 SELECT cron.unschedule('cleanup_cron_history');
+```
+
+## BLOQUE 23 — Hardening de funciones del motor (REVOKE EXECUTE)
+
+**Descripción:** Hardening de la base: `REVOKE EXECUTE` sobre las **13 funciones del motor** (Parte B) a `PUBLIC`/`anon`/`authenticated`/`service_role`. Cierra el gap por el que un bootstrap fresco las dejaba PUBLIC-ejecutables (NULL-acl: `proacl IS NULL ⇒ PUBLIC ejecuta`). Espejo de C12 para el motor. Solo el owner ejecuta.
+
+```sql
+-- ── Bloque 23. Hardening del motor — REVOKE EXECUTE a PUBLIC/anon/authenticated/service_role ──
+-- 13 funciones del motor (firma por tipo; sin sobrecargas):
+REVOKE EXECUTE ON FUNCTION public.normalizar_telefono(text) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.set_telefono_normalizado() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.upsert_huesped(jsonb) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.validar_disponibilidad(bigint, date, date, bigint) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.obtener_disponibilidad_rango(date, date, bigint) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.crear_prereserva(jsonb) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.confirmar_reserva(jsonb) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.cancelar_prereserva(jsonb) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.crear_bloqueo(jsonb) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.registrar_pago(jsonb) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.expirar_prereservas_vencidas() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.set_updated_at() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.log_cambio_estado() FROM PUBLIC, anon, authenticated, service_role;
 ```
 
 ---
