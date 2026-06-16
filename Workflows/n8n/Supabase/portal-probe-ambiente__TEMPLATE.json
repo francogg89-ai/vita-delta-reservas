@@ -1,0 +1,144 @@
+{
+  "name": "portal-probe-ambiente",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-probe-ambiente",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "6c9b6bfa-d5ff-4a6a-9d8b-47335ef28f60",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "REEMPLAZAR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Slice 0 / Fase C (v2) - lee el raw body desde BINARIO ('data'), no desde $json.rawBody.\n// En esta version de n8n, el Webhook con \"Raw Body\" ON entrega el cuerpo crudo como\n// binario (item.binary.data), no como rawBody. getBinaryDataBuffer da los bytes exactos.\nconst crypto = require('crypto');\n\n// Secreto: prioridad Variables ($vars); fallback in-node (sanitizado en el template).\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\n\nconst item = $input.first();\nconst wh = item.json;\n\n// 1) Raw body como Buffer EXACTO. Prioridad: binario 'data'. Fallback: wh.rawBody.\nlet buf = null;\ntry {\n  if (item.binary && item.binary.data) {\n    buf = await this.helpers.getBinaryDataBuffer(0, 'data');\n  }\n} catch (e) {\n  buf = null;\n}\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) {\n  return [{ json: { ok_firma: false, motivo: 'raw_body_ausente', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 2) Firma recibida en el header.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\n\n// 3) HMAC recomputado sobre los MISMOS bytes.\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\n\n// 4) Comparacion timing-safe (requiere igual longitud).\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(sigHeader);\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) {\n  firmaOk = false;\n}\nif (!firmaOk) {\n  return [{ json: { ok_firma: false, motivo: 'firma_invalida', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 5) Parseo (firma ya validada sobre bytes crudos).\nlet body;\ntry {\n  body = JSON.parse(buf.toString('utf8'));\n} catch (e) {\n  return [{ json: { ok_firma: false, motivo: 'payload_invalido', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 6) Ventana de ts (anti-replay liviano, D-C-29): |now - ts| <= 300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) {\n  return [{ json: { ok_firma: false, motivo: 'ts_fuera_de_ventana', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts: body.ts ?? null } }];\n}\n\nreturn [{ json: { ok_firma: true, motivo: null, ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts } }];"
+      },
+      "id": "53048a3e-7c97-4be5-88bc-0764fd5ab297",
+      "name": "validar_firma_ts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "id": "ad78e086-f9d3-4eda-a10e-228733cab4a8",
+      "name": "leer_ambiente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "Postgres TEST (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Slice 0 / Fase C - compara ambiente y arma el envelope uniforme (D-C-18/35).\nconst v = $('validar_firma_ts').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\n\nfunction envErr(code, message, detail) {\n  return [{ json: { ok: false, error: { code, message, detail: detail ?? null } } }];\n}\n\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'cuerpo no es JSON valido',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\n\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\n\nreturn [{ json: { ok: true, data: { ambiente: real, rol: v.rol } } }];\n"
+      },
+      "id": "337c9005-daee-4a02-b5d0-39dc35c08a1e",
+      "name": "verificar_ambiente_responder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "4a6f1b96-3503-46bf-bfed-7c23c1520305",
+      "name": "responder",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        880,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_ambiente_responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_ambiente_responder": {
+      "main": [
+        [
+          {
+            "node": "responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}
