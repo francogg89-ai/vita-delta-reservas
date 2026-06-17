@@ -18,7 +18,7 @@
 
 # ====== CONFIG (editar estos dos) ======
 $WebhookUrl = "https://federicosecchi.app.n8n.cloud/webhook/portal-probe-ambiente"
-$Secret     = "9baecccda47449510bf22370f85775a6f2c3b3bfe06fcd2b94fedccdece5c37b"   # mismo valor que en Supabase y n8n; NO commitear
+$Secret     = "Vita_secret_no_commit"   # mismo valor que en Supabase y n8n; NO commitear
 # =======================================
 
 function New-Body {
