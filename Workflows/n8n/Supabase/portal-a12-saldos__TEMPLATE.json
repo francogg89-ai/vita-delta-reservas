@@ -1,0 +1,252 @@
+{
+  "name": "portal-a12-saldos",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a12-saldos",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "e391d66d-163a-4a76-b365-883f5e444c79",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a12-saldos — validar_firma_ts_rol.\n// Lee el raw body desde BINARIO ('data'); recomputa HMAC-SHA256 sobre los bytes EXACTOS\n// (D-C-29). Revalida ts (300s), rol (allowlist del wrapper, D-C-39) y action binding\n// (D-C-41). A12 NO lleva payload (payloadVacio): no se valida ni reenvia nada del payload.\nconst crypto = require('crypto');\n\n// Secreto: SOLO desde Variables de n8n ($vars.VITA_HMAC_SECRET). En Modo B (n8n Cloud SIN\n// Variables) se PEGA el secreto real reemplazando el placeholder. El template commiteado queda\n// sanitizado; el secreto vive solo en el nodo de la instancia.\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\n\n// Assert duro POR PREFIJO (L-C-10): sobrevive al find-replace del placeholder completo.\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado en n8n Variables; abortando (assert duro).');\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\n// 1) Raw body como Buffer EXACTO. Prioridad: binario 'data'. Fallback: wh.rawBody (L-C-05).\nlet buf = null;\ntry {\n  if (item.binary && item.binary.data) {\n    buf = await this.helpers.getBinaryDataBuffer(0, 'data');\n  }\n} catch (e) {\n  buf = null;\n}\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) {\n  return [{ json: { ok_firma: false, motivo: 'raw_body_ausente', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 2) Firma recibida en el header.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\n\n// 3) HMAC recomputado sobre los MISMOS bytes.\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\n\n// 4) Comparacion timing-safe (requiere igual longitud).\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(sigHeader);\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) {\n  firmaOk = false;\n}\nif (!firmaOk) {\n  return [{ json: { ok_firma: false, motivo: 'firma_invalida', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 5) Parseo (firma ya validada sobre bytes crudos).\nlet body;\ntry {\n  body = JSON.parse(buf.toString('utf8'));\n} catch (e) {\n  return [{ json: { ok_firma: false, motivo: 'payload_invalido', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 6) Ventana de ts (anti-replay liviano, D-C-29): |now - ts| <= 300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) {\n  return [{ json: { ok_firma: false, motivo: 'ts_fuera_de_ventana', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts: body.ts ?? null } }];\n}\n\n// 7) Allowlist de rol del wrapper (D-C-39, 2da defensa). A12 = vicky/socio (sin jenny, D-C-03).\nconst ROLES_OK = ['vicky', 'socio'];\nif (!ROLES_OK.includes(body.rol)) {\n  return [{ json: { ok_firma: false, motivo: 'rol_no_permitido', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts } }];\n}\n\n// 8) Action binding (D-C-41): EXPECTED_ACTION = cobranza.saldos (A12).\nconst EXPECTED_ACTION = 'cobranza.saldos';\nif (body.action !== EXPECTED_ACTION) {\n  return [{ json: { ok_firma: false, motivo: 'accion_desconocida', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts } }];\n}\n\nreturn [{ json: { ok_firma: true, motivo: null, ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "5d5c1a76-0766-4cca-bd9b-d116c963419a",
+      "name": "validar_firma_ts_rol"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "id": "b9253e9c-2f43-41b3-9c10-dd7264569bd3",
+      "name": "leer_ambiente",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a12-saldos — verificar_acceso. Compara ambiente y arma el envelope de rechazo\n// (D-C-18/35). En exito marca {ok:true} para habilitar el IF; el envelope final de exito lo\n// arma el render.\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\n\nfunction envErr(code, message, detail) {\n  return [{ json: { ok: false, error: { code, message, detail: detail ?? null } } }];\n}\n\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'cuerpo no es JSON valido',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\n\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\n\nreturn [{ json: { ok: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "2b07409e-2bbb-4408-a3c2-80b08a8be71e",
+      "name": "verificar_acceso"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "19314064-c2a0-470d-a7e2-9c0c67537732",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "a241b5e6-62f0-486d-b247-85d4b83eb625",
+      "name": "IF acceso"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH reserva_por_prereserva AS (\n  -- Mapeo prereserva -> reserva, agrupado y deterministico (MIN). No hay UNIQUE en\n  -- reservas.id_pre_reserva: si hubiera mas de una reserva por prereserva (dato sucio),\n  -- toma una de forma estable en vez de explotar como subquery escalar.\n  SELECT id_pre_reserva, MIN(id_reserva) AS id_reserva\n  FROM reservas\n  WHERE id_pre_reserva IS NOT NULL\n  GROUP BY id_pre_reserva\n),\npagos_reserva_normalizados AS (\n  -- Normaliza el pago a su reserva: directo por id_reserva, o derivado via id_prereserva\n  -- (cubre datos legacy o pagos no backfilleados; en el flujo normal coinciden, D-C-40).\n  SELECT p.estado, p.tipo, p.monto_recibido,\n         COALESCE(p.id_reserva, rpp.id_reserva) AS id_reserva_normalizado\n  FROM pagos p\n  LEFT JOIN reserva_por_prereserva rpp ON rpp.id_pre_reserva = p.id_prereserva\n),\nreservas_con_saldo AS (\n  SELECT r.id_reserva, r.id_cabana, c.nombre AS cabana,\n         r.fecha_checkin::TEXT AS fecha_checkin, r.fecha_checkout::TEXT AS fecha_checkout,\n         r.monto_total, r.id_huesped,\n         COALESCE(SUM(prn.monto_recibido) FILTER (\n           WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena','saldo')), 0) AS total_pagado_confirmado\n  FROM reservas r\n  JOIN cabanas c ON c.id_cabana = r.id_cabana\n  LEFT JOIN pagos_reserva_normalizados prn ON prn.id_reserva_normalizado = r.id_reserva\n  WHERE r.estado IN ('confirmada','activa')\n  GROUP BY r.id_reserva, r.id_cabana, c.nombre, r.fecha_checkin, r.fecha_checkout, r.monto_total, r.id_huesped\n  HAVING r.monto_total - COALESCE(SUM(prn.monto_recibido) FILTER (\n           WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena','saldo')), 0) > 0\n)\nSELECT rcs.id_reserva, rcs.id_cabana, rcs.cabana, rcs.fecha_checkin, rcs.fecha_checkout,\n       rcs.monto_total, rcs.total_pagado_confirmado,\n       (rcs.monto_total - rcs.total_pagado_confirmado)::numeric(12,2) AS saldo_real,\n       TRIM(BOTH FROM (h.nombre || ' ') || COALESCE(h.apellido, '')) AS huesped_nombre,\n       h.telefono AS huesped_telefono,\n       h.email AS huesped_email\nFROM reservas_con_saldo rcs\nJOIN huespedes h ON h.id_huesped = rcs.id_huesped\nORDER BY rcs.fecha_checkin, rcs.id_reserva;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -150
+      ],
+      "id": "3175f1fd-dba6-4ff1-9ad4-66ad3eca8f41",
+      "name": "PG: leer saldos",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== portal-a12-saldos — nodo Code (render JSON lista) =====\n// Lista de reservas (confirmada/activa) con saldo_real > 0. Reusa la logica de\n// vita_w09_listado_saldos (D-C-49); saldo calculado, no documental (D-9B-05 / D-C-40).\n// Contrato D-C-43/47: data:{filas}; montos NUMERICOS crudos. Read-only. Privacidad (D-C-03):\n// montos a nivel reserva + huesped nombre/telefono/email (al menos uno por regla del flujo);\n// SIN dni ni notas internas. Lista vacia => data:{filas:[]} con ok:true, NUNCA no_encontrado\n// (D-C-47). Frontend: renderizar como texto.\n\nfunction safeAll(nodeName, keyField) {\n  try {\n    const items = $(nodeName).all();\n    const failed = items.some(it => it && it.json && (it.json.error || it.error));\n    if (failed) return { ok: false, rows: [] };\n    const rows = items.map(it => it.json).filter(j => j && j[keyField] !== undefined && j[keyField] !== null);\n    return { ok: true, rows };\n  } catch (e) { return { ok: false, rows: [] }; }\n}\n\n// NUMERIC de Postgres llega como string; el calculo (saldo_real) ya se hizo en SQL, aca solo\n// transportamos numero crudo (D-C-43).\nfunction num(v) {\n  if (v === null || v === undefined || v === '') return null;\n  const n = Number(v);\n  return Number.isFinite(n) ? n : null;\n}\n\nconst saldoR = safeAll('PG: leer saldos', 'id_reserva');\n\n// Read fallido => error_interno limpio (sin filtrar SQL/n8n crudo, D-C-18).\nif (!saldoR.ok) {\n  return [{ json: { ok: false, error: { code: 'error_interno', message: 'no se pudo cargar los saldos', detail: null } } }];\n}\n\n// Lista vacia es resultado VALIDO (D-C-47): filas:[] con ok:true (rows=[] -> map -> []).\nconst filas = saldoR.rows.map(p => ({\n  id_reserva: p.id_reserva,\n  id_cabana: p.id_cabana,\n  cabana: p.cabana,\n  fecha_checkin: p.fecha_checkin,\n  fecha_checkout: p.fecha_checkout,\n  monto_total: num(p.monto_total),\n  total_pagado_confirmado: num(p.total_pagado_confirmado),\n  saldo_real: num(p.saldo_real),\n  huesped: {\n    nombre: p.huesped_nombre ?? null,\n    telefono: p.huesped_telefono ?? null,\n    email: p.huesped_email ?? null\n  }\n}));\n\nreturn [{ json: { ok: true, data: { filas } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -150
+      ],
+      "id": "4bbbe765-a551-408d-b538-11505bc90e67",
+      "name": "Code: render envelope"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        0
+      ],
+      "id": "f6cc342b-dd0b-4436-848d-db4968a101aa",
+      "name": "Respond"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF acceso": {
+      "main": [
+        [
+          {
+            "node": "PG: leer saldos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer saldos": {
+      "main": [
+        [
+          {
+            "node": "Code: render envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: render envelope": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}

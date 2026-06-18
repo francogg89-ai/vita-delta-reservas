@@ -1,0 +1,252 @@
+{
+  "name": "portal-a06-prereservas",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a06-prereservas",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "f2e81386-24da-4165-8ced-8bcf34bf4d9d",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a06-prereservas — validar_firma_ts_rol.\n// Lee el raw body desde BINARIO ('data'); recomputa HMAC-SHA256 sobre los bytes EXACTOS\n// (D-C-29). Revalida ts (300s), rol (allowlist del wrapper, D-C-39) y action binding\n// (D-C-41). A06 NO lleva payload (payloadVacio): no se valida ni reenvia nada del payload.\nconst crypto = require('crypto');\n\n// Secreto: SOLO desde Variables de n8n ($vars.VITA_HMAC_SECRET). En Modo B (n8n Cloud SIN\n// Variables) se PEGA el secreto real reemplazando el placeholder. El template commiteado queda\n// sanitizado; el secreto vive solo en el nodo de la instancia.\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\n\n// Assert duro POR PREFIJO (L-C-10): sobrevive al find-replace del placeholder completo.\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado en n8n Variables; abortando (assert duro).');\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\n// 1) Raw body como Buffer EXACTO. Prioridad: binario 'data'. Fallback: wh.rawBody (L-C-05).\nlet buf = null;\ntry {\n  if (item.binary && item.binary.data) {\n    buf = await this.helpers.getBinaryDataBuffer(0, 'data');\n  }\n} catch (e) {\n  buf = null;\n}\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) {\n  return [{ json: { ok_firma: false, motivo: 'raw_body_ausente', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 2) Firma recibida en el header.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\n\n// 3) HMAC recomputado sobre los MISMOS bytes.\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\n\n// 4) Comparacion timing-safe (requiere igual longitud).\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(sigHeader);\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) {\n  firmaOk = false;\n}\nif (!firmaOk) {\n  return [{ json: { ok_firma: false, motivo: 'firma_invalida', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 5) Parseo (firma ya validada sobre bytes crudos).\nlet body;\ntry {\n  body = JSON.parse(buf.toString('utf8'));\n} catch (e) {\n  return [{ json: { ok_firma: false, motivo: 'payload_invalido', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 6) Ventana de ts (anti-replay liviano, D-C-29): |now - ts| <= 300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) {\n  return [{ json: { ok_firma: false, motivo: 'ts_fuera_de_ventana', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts: body.ts ?? null } }];\n}\n\n// 7) Allowlist de rol del wrapper (D-C-39, 2da defensa). A06 = vicky/socio (sin jenny, D-C-03).\nconst ROLES_OK = ['vicky', 'socio'];\nif (!ROLES_OK.includes(body.rol)) {\n  return [{ json: { ok_firma: false, motivo: 'rol_no_permitido', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts } }];\n}\n\n// 8) Action binding (D-C-41): EXPECTED_ACTION = prereservas.activas (A06).\nconst EXPECTED_ACTION = 'prereservas.activas';\nif (body.action !== EXPECTED_ACTION) {\n  return [{ json: { ok_firma: false, motivo: 'accion_desconocida', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts } }];\n}\n\nreturn [{ json: { ok_firma: true, motivo: null, ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "76e5ffd1-71ae-4e57-a230-ea52cbb9a012",
+      "name": "validar_firma_ts_rol"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "id": "ca954926-4b75-4635-aa70-f7fdb8e8860c",
+      "name": "leer_ambiente",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a06-prereservas — verificar_acceso. Compara ambiente y arma el envelope de rechazo\n// (D-C-18/35). En exito marca {ok:true} para habilitar el IF; el envelope final de exito lo\n// arma el render.\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\n\nfunction envErr(code, message, detail) {\n  return [{ json: { ok: false, error: { code, message, detail: detail ?? null } } }];\n}\n\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'cuerpo no es JSON valido',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\n\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\n\nreturn [{ json: { ok: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "a94cf99c-c311-4afc-8a1d-cf953072b61f",
+      "name": "verificar_acceso"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e643f839-957b-4db1-aa0f-76a709b7c2a4",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "3f404666-5317-430c-9b65-9ea2414cd3ca",
+      "name": "IF acceso"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id_pre_reserva, cabana, id_cabana, fecha_in, fecha_out, personas, estado,\n       expira_en, minutos_para_vencer, monto_total, monto_sena,\n       canal_origen, canal_pago_esperado, huesped_nombre, huesped_telefono\nFROM vista_prereservas_activas\nORDER BY expira_en, id_pre_reserva;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -150
+      ],
+      "id": "0c9478c8-4495-4f3b-8c12-db736d66ddea",
+      "name": "PG: leer prereservas",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== portal-a06-prereservas — nodo Code (render JSON lista) =====\n// Lista de prereservas ACTIVAS (pendiente_pago / pago_en_revision, no vencidas) desde\n// vista_prereservas_activas (reuse, D-C-46). Contrato D-C-43/47: data:{filas}; montos\n// NUMERICOS crudos; minutos_para_vencer redondeado. Read-only. Privacidad (D-C-03): montos\n// a nivel prereserva + huesped nombre/telefono; SIN dni ni notas internas. Lista vacia =>\n// data:{filas:[]} con ok:true, NUNCA no_encontrado (D-C-47). Frontend: renderizar como texto.\n\nfunction safeAll(nodeName, keyField) {\n  try {\n    const items = $(nodeName).all();\n    const failed = items.some(it => it && it.json && (it.json.error || it.error));\n    if (failed) return { ok: false, rows: [] };\n    const rows = items.map(it => it.json).filter(j => j && j[keyField] !== undefined && j[keyField] !== null);\n    return { ok: true, rows };\n  } catch (e) { return { ok: false, rows: [] }; }\n}\n\n// NUMERIC de Postgres llega como string; transportamos numero crudo (D-C-43).\nfunction num(v) {\n  if (v === null || v === undefined || v === '') return null;\n  const n = Number(v);\n  return Number.isFinite(n) ? n : null;\n}\nfunction intOrNull(v) {\n  const n = num(v);\n  return n === null ? null : Math.round(n);\n}\n\nconst preR = safeAll('PG: leer prereservas', 'id_pre_reserva');\n\n// Read fallido => error_interno limpio (sin filtrar SQL/n8n crudo, D-C-18).\nif (!preR.ok) {\n  return [{ json: { ok: false, error: { code: 'error_interno', message: 'no se pudo cargar las prereservas', detail: null } } }];\n}\n\n// Lista vacia es resultado VALIDO (D-C-47): filas:[] con ok:true (rows=[] -> map -> []).\nconst filas = preR.rows.map(p => ({\n  id_pre_reserva: p.id_pre_reserva,\n  id_cabana: p.id_cabana,\n  cabana: p.cabana,\n  fecha_in: p.fecha_in,\n  fecha_out: p.fecha_out,\n  personas: p.personas,\n  estado: p.estado,\n  expira_en: p.expira_en,\n  minutos_para_vencer: intOrNull(p.minutos_para_vencer),\n  monto_total: num(p.monto_total),\n  monto_sena: num(p.monto_sena),\n  canal_origen: p.canal_origen,\n  canal_pago_esperado: p.canal_pago_esperado,\n  huesped: {\n    nombre: p.huesped_nombre ?? null,\n    telefono: p.huesped_telefono ?? null\n  }\n}));\n\nreturn [{ json: { ok: true, data: { filas } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -150
+      ],
+      "id": "625e2632-3160-4db4-8fdf-ca03860719f7",
+      "name": "Code: render envelope"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        0
+      ],
+      "id": "6e5bae7c-f1c4-49d4-bf9a-0eb9211d6056",
+      "name": "Respond"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF acceso": {
+      "main": [
+        [
+          {
+            "node": "PG: leer prereservas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer prereservas": {
+      "main": [
+        [
+          {
+            "node": "Code: render envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: render envelope": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}

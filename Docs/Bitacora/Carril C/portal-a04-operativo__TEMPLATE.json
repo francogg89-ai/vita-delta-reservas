@@ -1,0 +1,357 @@
+{
+  "name": "portal-a04-operativo",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a04-operativo",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ef60e168-5c01-4654-a4d7-07065112e502",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a04-operativo — validar_firma_ts_rol.\n// Lee el raw body desde BINARIO ('data'); recomputa HMAC-SHA256 sobre los bytes\n// EXACTOS (D-C-29). Revalida ts (300s), rol (allowlist del wrapper, D-C-39) y\n// action binding (D-C-41). Segunda defensa: el gateway ya valido; n8n revalida.\nconst crypto = require('crypto');\n\n// Secreto: SOLO desde Variables de n8n ($vars.VITA_HMAC_SECRET). El template queda con\n// placeholder sanitizado; el secreto real NO se hardcodea (vive en la Variable de n8n).\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\n\n// Assert duro POR PREFIJO (L-C-10): si la Variable no esta seteada, SECRET conserva el\n// placeholder (empieza con '__PEGAR_') y se aborta. El prefijo sobrevive a un find-replace\n// del placeholder completo, asi que no rompe el guard.\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado en n8n Variables; abortando (assert duro).');\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\n// 1) Raw body como Buffer EXACTO. Prioridad: binario 'data'. Fallback: wh.rawBody.\nlet buf = null;\ntry {\n  if (item.binary && item.binary.data) {\n    buf = await this.helpers.getBinaryDataBuffer(0, 'data');\n  }\n} catch (e) {\n  buf = null;\n}\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) {\n  return [{ json: { ok_firma: false, motivo: 'raw_body_ausente', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 2) Firma recibida en el header.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\n\n// 3) HMAC recomputado sobre los MISMOS bytes.\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\n\n// 4) Comparacion timing-safe (requiere igual longitud).\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(sigHeader);\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) {\n  firmaOk = false;\n}\nif (!firmaOk) {\n  return [{ json: { ok_firma: false, motivo: 'firma_invalida', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 5) Parseo (firma ya validada sobre bytes crudos).\nlet body;\ntry {\n  body = JSON.parse(buf.toString('utf8'));\n} catch (e) {\n  return [{ json: { ok_firma: false, motivo: 'payload_invalido', ambiente_esperado: null, rol: null, action: null, ts: null } }];\n}\n\n// 6) Ventana de ts (anti-replay liviano, D-C-29): |now - ts| <= 300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) {\n  return [{ json: { ok_firma: false, motivo: 'ts_fuera_de_ventana', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts: body.ts ?? null } }];\n}\n\n// Allowlist de rol del wrapper (D-C-39, segunda defensa). A04 = vicky/socio (sin jenny).\nconst ROLES_OK = ['vicky', 'socio'];\nif (!ROLES_OK.includes(body.rol)) {\n  return [{ json: { ok_firma: false, motivo: 'rol_no_permitido', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts } }];\n}\n\n// Action binding (D-C-41): el endpoint solo acepta su accion esperada, aunque el sobre\n// este bien firmado (evita ruteos cruzados). EXPECTED_ACTION = calendario.operativo (A04).\nconst EXPECTED_ACTION = 'calendario.operativo';\nif (body.action !== EXPECTED_ACTION) {\n  return [{ json: { ok_firma: false, motivo: 'accion_desconocida', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts } }];\n}\n\nreturn [{ json: { ok_firma: true, motivo: null, ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "cae82076-e868-4730-8dff-9d22759ac40d",
+      "name": "validar_firma_ts_rol"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "id": "e0aa8336-ada2-4e31-b4cd-e1d9418395d1",
+      "name": "leer_ambiente",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a04-operativo — verificar_acceso. Compara ambiente y arma el envelope de\n// rechazo (D-C-18/35). En exito marca {ok:true} para habilitar el IF (el envelope final\n// de exito lo arma el render).\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\n\nfunction envErr(code, message, detail) {\n  return [{ json: { ok: false, error: { code, message, detail: detail ?? null } } }];\n}\n\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'cuerpo no es JSON valido',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\n\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\n\nreturn [{ json: { ok: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "7b1938a6-f056-47f0-82e3-175c25ed4ad5",
+      "name": "verificar_acceso"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "344a2c3b-4951-4bc9-8f47-2585641e7a1e",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "7ca2dc3d-159f-481a-bb82-47e46ef6f284",
+      "name": "IF acceso"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id_cabana, fecha, estado, id_reserva_activa, hora_checkin_base, hora_checkout_base\nFROM vista_disponibilidad\nWHERE fecha >= CURRENT_DATE\n  AND fecha < CURRENT_DATE + INTERVAL '120 days'\nORDER BY id_cabana, fecha;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -150
+      ],
+      "id": "7f9c7b76-581c-43d9-a8ba-2170dbd829f9",
+      "name": "PG: leer grilla",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id_cabana, id_reserva, fecha_checkin, fecha_checkout, hora_checkin, hora_checkout,\n       personas, estado_reserva, huesped_nombre, huesped_telefono, monto_total, monto_saldo\nFROM vista_calendario\nWHERE fecha_checkin < CURRENT_DATE + INTERVAL '120 days'\n  AND fecha_checkout > CURRENT_DATE\nORDER BY id_cabana, fecha_checkin;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1320,
+        -150
+      ],
+      "id": "f27e3b97-4867-431b-ba1f-b5427e0992c7",
+      "name": "PG: leer detalle",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id_bloqueo, id_cabana, fecha_desde, fecha_hasta, motivo, descripcion\nFROM bloqueos\nWHERE activo = true\n  AND fecha_desde < CURRENT_DATE + INTERVAL '120 days'\n  AND fecha_hasta > CURRENT_DATE\nORDER BY fecha_desde;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1540,
+        -150
+      ],
+      "id": "002d2dba-c07a-41af-935d-8912744b3929",
+      "name": "PG: leer bloqueos",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT r.id_cabana, r.id_reserva, r.fecha_checkout, r.hora_checkout,\n       TRIM(BOTH FROM (h.nombre || ' ') || COALESCE(h.apellido, '')) AS huesped_nombre\nFROM reservas r\nJOIN huespedes h ON h.id_huesped = r.id_huesped\nWHERE r.estado IN ('confirmada','activa','completada')\n  AND r.fecha_checkout >= CURRENT_DATE\n  AND r.fecha_checkout < CURRENT_DATE + INTERVAL '120 days';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1760,
+        -150
+      ],
+      "id": "bdb7c4e7-218a-4383-a5c5-cd3d727de716",
+      "name": "PG: leer salidas",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== portal-a04-operativo__TEST — nodo Code (render) =====\n// Deriva de vita_w8c_html_operativo (8C) v2.1: operativo, 120 dias, CON montos,\n// pestanias por mes. Read-only. Adaptaciones para el portal (Carril C / Slice 1 / B4):\n//   (1) ymd() endurece comparaciones de fecha (L-8C-02): robusto a timestamps ISO.\n//   (2) los 2 return devuelven el ENVELOPE del portal (D-C-18/38), no {html,statusCode}.\n//   (3) branch de error: SIN HTML de error (codigo muerto eliminado); devuelve error_interno limpio.\n// Auditoria de privacidad (D-C-03): SOLO montos a nivel reserva (monto_total/monto_saldo)\n// via money(); NO reparto por socio, NO cascada, NO mayor/cuenta corriente, NO societario.\n// esc() aplicado a TODO texto dinamico (huesped, telefono, motivo, personas, cabana).\n// 'descripcion' de bloqueo se lee pero NO se renderiza. Color: rojo > gris > verde > blanco.\n\nconst TZ = 'America/Argentina/Buenos_Aires';\nconst HORIZONTE_DIAS = 120;\n\nfunction esc(v) {\n  if (v === null || v === undefined) return '';\n  return String(v)\n    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\n}\nfunction hhmm(t) { if (!t) return ''; const s = String(t); return s.length >= 5 ? s.slice(0, 5) : s; }\nfunction money(n) {\n  if (n === null || n === undefined || n === '') return '';\n  const num = Number(n); if (Number.isNaN(num)) return '';\n  return '$' + num.toLocaleString('es-AR', { maximumFractionDigits: 0 });\n}\nfunction primerNombre(full) { if (!full) return ''; return String(full).trim().split(/\\s+/)[0]; }\n// Normaliza date|timestamp ('2026-06-01T00:00:00.000Z') a 'YYYY-MM-DD' (L-8C-02).\nfunction ymd(v) { if (v === null || v === undefined) return ''; return String(v).slice(0, 10); }\n\nfunction safeAll(nodeName, keyField) {\n  try {\n    const items = $(nodeName).all();\n    const failed = items.some(it => it && it.json && (it.json.error || it.error));\n    if (failed) return { ok: false, rows: [] };\n    const rows = items.map(it => it.json).filter(j => j && j[keyField] !== undefined && j[keyField] !== null);\n    return { ok: true, rows };\n  } catch (e) { return { ok: false, rows: [] }; }\n}\n\nconst gridR = safeAll('PG: leer grilla', 'id_cabana');\nconst resR  = safeAll('PG: leer detalle', 'id_reserva');\nconst blkR  = safeAll('PG: leer bloqueos', 'id_bloqueo');\nconst outR  = safeAll('PG: leer salidas', 'id_reserva');\nconst huboError = !gridR.ok || !resR.ok || !blkR.ok || !outR.ok;\n\nif (huboError) {\n  // Branch de error: envelope uniforme, sin filtrar SQL/n8n crudo al cliente (D-C-18).\n  return [{ json: { ok: false, error: { code: 'error_interno', message: 'no se pudo cargar el calendario', detail: null } } }];\n}\n\nconst ORDEN_CABANAS = [\n  { id: 1, nombre: 'Bamboo' }, { id: 2, nombre: 'Madre Selva' }, { id: 3, nombre: 'Arrebol' },\n  { id: 4, nombre: 'Guatemala' }, { id: 5, nombre: 'Tokio' },\n];\n\nconst dias = Array.from(new Set(gridR.rows.map(r => ymd(r.fecha)))).sort();\nconst primerDiaVisible = dias.length ? dias[0] : null;\n\nconst reservasPorCabana = {};\nfor (const r of resR.rows) (reservasPorCabana[r.id_cabana] = reservasPorCabana[r.id_cabana] || []).push(r);\n\nconst salidasPorCabana = {};\nconst vistosSalida = new Set();\nfunction pushSalida(idc, idr, fecha, hora, nombre) {\n  const k = String(idr);\n  if (vistosSalida.has(k)) return;\n  vistosSalida.add(k);\n  (salidasPorCabana[idc] = salidasPorCabana[idc] || []).push({ id_reserva: idr, fecha_checkout: fecha, hora_checkout: hora, huesped_nombre: nombre });\n}\nfor (const r of resR.rows) pushSalida(r.id_cabana, r.id_reserva, ymd(r.fecha_checkout), r.hora_checkout, r.huesped_nombre);\nfor (const s of outR.rows) pushSalida(s.id_cabana, s.id_reserva, ymd(s.fecha_checkout), s.hora_checkout, s.huesped_nombre);\n\nconst bloqueosEspecificos = {};\nconst bloqueosTotales = [];\nfor (const b of blkR.rows) {\n  if (b.id_cabana === null || b.id_cabana === undefined) bloqueosTotales.push(b);\n  else (bloqueosEspecificos[b.id_cabana] = bloqueosEspecificos[b.id_cabana] || []).push(b);\n}\n\nfunction reservasDeCabana(idc) { return reservasPorCabana[idc] || []; }\nfunction salidasDeCabana(idc) { return salidasPorCabana[idc] || []; }\nfunction entradaEseDia(idc, dia) { return reservasDeCabana(idc).find(r => ymd(r.fecha_checkin) === dia) || null; }\nfunction salidaEseDia(idc, dia) { return salidasDeCabana(idc).find(s => ymd(s.fecha_checkout) === dia) || null; }\nfunction ocupadaEseDia(idc, dia) {\n  return reservasDeCabana(idc).find(r =>\n    (ymd(r.fecha_checkin) <= dia && dia < ymd(r.fecha_checkout)) || ymd(r.fecha_checkout) === dia) || null;\n}\nfunction bloqueosQueCubren(idc, dia) {\n  const esp = (bloqueosEspecificos[idc] || []).filter(b => ymd(b.fecha_desde) <= dia && dia < ymd(b.fecha_hasta));\n  const tot = bloqueosTotales.filter(b => ymd(b.fecha_desde) <= dia && dia < ymd(b.fecha_hasta));\n  return esp.concat(tot);\n}\nfunction bordeBloqueoEseDia(idc, dia) {\n  const todos = (bloqueosEspecificos[idc] || []).concat(bloqueosTotales);\n  return todos.find(b => ymd(b.fecha_desde) === dia || ymd(b.fecha_hasta) === dia) || null;\n}\n\nfunction calcularCelda(idc, dia) {\n  const entra = entradaEseDia(idc, dia);\n  const sale = salidaEseDia(idc, dia);\n  const ocupa = ocupadaEseDia(idc, dia);\n  const bloqueosCubren = bloqueosQueCubren(idc, dia);\n  const bloqueado = bloqueosCubren.length > 0;\n  const borde = bordeBloqueoEseDia(idc, dia);\n  const hayMovimiento = !!(entra || sale);\n  const recambioHuesped = !!(entra && sale && entra.id_reserva !== sale.id_reserva);\n  const rojoBloqueoMov = !!(borde && hayMovimiento);\n  if (recambioHuesped || rojoBloqueoMov) return { color: 'rojo', sale, entra, borde, bloqueosCubren };\n  if (bloqueado) return { color: 'gris', bloqueosCubren };\n  if (ocupa) {\n    const inicioVisible = (ymd(ocupa.fecha_checkin) === dia) || (primerDiaVisible === dia && ymd(ocupa.fecha_checkin) < dia);\n    // Dia de salida sin recambio (no hubo rojo porque nadie entra): mostrar \"Sale X · hora\".\n    const esSalida = !!sale && !inicioVisible;\n    return { color: 'verde', reserva: ocupa, esInicioVisible: inicioVisible, esSalida, sale };\n  }\n  return { color: 'blanco' };\n}\n\nconst COLORES = {\n  rojo: { bg: '#f8d2d2', label: 'Recambio / doble evento' },\n  gris: { bg: '#d9d9d9', label: 'Bloqueo' },\n  verde: { bg: '#cdeccd', label: 'Ocupado' },\n  blanco: { bg: '#ffffff', label: 'Libre' },\n};\n\nconst meses = {};\nfor (const dia of dias) (meses[dia.slice(0, 7)] = meses[dia.slice(0, 7)] || []).push(dia);\nconst NOMBRE_MES = { '01': 'Enero', '02': 'Febrero', '03': 'Marzo', '04': 'Abril', '05': 'Mayo', '06': 'Junio', '07': 'Julio', '08': 'Agosto', '09': 'Septiembre', '10': 'Octubre', '11': 'Noviembre', '12': 'Diciembre' };\n\nfunction contenidoCelda(idc, dia) {\n  const c = calcularCelda(idc, dia);\n  const bg = COLORES[c.color].bg;\n  let f1 = '', f2 = '', f3 = '';\n  if (c.color === 'verde' && c.esInicioVisible) {\n    const r = c.reserva;\n    f1 = esc(r.huesped_nombre) + ' · ' + esc(r.personas) + 'p · ' + hhmm(r.hora_checkin);\n    f2 = esc(r.huesped_telefono);\n    f3 = money(r.monto_total) + ' / saldo ' + money(r.monto_saldo);\n  } else if (c.color === 'verde' && c.esSalida) {\n    // Dia de check-out sin recambio: solo \"Sale <nombre> · <hora>\"; filas 2-3 vacias.\n    f1 = 'Sale ' + esc(primerNombre(c.sale.huesped_nombre)) + ' · ' + hhmm(c.sale.hora_checkout);\n  } else if (c.color === 'rojo') {\n    let arriba = '';\n    if (c.sale) arriba = 'Sale ' + esc(primerNombre(c.sale.huesped_nombre)) + ' · ' + hhmm(c.sale.hora_checkout);\n    else if (c.borde && ymd(c.borde.fecha_hasta) === dia) arriba = 'Fin bloqueo';\n    let abajo = '';\n    if (c.entra) {\n      abajo = 'Entra ' + esc(c.entra.huesped_nombre) + ' · ' + esc(c.entra.personas) + 'p · ' + hhmm(c.entra.hora_checkin);\n      f2 = esc(c.entra.huesped_telefono);\n      f3 = money(c.entra.monto_total) + ' / saldo ' + money(c.entra.monto_saldo);\n    } else if (c.borde && ymd(c.borde.fecha_desde) === dia) {\n      abajo = 'Inicio bloqueo · ' + esc(c.borde.motivo);\n    }\n    f1 = arriba && abajo ? (arriba + '<br>' + abajo) : (arriba || abajo);\n  } else if (c.color === 'gris') {\n    const b = c.bloqueosCubren[0];\n    const extra = c.bloqueosCubren.length > 1 ? ' (+)' : '';\n    f1 = esc(b ? b.motivo : 'bloqueo') + extra;\n  }\n  return { bg, f1, f2, f3 };\n}\n\n// Mes que contiene \"hoy\" (pestaña activa por defecto). primerDiaVisible es hoy salvo borde.\nconst hoyYM = (primerDiaVisible || dias[0] || '').slice(0, 7);\nconst clavesMes = Object.keys(meses).sort();\nconst mesActivo = clavesMes.indexOf(hoyYM) >= 0 ? hoyYM : (clavesMes[0] || '');\n\nlet secciones = '';\nlet pestanias = '';\nfor (const mk of clavesMes) {\n  const diasMes = meses[mk];\n  const parts = mk.split('-'); const anio = parts[0]; const mes = parts[1];\n  const activa = (mk === mesActivo);\n  const idMes = 'mes-' + mk;\n\n  pestanias += '<button class=\"tab' + (activa ? ' tab-activa' : '') + '\" data-mes=\"' + idMes + '\" type=\"button\">'\n    + NOMBRE_MES[mes] + ' ' + anio + '</button>';\n\n  let thDias = '<th class=\"cab\">Cabaña</th>';\n  for (const d of diasMes) thDias += '<th class=\"dia\">' + d.slice(8, 10) + '</th>';\n  let cuerpo = '';\n  for (const cab of ORDEN_CABANAS) {\n    const celdas = diasMes.map(d => contenidoCelda(cab.id, d));\n    let tr1 = '<td class=\"cab\" rowspan=\"3\">' + esc(cab.nombre) + '</td>';\n    let tr2 = '', tr3 = '';\n    celdas.forEach(cel => {\n      tr1 += '<td class=\"cell f1\" style=\"background:' + cel.bg + '\">' + cel.f1 + '</td>';\n      tr2 += '<td class=\"cell f2\" style=\"background:' + cel.bg + '\">' + cel.f2 + '</td>';\n      tr3 += '<td class=\"cell f3\" style=\"background:' + cel.bg + '\">' + cel.f3 + '</td>';\n    });\n    cuerpo += '<tr class=\"r-huesped\">' + tr1 + '</tr><tr class=\"r-tel\">' + tr2 + '</tr><tr class=\"r-pago\">' + tr3 + '</tr>';\n  }\n  secciones += '<section class=\"mes\" id=\"' + idMes + '\"' + (activa ? '' : ' style=\"display:none\"') + '><h2>' + NOMBRE_MES[mes] + ' ' + anio + '</h2>'\n    + '<div class=\"scroll\"><table><thead><tr>' + thDias + '</tr></thead><tbody>' + cuerpo + '</tbody></table></div></section>';\n}\n\nconst ahora = new Intl.DateTimeFormat('es-AR', { timeZone: TZ, dateStyle: 'short', timeStyle: 'short' }).format(new Date());\nconst leyenda = Object.values(COLORES).map(c => '<span class=\"lg\"><span class=\"sw\" style=\"background:' + c.bg + '\"></span>' + c.label + '</span>').join('');\n\nconst html = '<!DOCTYPE html><html lang=\"es\"><head><meta charset=\"utf-8\">'\n  + '<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">'\n  + '<title>Calendario operativo — Vita Delta</title>'\n  + '<style>'\n  + 'body{font-family:system-ui,Arial,sans-serif;margin:0;padding:1rem;background:#fafafa;color:#222}'\n  + 'h1{font-size:1.3rem;margin:.2rem 0}'\n  + '.info{color:#666;font-size:.8rem;margin-bottom:.8rem}'\n  + '.leyenda{margin:.5rem 0 1rem;font-size:.8rem}'\n  + '.lg{margin-right:1rem;white-space:nowrap}.sw{display:inline-block;width:14px;height:14px;border:1px solid #aaa;vertical-align:middle;margin-right:4px}'\n  + '.mes{margin-bottom:1.5rem}.mes h2{font-size:1rem;margin:.5rem 0}'\n  + '.tabs{display:flex;flex-wrap:wrap;gap:.4rem;margin:.6rem 0 1rem}'\n  + '.tab{font-family:inherit;font-size:.85rem;padding:.4rem .8rem;border:1px solid #ccc;border-radius:8px;background:#fff;color:#333;cursor:pointer}'\n  + '.tab:hover{background:#f0f0f0}'\n  + '.tab-activa{background:#225;color:#fff;border-color:#225;font-weight:bold}'\n  + '.scroll{overflow-x:auto;border:1px solid #ddd;border-radius:8px}'\n  + 'table{border-collapse:collapse;font-size:.7rem;min-width:100%}'\n  + 'th,td{border:1px solid #e0e0e0;padding:2px 4px;text-align:center;vertical-align:middle}'\n  + 'th.dia{min-width:78px}'\n  + 'td.cab,th.cab{position:sticky;left:0;background:#f0f0f0;font-weight:bold;text-align:left;min-width:90px;z-index:1}'\n  + '.cell{min-width:78px;font-size:.65rem;line-height:1.15;height:18px}'\n  + '.r-huesped .f1{font-weight:bold}'\n  + '.r-pago .f3{color:#225}'\n  + '</style></head>'\n  + '<body>'\n  + '<h1>Calendario operativo — Complejo Vita Delta</h1>'\n  + '<div class=\"info\">Datos al ' + esc(ahora) + ' · horizonte ' + HORIZONTE_DIAS + ' días · TEST</div>'\n  + '<div class=\"leyenda\">' + leyenda + '</div>'\n  + '<div class=\"tabs\">' + pestanias + '</div>'\n  + secciones\n  + '<script>'\n  + '(function(){'\n  + 'var tabs=document.querySelectorAll(\".tab\");'\n  + 'function mostrar(idMes){'\n  + 'var secs=document.querySelectorAll(\"section.mes\");'\n  + 'for(var i=0;i<secs.length;i++){secs[i].style.display=(secs[i].id===idMes)?\"\":\"none\";}'\n  + 'for(var j=0;j<tabs.length;j++){'\n  + 'if(tabs[j].getAttribute(\"data-mes\")===idMes){tabs[j].classList.add(\"tab-activa\");}'\n  + 'else{tabs[j].classList.remove(\"tab-activa\");}}'\n  + '}'\n  + 'for(var k=0;k<tabs.length;k++){'\n  + 'tabs[k].addEventListener(\"click\",function(){mostrar(this.getAttribute(\"data-mes\"));});'\n  + '}'\n  + '})();'\n  + '</script>'\n  + '</body></html>';\n\nreturn [{ json: { ok: true, data: { formato: 'html', html } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -150
+      ],
+      "id": "759a8aee-e783-41a8-83e0-a92e9429fc7d",
+      "name": "Code: render envelope"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2200,
+        0
+      ],
+      "id": "c23756fe-1935-43c2-9b8f-f4e1debf3915",
+      "name": "Respond"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF acceso": {
+      "main": [
+        [
+          {
+            "node": "PG: leer grilla",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer grilla": {
+      "main": [
+        [
+          {
+            "node": "PG: leer detalle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer detalle": {
+      "main": [
+        [
+          {
+            "node": "PG: leer bloqueos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer bloqueos": {
+      "main": [
+        [
+          {
+            "node": "PG: leer salidas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer salidas": {
+      "main": [
+        [
+          {
+            "node": "Code: render envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: render envelope": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}

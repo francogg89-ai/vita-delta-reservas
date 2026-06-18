@@ -1,0 +1,291 @@
+{
+  "name": "portal-a05-detalle",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a05-detalle",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "e7b153a8-ac11-4f0e-8ab0-d34ce113a064",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a05-detalle — validar_firma_ts_rol.\n// Lee el raw body desde BINARIO ('data'); recomputa HMAC-SHA256 sobre los bytes\n// EXACTOS (D-C-29). Revalida ts (300s), rol (allowlist del wrapper, D-C-39),\n// action binding (D-C-41) y -NUEVO en A05- el payload id_reserva (D-C-40, 2da defensa:\n// el smoke directo pega aca sin gateway). Whitelist: solo el numero.\nconst crypto = require('crypto');\n\n// Secreto: SOLO desde Variables de n8n ($vars.VITA_HMAC_SECRET). En Modo B (n8n Cloud SIN\n// Variables) se PEGA el secreto real reemplazando el placeholder. El template commiteado queda\n// sanitizado; el secreto vive solo en el nodo de la instancia.\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\n\n// Assert duro POR PREFIJO (L-C-10): sobrevive al find-replace del placeholder completo.\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado en n8n Variables; abortando (assert duro).');\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\n// 1) Raw body como Buffer EXACTO. Prioridad: binario 'data'. Fallback: wh.rawBody (L-C-05).\nlet buf = null;\ntry {\n  if (item.binary && item.binary.data) {\n    buf = await this.helpers.getBinaryDataBuffer(0, 'data');\n  }\n} catch (e) {\n  buf = null;\n}\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) {\n  return [{ json: { ok_firma: false, motivo: 'raw_body_ausente', ambiente_esperado: null, rol: null, action: null, ts: null, id_reserva: null } }];\n}\n\n// 2) Firma recibida en el header.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\n\n// 3) HMAC recomputado sobre los MISMOS bytes.\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\n\n// 4) Comparacion timing-safe (requiere igual longitud).\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(sigHeader);\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) {\n  firmaOk = false;\n}\nif (!firmaOk) {\n  return [{ json: { ok_firma: false, motivo: 'firma_invalida', ambiente_esperado: null, rol: null, action: null, ts: null, id_reserva: null } }];\n}\n\n// 5) Parseo (firma ya validada sobre bytes crudos).\nlet body;\ntry {\n  body = JSON.parse(buf.toString('utf8'));\n} catch (e) {\n  return [{ json: { ok_firma: false, motivo: 'payload_invalido', ambiente_esperado: null, rol: null, action: null, ts: null, id_reserva: null } }];\n}\n\n// 6) Ventana de ts (anti-replay liviano, D-C-29): |now - ts| <= 300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) {\n  return [{ json: { ok_firma: false, motivo: 'ts_fuera_de_ventana', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts: body.ts ?? null, id_reserva: null } }];\n}\n\n// 7) Allowlist de rol del wrapper (D-C-39, 2da defensa). A05 = vicky/socio (sin jenny, D-C-03).\nconst ROLES_OK = ['vicky', 'socio'];\nif (!ROLES_OK.includes(body.rol)) {\n  return [{ json: { ok_firma: false, motivo: 'rol_no_permitido', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts, id_reserva: null } }];\n}\n\n// 8) Action binding (D-C-41): EXPECTED_ACTION = reserva.detalle (A05).\nconst EXPECTED_ACTION = 'reserva.detalle';\nif (body.action !== EXPECTED_ACTION) {\n  return [{ json: { ok_firma: false, motivo: 'accion_desconocida', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts, id_reserva: null } }];\n}\n\n// 9) Payload (A05, D-C-40): id_reserva entero positivo seguro. isSafeInteger rechaza decimales,\n// NaN/Infinity y enteros fuera del rango seguro de JS. typeof number rechaza strings.\nconst idRaw = (body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload))\n  ? body.payload.id_reserva : undefined;\nif (typeof idRaw !== 'number' || !Number.isSafeInteger(idRaw) || idRaw <= 0) {\n  return [{ json: { ok_firma: false, motivo: 'payload_invalido', ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts, id_reserva: null } }];\n}\n\nreturn [{ json: { ok_firma: true, motivo: null, ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null, action: body.action ?? null, ts, id_reserva: idRaw } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "0bdfeb69-26b3-4b31-8cb0-e72aa826e7f6",
+      "name": "validar_firma_ts_rol"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "id": "c7f122e0-982f-4e66-8362-88752ff5227a",
+      "name": "leer_ambiente",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a05-detalle — verificar_acceso. Compara ambiente y arma el envelope de rechazo\n// (D-C-18/35). En exito marca {ok:true} para habilitar el IF; el envelope final de exito lo\n// arma el render.\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\n\nfunction envErr(code, message, detail) {\n  return [{ json: { ok: false, error: { code, message, detail: detail ?? null } } }];\n}\n\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'payload invalido (id_reserva ausente o no entero positivo)',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\n\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\n\nreturn [{ json: { ok: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "df75c9e4-d1e9-424c-96e0-dc460a735a6e",
+      "name": "verificar_acceso"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "58a6169b-0ab4-414f-b120-141c8f082aec",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "37dc7ed1-46d8-476f-b6a3-4e0da84da6b1",
+      "name": "IF acceso"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  r.id_reserva,\n  r.id_cabana,\n  c.nombre AS cabana,\n  r.fecha_checkin,\n  r.fecha_checkout,\n  r.hora_checkin,\n  r.hora_checkout,\n  r.personas,\n  r.estado AS estado_reserva,\n  r.canal_origen,\n  r.monto_total,\n  r.monto_sena,\n  r.monto_saldo AS monto_saldo_registrado,\n  pg.total_pagado_confirmado,\n  (r.monto_total - pg.total_pagado_confirmado)::numeric(12,2) AS saldo_real,\n  r.encargado_semana,\n  r.mascotas,\n  r.detalle_mascotas,\n  r.ninos,\n  r.notas,\n  r.notas_reserva,\n  r.created_at,\n  h.id_huesped,\n  TRIM(BOTH FROM (h.nombre || ' ') || COALESCE(h.apellido, '')) AS huesped_nombre,\n  h.telefono AS huesped_telefono,\n  h.email AS huesped_email\nFROM reservas r\nJOIN cabanas   c ON c.id_cabana  = r.id_cabana\nJOIN huespedes h ON h.id_huesped = r.id_huesped\nLEFT JOIN LATERAL (\n  SELECT COALESCE(SUM(p.monto_recibido), 0)::numeric(12,2) AS total_pagado_confirmado\n  FROM pagos p\n  WHERE p.id_reserva = r.id_reserva\n    AND p.estado = 'confirmado'\n    AND p.tipo IN ('sena', 'saldo')\n) pg ON TRUE\nWHERE r.id_reserva = $1;",
+        "options": {
+          "queryReplacement": "={{ $('validar_firma_ts_rol').first().json.id_reserva }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -150
+      ],
+      "id": "191ea6e0-859f-41d6-a511-12303d8a08d9",
+      "name": "PG: leer reserva",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  id_pago,\n  tipo,\n  medio_pago,\n  monto_esperado,\n  monto_recibido,\n  moneda,\n  estado,\n  es_automatico,\n  validado_en,\n  created_at\nFROM pagos\nWHERE id_reserva = $1\nORDER BY created_at, id_pago;",
+        "options": {
+          "queryReplacement": "={{ $('validar_firma_ts_rol').first().json.id_reserva }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1320,
+        -150
+      ],
+      "id": "84a4f934-ea7d-4aec-8501-12876fbbfaaf",
+      "name": "PG: leer pagos",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== portal-a05-detalle — nodo Code (render JSON) =====\n// Detalle de UNA reserva por id_reserva. Contrato D-C-43: data:{reserva,pagos}, montos\n// NUMERICOS crudos (el frontend formatea es-AR; debe renderizar como TEXTO, no innerHTML).\n// Read-only. Privacidad (D-C-03): SOLO montos de ESTA reserva + sus pagos. saldo_real se\n// recalcula en SQL (LATERAL) con pagos confirmados (sena/saldo, monto_recibido) -reafirma\n// D-C-40, no se confia en reservas.monto_saldo-. NADA de reparto/cascada/mayor/societario.\n// PII huesped: nombre/telefono/email; SIN dni ni notas internas del huesped. Las notas de la\n// reserva (notas, notas_reserva) van separadas dentro de 'reserva'.\n\nfunction safeAll(nodeName, keyField) {\n  try {\n    const items = $(nodeName).all();\n    const failed = items.some(it => it && it.json && (it.json.error || it.error));\n    if (failed) return { ok: false, rows: [] };\n    const rows = items.map(it => it.json).filter(j => j && j[keyField] !== undefined && j[keyField] !== null);\n    return { ok: true, rows };\n  } catch (e) { return { ok: false, rows: [] }; }\n}\n\n// NUMERIC de Postgres llega como string; el calculo (saldo_real) ya se hizo en SQL, aca solo\n// transportamos el numero (D-C-43). num() devuelve null si no es finito.\nfunction num(v) {\n  if (v === null || v === undefined || v === '') return null;\n  const n = Number(v);\n  return Number.isFinite(n) ? n : null;\n}\n\nconst resR = safeAll('PG: leer reserva', 'id_reserva');\nconst pagR = safeAll('PG: leer pagos', 'id_pago');\n\n// Cualquier read fallido => error_interno limpio (sin filtrar SQL/n8n crudo, D-C-18). Una\n// reserva sin pagos NO es error: pagR.ok=true con rows=[].\nif (!resR.ok || !pagR.ok) {\n  return [{ json: { ok: false, error: { code: 'error_interno', message: 'no se pudo cargar el detalle', detail: null } } }];\n}\n\n// Cero filas en la reserva = id inexistente => no_encontrado (permitido en el gateway).\nif (resR.rows.length === 0) {\n  return [{ json: { ok: false, error: { code: 'no_encontrado', message: 'reserva inexistente', detail: null } } }];\n}\n\nconst r = resR.rows[0];\n\nconst reserva = {\n  id_reserva: r.id_reserva,\n  id_cabana: r.id_cabana,\n  cabana: r.cabana,\n  fecha_checkin: r.fecha_checkin,\n  fecha_checkout: r.fecha_checkout,\n  hora_checkin: r.hora_checkin,\n  hora_checkout: r.hora_checkout,\n  personas: r.personas,\n  estado: r.estado_reserva,\n  canal_origen: r.canal_origen,\n  monto_total: num(r.monto_total),\n  monto_sena: num(r.monto_sena),\n  monto_saldo_registrado: num(r.monto_saldo_registrado),\n  total_pagado_confirmado: num(r.total_pagado_confirmado),\n  saldo_real: num(r.saldo_real),\n  encargado_semana: r.encargado_semana ?? null,\n  mascotas: r.mascotas === true,\n  detalle_mascotas: r.detalle_mascotas ?? null,\n  ninos: r.ninos ?? null,\n  notas: r.notas ?? null,\n  notas_reserva: r.notas_reserva ?? null,\n  created_at: r.created_at,\n  huesped: {\n    id_huesped: r.id_huesped,\n    nombre: r.huesped_nombre ?? null,\n    telefono: r.huesped_telefono ?? null,\n    email: r.huesped_email ?? null\n  }\n};\n\nconst pagos = pagR.rows.map(p => ({\n  id_pago: p.id_pago,\n  tipo: p.tipo,\n  medio_pago: p.medio_pago,\n  monto_esperado: num(p.monto_esperado),\n  monto_recibido: num(p.monto_recibido),\n  moneda: p.moneda,\n  estado: p.estado,\n  es_automatico: p.es_automatico === true,\n  validado_en: p.validado_en ?? null,\n  created_at: p.created_at\n}));\n\nreturn [{ json: { ok: true, data: { reserva, pagos } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -150
+      ],
+      "id": "deea389d-a1b7-41a8-981f-af6a1669ac18",
+      "name": "Code: render envelope"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1760,
+        0
+      ],
+      "id": "2755da33-3ae3-4092-8665-8a38141773c5",
+      "name": "Respond"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF acceso": {
+      "main": [
+        [
+          {
+            "node": "PG: leer reserva",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer reserva": {
+      "main": [
+        [
+          {
+            "node": "PG: leer pagos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer pagos": {
+      "main": [
+        [
+          {
+            "node": "Code: render envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: render envelope": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
