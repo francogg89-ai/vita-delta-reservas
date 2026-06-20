@@ -81,11 +81,6 @@ const ENUM_PAGO_GW = ['transferencia_bancaria', 'transferencia_mp', 'mp_link', '
 const EMAIL_RE_GW = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAXLEN_GW = 1000;
 const ENUM_MOTIVO_GW = ['mantenimiento', 'uso_propio', 'tormenta', 'overbooking', 'otro'];
-// A10 (Slice 2): medio_pago de registro de saldo (ENUM_MEDIO_A10, D-C-50). NO incluye
-// mp_link (A10 es carga manual de saldo ya cobrado, no link de pago) — distinto de
-// ENUM_PAGO_GW. MONTO_MAX_A10_GW = tope de NUMERIC(12,2).
-const ENUM_MEDIO_A10_GW = ['efectivo', 'transferencia_bancaria', 'transferencia_mp', 'cripto'];
-const MONTO_MAX_A10_GW = 9999999999.99;
 function isYMD_GW(s: unknown): s is string {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const Y = +s.slice(0, 4), M = +s.slice(5, 7), D = +s.slice(8, 10);
@@ -188,44 +183,6 @@ export const payloadCrearBloqueo: PayloadValidator = (payload) => {
   return { ok: true, value };
 };
 
-// A10 (Slice 2) — Validador del payload de registro de saldo. ESPEJO EXACTO de la capa
-// de payload de coreValidate del wrapper A10 (a10_validator_core.mjs, líneas 83-116):
-// reject-unknown, id_reserva entero positivo estricto, monto number finito >0 con ≤2
-// decimales dentro de NUMERIC(12,2), medio_pago en ENUM_MEDIO_A10 (sin mp_link),
-// idempotency_key 8-64 [A-Za-z0-9_-], notas opcional. `actor` NO es clave del payload:
-// viaja en el sobre, inyectado server-side (injectActor), y el wrapper lo usa como
-// validado_por. Doble allowlist (D-C-39): el gateway valida ANTES de firmar; el wrapper
-// revalida antes del Postgres. Devuelve el payload whitelisteado (sin claves extra).
-export const payloadRegistrarSaldo: PayloadValidator = (payload) => {
-  const bad = (message: string): PayloadValidation => ({ ok: false, message });
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return bad('payload inválido: se esperaba un objeto');
-  const p = payload as Record<string, unknown>;
-  const PERMITIDAS = ['id_reserva', 'monto', 'medio_pago', 'idempotency_key', 'notas'];
-  for (const k of Object.keys(p)) if (!PERMITIDAS.includes(k)) return bad(`clave no permitida en payload: ${k}`);
-  const isStr = (v: unknown): v is string => typeof v === 'string';
-
-  if (typeof p.id_reserva !== 'number' || !Number.isSafeInteger(p.id_reserva) || p.id_reserva <= 0) return bad('id_reserva debe ser entero positivo');
-
-  const monto = p.monto;
-  if (typeof monto !== 'number' || !Number.isFinite(monto) || monto <= 0) return bad('monto debe ser número positivo finito');
-  const cents = Math.round(monto * 100);
-  if (Math.abs(monto * 100 - cents) > 1e-6) return bad('monto admite máximo 2 decimales');
-  if (cents <= 0 || monto > MONTO_MAX_A10_GW) return bad('monto fuera de rango');
-
-  if (!ENUM_MEDIO_A10_GW.includes(p.medio_pago as string)) return bad('medio_pago inválido');
-
-  const key = p.idempotency_key;
-  if (!isStr(key) || key.length < 8 || key.length > 64 || !/^[A-Za-z0-9_-]+$/.test(key)) return bad('idempotency_key inválida');
-
-  if (p.notas !== undefined && p.notas !== null && (!isStr(p.notas) || p.notas.length > MAXLEN_GW)) return bad('notas inválida');
-
-  const value = {
-    id_reserva: p.id_reserva, monto, medio_pago: p.medio_pago, idempotency_key: key,
-    notas: (p.notas != null ? p.notas : null),
-  };
-  return { ok: true, value };
-};
-
 // Coherencia rol↔actor (server-side, ANTES de firmar): el rol gobierna la allowlist;
 // el actor (persona) gobierna validado_por/created_by aguas abajo (D-C-22). vicky es
 // rol y persona; socio agrupa a franco/rodrigo/remo. jenny no llega (rebota por rol).
@@ -285,16 +242,6 @@ const CATALOG: Record<string, CatalogEntry> = {
   // confiable, estado_incierto. id_cabana OBLIGATORIO (bloqueo total no se expone, 8D).
   // El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
   'bloqueo.crear_manual': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a08-crear-bloqueo__TEST', validate: payloadCrearBloqueo, injectActor: true, isWrite: true },
-  // A10 (Slice 2) — Registrar pago de saldo. Wrapper n8n firmado
-  // (portal-a10-registrar-saldo__TEST). SOLO vicky/socio (D-C-39): jenny rebota con
-  // rol_no_permitido EN EL GATEWAY antes de firmar. validate: payloadRegistrarSaldo
-  // (espejo del wrapper, capa de payload). injectActor: el actor (persona) se inyecta
-  // server-side desde portal_usuarios.nombre y el wrapper lo usa como validado_por,
-  // NUNCA del frontend. isWrite: ante dispatch no confiable, estado_incierto. El wrapper
-  // mapea excede_saldo/idempotency_mismatch/estado_no_cobrable/saldo_ya_cancelado →
-  // conflicto, reserva_no_existe → no_encontrado, P0001 → error_interno (D-C-51); todos
-  // allowlisted. El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
-  'cobranza.registrar_saldo': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a10-registrar-saldo__TEST', validate: payloadRegistrarSaldo, injectActor: true, isWrite: true },
 };
 
 const ROLES_VALIDOS: ReadonlySet<Rol> = new Set<Rol>(['jenny', 'vicky', 'socio']);

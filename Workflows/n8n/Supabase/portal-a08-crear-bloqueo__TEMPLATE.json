@@ -1,0 +1,299 @@
+{
+  "name": "portal-a08-crear-bloqueo__TEST",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a08-crear-bloqueo__TEST",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "7046bba0-05af-4207-8a84-2913a26e3b5f",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "notes": "A07.2 v2 wrapper (ESCRITURA). Molde base: portal-a05-detalle__TEMPLATE.json (sha256=c9a8703ae3c330dca5a8100a4541891e7d3bc08b6f388dce6d555c095df36519) en francogg89-ai/vita-delta-reservas @ main : Workflows/n8n/Supabase/. active:false, HMAC placeholder (Modo B). No gateway."
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a08-crear-bloqueo__TEST -- validar_firma_ts_rol (ESCRITURA / A08).\n// Molde a05 (HMAC sobre buffer crudo, timing-safe, ventana ts, raw body binario con\n// fallback, assert por prefijo __PEGAR_). A08:\n//   - EXPECTED_ACTION = 'bloqueo.crear_manual'.\n//   - actor (sobre firmado) contra enum de personas.\n//   - payload REJECT-UNKNOWN + validacion ESTRICTA. id_cabana OBLIGATORIO (safe int > 0;\n//     bloqueo total NO se expone en el portal, decision 8D). fechas YMD reales con\n//     hasta > desde; motivo en enum; descripcion opcional.\nconst crypto = require('crypto');\n\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado (assert por prefijo, L-C-10).');\n}\n\nconst ENUM_ACTOR  = ['vicky','franco','rodrigo','remo'];\nconst ROLES_OK    = ['vicky','socio'];\nconst ENUM_MOTIVO = ['mantenimiento','uso_propio','tormenta','overbooking','otro'];\nconst EXPECTED_ACTION = 'bloqueo.crear_manual';\nconst MAXLEN = 1000;\n\nfunction rej(motivo, body) {\n  body = body || {};\n  return [{ json: { ok_firma:false, motivo, ambiente_esperado: body.ambiente_esperado ?? null,\n    rol: body.rol ?? null, action: body.action ?? null, ts: (typeof body.ts!=='undefined'?body.ts:null),\n    actor: body.actor ?? null, payload: null } }];\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\n// 1) Raw body Buffer exacto (binario 'data' prioridad; fallback rawBody, L-C-05).\nlet buf = null;\ntry { if (item.binary && item.binary.data) buf = await this.helpers.getBinaryDataBuffer(0, 'data'); } catch (e) { buf = null; }\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) return rej('raw_body_ausente', {});\n\n// 2-4) Firma HMAC recomputada sobre los mismos bytes, comparacion timing-safe.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\nlet firmaOk = false;\ntry { const a = Buffer.from(sigHeader); const b = Buffer.from(expected); firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b); } catch (e) { firmaOk = false; }\nif (!firmaOk) return rej('firma_invalida', {});\n\n// 5) Parseo (firma ya validada).\nlet body;\ntry { body = JSON.parse(buf.toString('utf8')); } catch (e) { return rej('payload_invalido', {}); }\n\n// 6) Ventana ts +-300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) return rej('ts_fuera_de_ventana', body);\n\n// 7) Rol allowlist (D-C-39).\nif (!ROLES_OK.includes(body.rol)) return rej('rol_no_permitido', body);\n// 8) Action binding (D-C-41).\nif (body.action !== EXPECTED_ACTION) return rej('accion_desconocida', body);\n// 9) actor (sobre firmado; persona, no rol).\nif (typeof body.actor !== 'string' || !ENUM_ACTOR.includes(body.actor)) return rej('payload_invalido', body);\n\n// 10) Payload de negocio: REJECT-UNKNOWN + tipos estrictos.\nconst p = body.payload;\nif (!p || typeof p !== 'object' || Array.isArray(p)) return rej('payload_invalido', body);\n\nconst PERMITIDAS = ['id_cabana','fecha_desde','fecha_hasta','motivo','descripcion'];\nfor (const k of Object.keys(p)) { if (!PERMITIDAS.includes(k)) return rej('payload_invalido', body); }\n\nconst isStr = (v) => typeof v === 'string';\nconst okLen = (v) => v.length <= MAXLEN;\n// Fecha YYYY-MM-DD REAL: round-trip UTC (2027-02-30 -> rollover -> rechazado).\nconst isYMD = (s) => {\n  if (!isStr(s) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const Y = +s.slice(0,4), M = +s.slice(5,7), D = +s.slice(8,10);\n  if (M < 1 || M > 12 || D < 1 || D > 31) return false;\n  const dt = new Date(Date.UTC(Y, M - 1, D));\n  return dt.getUTCFullYear() === Y && dt.getUTCMonth() === M - 1 && dt.getUTCDate() === D;\n};\n\n// id_cabana OBLIGATORIO (bloqueo total no se expone en el portal, 8D). safe int > 0.\nif (typeof p.id_cabana !== 'number' || !Number.isSafeInteger(p.id_cabana) || p.id_cabana <= 0) return rej('payload_invalido', body);\nif (!isYMD(p.fecha_desde) || !isYMD(p.fecha_hasta)) return rej('payload_invalido', body);\nif (!(p.fecha_hasta > p.fecha_desde)) return rej('payload_invalido', body);\nif (!ENUM_MOTIVO.includes(p.motivo)) return rej('payload_invalido', body);\nif (p.descripcion != null && (!isStr(p.descripcion) || !okLen(p.descripcion))) return rej('payload_invalido', body);\n\nconst payloadWL = {\n  id_cabana: p.id_cabana, fecha_desde: p.fecha_desde, fecha_hasta: p.fecha_hasta,\n  motivo: p.motivo, descripcion: (p.descripcion != null ? p.descripcion : null)\n};\nreturn [{ json: { ok_firma:true, motivo:null, ambiente_esperado: body.ambiente_esperado ?? null,\n  rol: body.rol, action: body.action, ts, actor: body.actor, payload: payloadWL } }];\n"
+      },
+      "id": "cb6a46d3-b047-4964-88e2-f183d5e17a24",
+      "name": "validar_firma_ts_rol",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "id": "27920894-df7c-4246-a9f2-4fecff5d65b8",
+      "name": "leer_ambiente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a07-crear-reserva__TEST — verificar_acceso (ambiente + envelope de rechazo).\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\nfunction envErr(code, message, detail) { return [{ json: { ok:false, error: { code, message, detail: detail ?? null } } }]; }\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'payload invalido (campos de negocio, huesped o actor)',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\nreturn [{ json: { ok:true } }];\n"
+      },
+      "id": "86221698-cf3d-412a-b410-0fcb1d87a565",
+      "name": "verificar_acceso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9489ce2c-0e20-416e-87a2-016c9384a7ea",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "47745a6a-13cf-416b-ac20-d8020cc78741",
+      "name": "IF acceso",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a08-crear-bloqueo__TEST -- Code: derivar. source_event PII-free determinístico\n// (sin idem: A08 no es idempotente; el guard de solapamiento evita duplicados). crypto SHA-256.\nconst crypto = require('crypto');\nconst sha256hex = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');\n\nconst V = $('validar_firma_ts_rol').first().json;\nconst p = V.payload;\nconst actor = V.actor;\n\nconst ORDEN = ['id_cabana','fecha_desde','fecha_hasta','motivo','descripcion'];\nconst negocio = {\n  id_cabana: p.id_cabana, fecha_desde: p.fecha_desde, fecha_hasta: p.fecha_hasta,\n  motivo: p.motivo, descripcion: (p.descripcion != null ? p.descripcion : null)\n};\nconst canon = JSON.stringify(ORDEN.map((k) => [k, negocio[k]]));\nconst hash12 = sha256hex(canon).slice(0, 12);\nconst source_event = `portal_test_a08_cab${p.id_cabana}_${p.fecha_desde}_${p.fecha_hasta}_${hash12}`;\n\nconst payload1Obj = {\n  id_cabana: p.id_cabana, fecha_desde: p.fecha_desde, fecha_hasta: p.fecha_hasta,\n  motivo: p.motivo, creado_por: actor, source_event: source_event\n};\nif (p.descripcion != null) payload1Obj.descripcion = p.descripcion;\n\nreturn [{ json: { source_event, actor, payload1: JSON.stringify(payload1Obj) } }];\n"
+      },
+      "id": "d776abb6-8c80-4911-9930-fb81ec9e3b2c",
+      "name": "Code: derivar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT crear_bloqueo($1::jsonb) AS resultado;",
+        "options": {
+          "queryReplacement": "={{ $('Code: derivar').first().json.payload1 }}"
+        }
+      },
+      "id": "b900185c-eea0-4de9-bc8d-5d616de9d64a",
+      "name": "PG crear_bloqueo",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1320,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// router_bloqueo -- lee crear_bloqueo (columna 'resultado', L-8D-01). Mapea a envelope final.\n// Terminal: no hay pasos siguientes (escritura atomica). conflicto_* y bloqueo_solapado ->\n// conflicto; los 4 de datos -> payload_invalido; otro -> error_interno.\nconst res = $json.resultado;\nfunction mapErr(e) {\n  const conflicto  = ['conflicto_con_reserva','conflicto_con_prereserva','bloqueo_solapado'];\n  const payloadInv = ['payload_invalido','fechas_invalidas','motivo_invalido','cabana_no_existe'];\n  if (conflicto.includes(e))  return { ok:false, error: { code:'conflicto', message:'conflicto con reserva, prereserva o bloqueo en el rango', detail:null } };\n  if (payloadInv.includes(e)) return { ok:false, error: { code:'payload_invalido', message:'datos de bloqueo rechazados: '+e, detail:null } };\n  return { ok:false, error: { code:'error_interno', message:'no se pudo crear el bloqueo', detail:null } };\n}\nif (!res || res.ok !== true) return [{ json: mapErr(res ? res.error : null) }];\nreturn [{ json: { ok:true, data: { id_bloqueo: res.id_bloqueo, id_cabana: res.id_cabana, tipo_bloqueo: res.tipo_bloqueo } } }];\n"
+      },
+      "id": "d51dd772-554e-4e5e-9c2f-1d9a4dc24277",
+      "name": "router_bloqueo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a07-crear-reserva__TEST — Code: render. Punto unico de salida.\n// Extrae el envelope de los routers; o pasa el rechazo de verificar_acceso ($json {ok:false,error}).\n// El gateway re-enmascarara/re-sanitizara codigos de infra/estado_incierto (D-C-55).\nconst e = ($json && $json.envelope) ? $json.envelope : $json;\nreturn [{ json: e }];\n"
+      },
+      "id": "2f6191d0-d01c-4d46-8fa0-ddddfb0841a2",
+      "name": "Code: render",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "057687ba-3cbf-4576-afb1-3c6173ab2b6c",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1980,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF acceso": {
+      "main": [
+        [
+          {
+            "node": "Code: derivar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: derivar": {
+      "main": [
+        [
+          {
+            "node": "PG crear_bloqueo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG crear_bloqueo": {
+      "main": [
+        [
+          {
+            "node": "router_bloqueo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "router_bloqueo": {
+      "main": [
+        [
+          {
+            "node": "Code: render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: render": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}

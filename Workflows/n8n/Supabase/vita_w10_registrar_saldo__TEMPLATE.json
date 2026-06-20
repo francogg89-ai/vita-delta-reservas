@@ -1,0 +1,370 @@
+{
+  "name": "Vita A10 portal-a10-registrar-saldo__TEST (wrapper directo)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a10-registrar-saldo__TEST",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "4ad57624-0e33-4fee-ac25-305b681cef0d",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1104,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\n// Secreto (L-C-10): $vars.__PEGAR_SECRETO_O_USAR_VARIABLE__ si existe; si no, placeholder pegado a mano (Modo B).\n// Mismo patron que A05/A06/A12. Assert duro POR PREFIJO sobrevive al find-replace del placeholder.\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.__PEGAR_SECRETO_O_USAR_VARIABLE__)\n  ? $vars.__PEGAR_SECRETO_O_USAR_VARIABLE__\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('__PEGAR_SECRETO_O_USAR_VARIABLE__ no configurado; abortando (assert duro por prefijo).');\n}\n\nconst EXPECTED_ACTION = 'cobranza.registrar_saldo';\nconst ROLES_OK = ['vicky', 'socio'];\nconst ENUM_ACTOR = ['vicky', 'franco', 'rodrigo', 'remo'];\nconst ENUM_MEDIO_A10 = ['efectivo', 'transferencia_bancaria', 'transferencia_mp', 'cripto'];\nconst MONTO_MAX = 9999999999.99;\nconst TS_WINDOW_MS = 300000;\nconst MAXLEN = 1000;\nconst ENVELOPE_KEYS = ['action', 'payload', 'rol', 'ambiente_esperado', 'ts', 'nonce', 'actor'];\nconst PAYLOAD_KEYS = ['id_reserva', 'monto', 'medio_pago', 'idempotency_key', 'notas'];\n\nfunction actorCoherente(rol, nombre) {\n  if (rol === 'vicky') return nombre === 'vicky';\n  if (rol === 'socio') return nombre === 'franco' || nombre === 'rodrigo' || nombre === 'remo';\n  return false;\n}\nconst fail = (error, message) => [{ json: { __auth_ok: false, error: error, message: message } }];\n\n// Raw body como Buffer EXACTO. PATRON A12 (probado 8/8 en este n8n): binario 'data' via\n// getBinaryDataBuffer; fallback wh.rawBody incl. forma serializada {type:'Buffer',data:[...]}\n// (L-C-05). Webhook typeVersion 2.1 (igual que A12) para que el raw aterrice.\nconst item = $input.first();\nconst wh = item.json;\n\nlet raw = null;\nlet via = 'none';\nconst diag = { rawread: 'v5' };\ntry {\n  if (item.binary && item.binary.data) {\n    raw = await this.helpers.getBinaryDataBuffer(0, 'data');\n    if (raw && raw.length) via = 'getBinaryDataBuffer';\n  }\n} catch (e) { diag.getBinErr = String((e && e.message) || e); raw = null; }\nif (!raw || !raw.length) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) { raw = rawField; via = 'rawBody.buffer'; }\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) { raw = Buffer.from(rawField.data); via = 'rawBody.serialized'; }\n  else if (typeof rawField === 'string') { raw = Buffer.from(rawField, 'utf8'); via = 'rawBody.string'; }\n}\nif (!raw || raw.length === 0) {\n  diag.via = via;\n  diag.binary = !!(item && item.binary);\n  const bd = (item && item.binary && item.binary.data) ? item.binary.data : null;\n  diag.binaryDataKeys = bd ? Object.keys(bd) : [];\n  diag.binDataType = bd ? typeof bd.data : 'no-bd';\n  diag.binDataLen = (bd && typeof bd.data === 'string') ? bd.data.length : null;\n  diag.binHasId = !!(bd && bd.id);\n  diag.rawBodyType = typeof wh.rawBody;\n  diag.contentLength = (wh.headers && (wh.headers['content-length'] || wh.headers['Content-Length'])) || null;\n  return fail('raw_body_ausente', 'raw body ausente | diag ' + JSON.stringify(diag));\n}\n\n// Firma: HMAC-SHA256 sobre los MISMOS bytes; compara el header completo timing-safe (patron A12).\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(raw).digest('hex');\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(String(sigHeader || ''));\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) { firmaOk = false; }\nif (!firmaOk) return fail('firma_invalida', 'firma invalida');\n\nlet env;\ntry { env = JSON.parse(raw.toString('utf8')); } catch (e) { return fail('payload_invalido', 'sobre no es JSON'); }\nif (typeof env !== 'object' || env === null || Array.isArray(env)) return fail('payload_invalido', 'sobre invalido');\nfor (const k of Object.keys(env)) if (!ENVELOPE_KEYS.includes(k)) return fail('payload_invalido', 'clave de sobre no permitida: ' + k);\n\nif (typeof env.ts !== 'number' || !Number.isFinite(env.ts)) return fail('payload_invalido', 'ts invalido');\nif (Math.abs(Date.now() - env.ts) > TS_WINDOW_MS) return fail('ts_fuera_de_ventana', 'ts fuera de ventana');\nif (env.action !== EXPECTED_ACTION) return fail('payload_invalido', 'action no coincide con el endpoint');\nif (!ROLES_OK.includes(env.rol)) return fail('rol_no_permitido', 'rol no habilitado');\nif (typeof env.actor !== 'string' || !ENUM_ACTOR.includes(env.actor)) return fail('payload_invalido', 'actor invalido');\nif (!actorCoherente(env.rol, env.actor)) return fail('rol_no_permitido', 'actor incoherente con rol');\nif (typeof env.ambiente_esperado !== 'string' || env.ambiente_esperado.length === 0) return fail('payload_invalido', 'ambiente_esperado invalido');\nif (typeof env.nonce !== 'string' || env.nonce.length === 0) return fail('payload_invalido', 'nonce invalido');\n\nconst p = env.payload;\nif (typeof p !== 'object' || p === null || Array.isArray(p)) return fail('payload_invalido', 'payload invalido');\nfor (const k of Object.keys(p)) if (!PAYLOAD_KEYS.includes(k)) return fail('payload_invalido', 'clave de payload no permitida: ' + k);\nif (typeof p.id_reserva !== 'number' || !Number.isSafeInteger(p.id_reserva) || p.id_reserva <= 0) return fail('payload_invalido', 'id_reserva debe ser entero positivo');\nconst monto = p.monto;\nif (typeof monto !== 'number' || !Number.isFinite(monto) || monto <= 0) return fail('payload_invalido', 'monto debe ser numero positivo finito');\nconst cents = Math.round(monto * 100);\nif (Math.abs(monto * 100 - cents) > 1e-6) return fail('payload_invalido', 'monto admite maximo 2 decimales');\nif (cents <= 0 || monto > MONTO_MAX) return fail('payload_invalido', 'monto fuera de rango');\nif (!ENUM_MEDIO_A10.includes(p.medio_pago)) return fail('payload_invalido', 'medio_pago invalido');\nconst key = p.idempotency_key;\nif (typeof key !== 'string' || key.length < 8 || key.length > 64 || !/^[A-Za-z0-9_-]+$/.test(key)) return fail('payload_invalido', 'idempotency_key invalida');\nif (p.notas !== undefined && p.notas !== null && (typeof p.notas !== 'string' || p.notas.length > MAXLEN)) return fail('payload_invalido', 'notas invalida');\n\nreturn [{ json: {\n  __auth_ok: true,\n  action: env.action, rol: env.rol, actor: env.actor,\n  ambiente_esperado: env.ambiente_esperado, ts: env.ts, nonce: env.nonce,\n  payload: { id_reserva: p.id_reserva, monto: monto, medio_pago: p.medio_pago, idempotency_key: key, notas: (p.notas != null ? p.notas : null) }\n}}];"
+      },
+      "id": "22cd51ba-7a3c-4ba5-836e-d7370fccaf37",
+      "name": "validar_firma_ts_rol",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor AS ambiente FROM configuracion_general WHERE clave = 'ambiente';",
+        "options": {}
+      },
+      "id": "4c4c2a4c-c7fc-4878-8beb-09ae0c9fd3a3",
+      "name": "leer_ambiente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -656,
+        128
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combina el resultado de validar_firma_ts_rol con el ambiente leido de la BD.\nconst v = $('validar_firma_ts_rol').first().json;\nif (!v.__auth_ok) {\n  return [{ json: { acceso: false, error: v.error, message: v.message } }];\n}\nconst ambRow = $('leer_ambiente').first().json;\nconst dbAmbiente = ambRow.ambiente;\nif (dbAmbiente !== v.ambiente_esperado) {\n  return [{ json: { acceso: false, error: 'ambiente_incorrecto', message: 'ambiente no coincide' } }];\n}\nif (dbAmbiente !== 'test') {\n  return [{ json: { acceso: false, error: 'ambiente_incorrecto', message: 'wrapper TEST-only' } }];\n}\nreturn [{ json: { acceso: true, rol: v.rol, actor: v.actor, payload: v.payload, ambiente: dbAmbiente } }];"
+      },
+      "id": "4ce9871a-d106-49d8-bb8d-60f496c5d8bc",
+      "name": "verificar_acceso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-acceso",
+              "leftValue": "={{ $json.acceso }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "16001540-ce92-49ed-8882-a42704ca6808",
+      "name": "IF_acceso",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Derivacion server-side: source_event determinista (PII-free) + payload para registrar_pago.\nconst crypto = require('crypto');\nconst va = $('verificar_acceso').first().json;\nconst p = va.payload;\nconst actor = va.actor;\nconst canon = String(p.id_reserva) + '|' + p.idempotency_key;\nconst hash = crypto.createHash('sha256').update(canon, 'utf8').digest('hex').slice(0, 12);\nconst source_event = 'portal_test_a10_res' + p.id_reserva + '_' + hash;\nconst sql_payload = {\n  id_reserva: p.id_reserva,\n  id_pre_reserva: null,\n  tipo: 'saldo',\n  medio_pago: p.medio_pago,\n  monto_esperado: p.monto,\n  monto_recibido: p.monto,\n  estado_inicial: 'confirmado',\n  validado_por: actor,\n  source_event: source_event,\n  notas: p.notas\n};\nreturn [{ json: { sql_payload: sql_payload, source_event: source_event, id_reserva: p.id_reserva, actor: actor } }];"
+      },
+      "id": "746a68fe-9ea3-4a6c-93e5-9400f30171f8",
+      "name": "derivar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- ============================================================================\n-- C_SLICE2 / A10 -- Nodo PG_cobranza (St1 + St2, queryBatching: transaction)\n-- $1 = sql_payload jsonb (server-side, armado por el nodo 'derivar').\n-- Devuelve la columna 'resultado' (jsonb INTERNO; el render lo mapea a la allowlist).\n-- Saldo BYTE-ALINEADO a A12 (D-C-49 / L-C-14): mismos CTE reserva_por_prereserva +\n-- pagos_reserva_normalizados + FILTER-en-SUM. saldo_real = monto_total - total_pagado_confirmado.\n-- Anti-OPS: este nodo solo se invoca en TEST; el wrapper valido ambiente en verificar_acceso.\n-- ============================================================================\n\n-- St1 -- Lock transaccional por id_reserva (advisory xact; namespaced; se libera en COMMIT/ROLLBACK).\nSELECT pg_advisory_xact_lock( hashtext('a10_cobranza_saldo:' || (($1::jsonb)->>'id_reserva')) );\n\n-- St2 -- Idempotencia (con control de mismatch) -> recalculo de saldo in-txn -> registro atomico.\nWITH\n  existing AS (                                    -- (1) pago previo con el MISMO source_event\n    SELECT id_pago, estado, id_reserva, tipo, medio_pago, monto_recibido, validado_por\n    FROM pagos\n    WHERE source_event = ($1::jsonb)->>'source_event'\n    ORDER BY id_pago\n    LIMIT 1\n  ),\n  r AS (                                           -- (2) reserva objetivo\n    SELECT estado, monto_total\n    FROM reservas\n    WHERE id_reserva = (($1::jsonb)->>'id_reserva')::bigint\n  ),\n  reserva_por_prereserva AS (                      -- (3) mapeo prereserva->reserva (D-C-49/L-C-14)\n    SELECT id_pre_reserva, MIN(id_reserva) AS id_reserva   --     CTE agrupada + MIN (NO escalar)\n    FROM reservas\n    WHERE id_pre_reserva IS NOT NULL\n    GROUP BY id_pre_reserva\n  ),\n  pagos_reserva_normalizados AS (                  -- (4) pagos normalizados al reserva (igual que A12)\n    SELECT p.estado, p.tipo, p.monto_recibido,\n           COALESCE(p.id_reserva, rpp.id_reserva) AS id_reserva_normalizado\n    FROM pagos p\n    LEFT JOIN reserva_por_prereserva rpp ON rpp.id_pre_reserva = p.id_prereserva\n  ),\n  pagado AS (                                      -- (5) total confirmado (sena+saldo) del objetivo\n    SELECT COALESCE(SUM(prn.monto_recibido) FILTER (\n             WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena', 'saldo')), 0) AS total_pagado_confirmado\n    FROM pagos_reserva_normalizados prn\n    WHERE prn.id_reserva_normalizado = (($1::jsonb)->>'id_reserva')::bigint\n  ),\n  sr AS (                                          -- (6) saldo vivo (NUNCA reservas.monto_saldo)\n    SELECT (SELECT monto_total FROM r) - (SELECT total_pagado_confirmado FROM pagado) AS saldo_real\n  )\nSELECT\n  CASE\n    -- A) Idempotencia PRIMERO: ya existe un pago con este source_event.\n    WHEN EXISTS (SELECT 1 FROM existing) THEN\n      CASE\n        WHEN (SELECT id_reserva     FROM existing) = (($1::jsonb)->>'id_reserva')::bigint\n         AND (SELECT tipo           FROM existing) = 'saldo'\n         AND (SELECT medio_pago     FROM existing) = ($1::jsonb)->>'medio_pago'\n         AND (SELECT monto_recibido FROM existing) = (($1::jsonb)->>'monto_recibido')::numeric\n         AND (SELECT validado_por   FROM existing) = ($1::jsonb)->>'validado_por'\n        THEN jsonb_build_object(\n               'ok', true, 'idempotent_match', true,\n               'id_pago', (SELECT id_pago FROM existing),\n               'estado_pago', (SELECT estado::text FROM existing))\n        ELSE jsonb_build_object('ok', false, 'error', 'idempotency_mismatch')\n      END\n    -- B) Reserva inexistente.\n    WHEN NOT EXISTS (SELECT 1 FROM r) THEN\n      jsonb_build_object('ok', false, 'error', 'reserva_no_existe')\n    -- C) Estado no cobrable (solo confirmada/activa).\n    WHEN (SELECT estado::text FROM r) NOT IN ('confirmada', 'activa') THEN\n      jsonb_build_object('ok', false, 'error', 'estado_no_cobrable',\n        'estado_reserva', (SELECT estado::text FROM r))\n    -- D) Saldo ya cancelado.\n    WHEN (SELECT saldo_real FROM sr) <= 0 THEN\n      jsonb_build_object('ok', false, 'error', 'saldo_ya_cancelado',\n        'saldo_real', (SELECT saldo_real FROM sr))\n    -- E) Sobrepago.\n    WHEN (($1::jsonb)->>'monto_recibido')::numeric > (SELECT saldo_real FROM sr) THEN\n      jsonb_build_object('ok', false, 'error', 'excede_saldo',\n        'saldo_real', (SELECT saldo_real FROM sr))\n    -- F) Alta valida y nueva: registrar + red de seguridad atomica (abortar_si_falla, D-9B-19).\n    ELSE\n      abortar_si_falla( registrar_pago($1::jsonb) )\n      || jsonb_build_object('idempotent_match', false, 'saldo_real_previo', (SELECT saldo_real FROM sr))\n  END AS resultado;",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ JSON.stringify($json.sql_payload) }}"
+        }
+      },
+      "id": "4d17b241-1067-4cdd-b328-7e27ba3e0123",
+      "name": "PG_cobranza",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        0
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- C_SLICE2 / A10 -- Nodo PG_verif_post (read-only, post-COMMIT). $1 = sql_payload jsonb.\n-- Relee por source_event, confirma estado del pago y RECALCULA saldo_real con la MISMA\n-- normalizacion byte-alineada a A12 (reserva_por_prereserva + pagos_reserva_normalizados +\n-- FILTER-en-SUM). No escribe. Devuelve 'resultado' jsonb.\nWITH\n  pago AS (\n    SELECT id_pago, estado\n    FROM pagos\n    WHERE source_event = ($1::jsonb)->>'source_event'\n    ORDER BY id_pago\n    LIMIT 1\n  ),\n  reserva_por_prereserva AS (\n    SELECT id_pre_reserva, MIN(id_reserva) AS id_reserva\n    FROM reservas\n    WHERE id_pre_reserva IS NOT NULL\n    GROUP BY id_pre_reserva\n  ),\n  pagos_reserva_normalizados AS (\n    SELECT p.estado, p.tipo, p.monto_recibido,\n           COALESCE(p.id_reserva, rpp.id_reserva) AS id_reserva_normalizado\n    FROM pagos p\n    LEFT JOIN reserva_por_prereserva rpp ON rpp.id_pre_reserva = p.id_prereserva\n  ),\n  pagado AS (\n    SELECT COALESCE(SUM(prn.monto_recibido) FILTER (\n             WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena', 'saldo')), 0) AS total_pagado_confirmado\n    FROM pagos_reserva_normalizados prn\n    WHERE prn.id_reserva_normalizado = (($1::jsonb)->>'id_reserva')::bigint\n  )\nSELECT jsonb_build_object(\n  'id_pago',           (SELECT id_pago FROM pago),\n  'estado_pago',       (SELECT estado::text FROM pago),\n  'pago_confirmado',   COALESCE((SELECT estado::text FROM pago) = 'confirmado', false),\n  'saldo_real_actual', (SELECT monto_total FROM reservas WHERE id_reserva = (($1::jsonb)->>'id_reserva')::bigint)\n                       - (SELECT total_pagado_confirmado FROM pagado)\n) AS resultado;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($('derivar').first().json.sql_payload) }}"
+        }
+      },
+      "id": "91227e12-ddf4-4fed-b13b-7d74afbc81c3",
+      "name": "PG_verif_post",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        0
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// RENDER (camino exito). Lee resultado de PG_cobranza + verif de PG_verif_post.\n// Mapea etiquetas internas -> codigos EXTERNOS de la allowlist del gateway (D-C-18).\nfunction pick(nodeName) {\n  const items = $(nodeName).all();\n  for (const it of items) { if (it.json && it.json.resultado !== undefined) {\n    let r = it.json.resultado;\n    if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) {} }\n    return r;\n  }}\n  return null;\n}\nconst out = (env) => [{ json: env }];\nconst resultado = pick('PG_cobranza');\nconst verif = pick('PG_verif_post');\n\n// Sin resultado en la salida principal (no deberia pasar: el write rutea sus errores por\n// continueErrorOutput a render_error_pg). Defensivo: estado_incierto.\nif (!resultado) {\n  return out({ ok: false, error: { code: 'estado_incierto', message: 'no se pudo determinar el resultado; verifica la reserva antes de reintentar' } });\n}\n\n// resultado.ok===true es confirmacion AUTORITATIVA: en alta nueva, abortar_si_falla (D-9B-19)\n// garantiza estado='confirmado' o habria tirado P0001 (ruteado a render_error_pg, no aca);\n// en idempotent_match, el pago previo ya existe. verif aporta saldo_real_actual post-commit;\n// si verif degrada (L-C-15) NO bajamos a estado_incierto: el write ya esta confirmado.\nif (resultado.ok === true) {\n  const data = {\n    id_pago: (resultado.id_pago != null) ? resultado.id_pago : (verif ? verif.id_pago : null),\n    estado_pago: (verif && verif.estado_pago) ? verif.estado_pago : 'confirmado',\n    idempotent_match: resultado.idempotent_match === true,\n    saldo_real_actual: verif ? verif.saldo_real_actual : null\n  };\n  if (resultado.saldo_real_previo !== undefined) data.saldo_real_previo = resultado.saldo_real_previo;\n  return out({ ok: true, data: data });\n}\n\nconst motivo = resultado.error;\nconst estadoRes = (resultado.estado_reserva) ? (' (estado: ' + resultado.estado_reserva + ')') : '';\nconst MAP = {\n  reserva_no_existe:    { code: 'no_encontrado', message: 'reserva inexistente' },\n  estado_no_cobrable:   { code: 'conflicto',     message: 'la reserva no admite cobranza de saldo' + estadoRes },\n  saldo_ya_cancelado:   { code: 'conflicto',     message: 'la reserva ya no tiene saldo pendiente' },\n  excede_saldo:         { code: 'conflicto',     message: 'el monto excede el saldo pendiente' },\n  idempotency_mismatch: { code: 'conflicto',     message: 'idempotency_key reutilizada con datos distintos' }\n};\nconst ext = MAP[motivo] || { code: 'error_interno', message: 'error interno' };\nreturn out({ ok: false, error: ext });"
+      },
+      "id": "a7901c9f-d46a-4ef3-8171-700c40b3644a",
+      "name": "render",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// RENDER de rechazo de acceso (rama IF-false). Los codigos vienen de validar_firma /\n// verificar_acceso y ya pertenecen a la allowlist; defensivo: si no, error_interno.\nconst ALLOW = new Set(['payload_invalido','no_autorizado','rol_no_permitido','accion_desconocida','no_encontrado','conflicto','error_entorno','error_interno','estado_incierto','firma_invalida','ts_fuera_de_ventana','raw_body_ausente','ambiente_incorrecto']);\nconst va = $('verificar_acceso').first().json;\nconst code = ALLOW.has(va.error) ? va.error : 'error_interno';\nconst message = ALLOW.has(va.error) ? (va.message || 'error') : 'error interno';\nreturn [{ json: { ok: false, error: { code: code, message: message } } }];"
+      },
+      "id": "dee9c324-730b-411f-87e0-56c8b7be0a5d",
+      "name": "render_error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// RENDER de error del nodo PG_cobranza (P0001 abortar_si_falla o error crudo).\n// La transaccion se revirtio: NADA persistio. Externo: error_interno (allowlist; el gateway\n// impone el mensaje fijo). Un retry con la MISMA idempotency_key es seguro (idempotente).\nreturn [{ json: { ok: false, error: { code: 'error_interno', message: 'error interno' } } }];"
+      },
+      "id": "9cdb9821-46f2-4fcc-9e10-206ca89eee9e",
+      "name": "render_error_pg",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "977e22e4-b67f-4fa2-9e27-89cb37235405",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        880,
+        128
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF_acceso": {
+      "main": [
+        [
+          {
+            "node": "derivar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "render_error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "derivar": {
+      "main": [
+        [
+          {
+            "node": "PG_cobranza",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG_cobranza": {
+      "main": [
+        [
+          {
+            "node": "PG_verif_post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "render_error_pg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG_verif_post": {
+      "main": [
+        [
+          {
+            "node": "render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "render": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "render_error": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "render_error_pg": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
