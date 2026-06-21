@@ -297,57 +297,6 @@ export const payloadHistoricoReservas: PayloadValidator = (payload) => {
   return { ok: true, value: { fecha_desde, fecha_hasta, id_cabana, estado, texto, limit, offset } };
 };
 
-// A25 (Slice 3a) — ingresos.cobrados_periodo (caja percibida, LECTURA). Espejo del paso 9 del
-// wrapper portal-a25-ingresos. Floor 2026-07-01 (D-NEG-02) clampea periodo_desde. periodo_hasta
-// es HIBRIDO: si el cliente lo OMITE, el value NO incluye la clave (el wrapper aplica el default
-// "hoy" sin tratarlo como explicito y SIN check de inversion). Si viene EXPLICITO: YMD valido y,
-// tras el clamp, >= periodo_desde; null/no-string/mal formado/invertido -> payload_invalido. Esto
-// preserva exactamente la semantica del wrapper directo. Reusa isYMD_GW y el floor de Carril B.
-const FLOOR_A25_GW = FLOOR_A24_GW; // mismo floor Carril B (2026-07-01, D-NEG-02)
-export const payloadIngresosPeriodo: PayloadValidator = (payload) => {
-  const bad = (message: string): PayloadValidation => ({ ok: false, message });
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return bad('payload inválido: se esperaba un objeto');
-  const p = payload as Record<string, unknown>;
-  const PERMITIDAS = ['periodo_desde', 'periodo_hasta', 'limit', 'offset'];
-  for (const k of Object.keys(p)) if (!PERMITIDAS.includes(k)) return bad(`clave no permitida en payload: ${k}`);
-
-  // periodo_desde: opcional; YMD; clamp al floor. Default = floor.
-  let periodo_desde = FLOOR_A25_GW;
-  if (p.periodo_desde !== undefined && p.periodo_desde !== null) {
-    if (!isYMD_GW(p.periodo_desde)) return bad('periodo_desde inválida (YYYY-MM-DD)');
-    periodo_desde = (p.periodo_desde as string) < FLOOR_A25_GW ? FLOOR_A25_GW : (p.periodo_desde as string);
-  }
-
-  const value: Record<string, unknown> = { periodo_desde };
-
-  // periodo_hasta: SOLO si la clave esta PRESENTE (explicito). Omitida (undefined) -> NO se
-  // incluye en value (el wrapper defaultea a hoy, sin check). Presente null/no-string/mal
-  // formado -> payload_invalido. Presente valida pero invertida tras el clamp -> payload_invalido.
-  if (p.periodo_hasta !== undefined) {
-    if (!isYMD_GW(p.periodo_hasta)) return bad('periodo_hasta inválida (YYYY-MM-DD)');
-    if ((p.periodo_hasta as string) < periodo_desde) return bad('periodo_hasta no puede ser anterior a periodo_desde');
-    value.periodo_hasta = p.periodo_hasta;
-  }
-
-  // limit: opcional; entero; clamp [1,200]; default 50.
-  let limit = 50;
-  if (p.limit !== undefined && p.limit !== null) {
-    if (typeof p.limit !== 'number' || !Number.isSafeInteger(p.limit)) return bad('limit debe ser un entero');
-    limit = Math.min(Math.max(p.limit, 1), 200);
-  }
-  value.limit = limit;
-
-  // offset: opcional; entero >= 0; default 0.
-  let offset = 0;
-  if (p.offset !== undefined && p.offset !== null) {
-    if (typeof p.offset !== 'number' || !Number.isSafeInteger(p.offset) || p.offset < 0) return bad('offset debe ser un entero >= 0');
-    offset = p.offset;
-  }
-  value.offset = offset;
-
-  return { ok: true, value };
-};
-
 // Coherencia rol↔actor (server-side, ANTES de firmar): el rol gobierna la allowlist;
 // el actor (persona) gobierna validado_por/created_by aguas abajo (D-C-22). vicky es
 // rol y persona; socio agrupa a franco/rodrigo/remo. jenny no llega (rebota por rol).
@@ -399,13 +348,6 @@ const CATALOG: Record<string, CatalogEntry> = {
   // injectActor, sin isWrite. Floor inferior duro; puede incluir futuras; NO liquidación ni
   // Carril B; NO reemplaza A04. El key DEBE coincidir con EXPECTED_ACTION del wrapper (D-C-41).
   'historico.reservas': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a24-historico-reservas', validate: payloadHistoricoReservas },
-  // A25 (Slice 3a) — Caja percibida por periodo (ingresos cobrados). Wrapper n8n firmado
-  // (portal-a25-ingresos). SOLO vicky/socio (D-C-27): jenny excluida, rebota con
-  // rol_no_permitido EN EL GATEWAY antes de firmar. validate: payloadIngresosPeriodo, que
-  // PRESERVA la ausencia de periodo_hasta (omitido NO va en value -> el wrapper defaultea a
-  // hoy sin check de inversion; explicito -> YMD y, tras el clamp al floor, >= periodo_desde).
-  // LECTURA: sin injectActor, sin isWrite. El key DEBE coincidir con EXPECTED_ACTION (D-C-41).
-  'ingresos.cobrados_periodo': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a25-ingresos', validate: payloadIngresosPeriodo },
   // A07 (Slice 2) — Crear reserva manual. PRIMERA ESCRITURA vía gateway. Wrapper n8n
   // firmado (portal-a07-crear-reserva__TEST). SOLO vicky/socio (D-C-39): jenny rebota
   // con rol_no_permitido EN EL GATEWAY antes de firmar. validate: payloadCrearManual

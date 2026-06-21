@@ -1,0 +1,254 @@
+{
+  "name": "portal-a25-ingresos",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a25-ingresos",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "3d14f58c-2d66-4a14-8037-0708bfe3e02e",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a25-ingresos — validar_firma_ts_rol.\n// Recomputa HMAC-SHA256 sobre los bytes EXACTOS (D-C-29). Revalida ts (300s), rol\n// (allowlist, D-C-39), action binding (D-C-41) y -A25- el payload de periodo (2da defensa).\nconst crypto = require('crypto');\n\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado en n8n Variables; abortando (assert duro).');\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\nfunction rej(motivo, b) {\n  return [{ json: { ok_firma: false, motivo,\n    ambiente_esperado: (b && b.ambiente_esperado) ?? null,\n    rol: (b && b.rol) ?? null, action: (b && b.action) ?? null,\n    ts: (b && b.ts) ?? null, payload_norm: null } }];\n}\n\n// 1) Raw body como Buffer EXACTO. Prioridad: binario 'data'. Fallback: wh.rawBody (L-C-05).\nlet buf = null;\ntry {\n  if (item.binary && item.binary.data) {\n    buf = await this.helpers.getBinaryDataBuffer(0, 'data');\n  }\n} catch (e) {\n  buf = null;\n}\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) return rej('raw_body_ausente', null);\n\n// 2) Firma del header.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\n\n// 3) HMAC recomputado sobre los MISMOS bytes.\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\n\n// 4) Comparacion timing-safe.\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(sigHeader);\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) {\n  firmaOk = false;\n}\nif (!firmaOk) return rej('firma_invalida', null);\n\n// 5) Parseo (firma ya validada sobre bytes crudos).\nlet body;\ntry {\n  body = JSON.parse(buf.toString('utf8'));\n} catch (e) {\n  return rej('payload_invalido', null);\n}\n\n// 6) Ventana de ts (D-C-29): |now - ts| <= 300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) {\n  return rej('ts_fuera_de_ventana', { ...body, ts: body.ts });\n}\nbody.ts = ts;\n\n// 7) Allowlist de rol (D-C-39). A25 = vicky/socio (sin jenny, D-C-03/27).\nconst ROLES_OK = ['vicky', 'socio'];\nif (!ROLES_OK.includes(body.rol)) return rej('rol_no_permitido', body);\n\n// 8) Action binding (D-C-41): EXPECTED_ACTION = ingresos.cobrados_periodo (A25).\nconst EXPECTED_ACTION = 'ingresos.cobrados_periodo';\nif (body.action !== EXPECTED_ACTION) return rej('accion_desconocida', body);\n\n// 9) Payload A25. Reject-unknown + normalizacion. Floor 2026-07-01 (D-NEG-02) clampea\n//    periodo_desde (el SQL ademas lo impone con GREATEST). periodo_hasta HIBRIDO:\n//      - OMITIDO -> hoy (CURRENT_DATE). SIN check de inversion: con floor futuro queda\n//        periodo_desde>periodo_hasta -> la query devuelve vacio con ok:true (totales 0).\n//      - EXPLICITO -> YMD y, tras el clamp, >= periodo_desde; sino payload_invalido.\nconst FLOOR = '2026-07-01';\nconst PERMITIDAS = ['periodo_desde', 'periodo_hasta', 'limit', 'offset'];\n\nlet pl = {};\nif (body.payload === undefined || body.payload === null) {\n  pl = {};\n} else if (typeof body.payload === 'object' && !Array.isArray(body.payload)) {\n  pl = body.payload;\n} else {\n  return rej('payload_invalido', body);\n}\nfor (const k of Object.keys(pl)) {\n  if (!PERMITIDAS.includes(k)) return rej('payload_invalido', body);\n}\n\nfunction isYMD(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const Y = +s.slice(0, 4), M = +s.slice(5, 7), D = +s.slice(8, 10);\n  if (M < 1 || M > 12 || D < 1 || D > 31) return false;\n  const dt = new Date(Date.UTC(Y, M - 1, D));\n  return dt.getUTCFullYear() === Y && dt.getUTCMonth() === M - 1 && dt.getUTCDate() === D;\n}\nfunction todayYMD() { return new Date().toISOString().slice(0, 10); }\n\n// periodo_desde: opcional; YMD; clamp al floor. Default = floor.\nlet periodo_desde = FLOOR;\nif (pl.periodo_desde !== undefined && pl.periodo_desde !== null) {\n  if (!isYMD(pl.periodo_desde)) return rej('payload_invalido', body);\n  periodo_desde = (pl.periodo_desde < FLOOR) ? FLOOR : pl.periodo_desde;\n}\n\n// periodo_hasta: hibrido (ver arriba).\nlet periodo_hasta;\nconst hastaExplicito = (pl.periodo_hasta !== undefined && pl.periodo_hasta !== null);\nif (hastaExplicito) {\n  if (!isYMD(pl.periodo_hasta)) return rej('payload_invalido', body);\n  if (pl.periodo_hasta < periodo_desde) return rej('payload_invalido', body); // inversion explicita\n  periodo_hasta = pl.periodo_hasta;\n} else {\n  periodo_hasta = todayYMD(); // floor futuro -> periodo_desde>periodo_hasta -> vacio OK\n}\n\n// limit: opcional; entero; clamp [1,200]; default 50.\nlet limit = 50;\nif (pl.limit !== undefined && pl.limit !== null) {\n  if (typeof pl.limit !== 'number' || !Number.isSafeInteger(pl.limit)) return rej('payload_invalido', body);\n  limit = Math.min(Math.max(pl.limit, 1), 200);\n}\n\n// offset: opcional; entero >= 0; default 0.\nlet offset = 0;\nif (pl.offset !== undefined && pl.offset !== null) {\n  if (typeof pl.offset !== 'number' || !Number.isSafeInteger(pl.offset) || pl.offset < 0) return rej('payload_invalido', body);\n  offset = pl.offset;\n}\n\nconst payload_norm = { periodo_desde, periodo_hasta, limit, offset };\n\nreturn [{ json: { ok_firma: true, motivo: null,\n  ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null,\n  action: body.action ?? null, ts, payload_norm } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "bb5e918b-564e-49f4-93d4-9c0c3ce546db",
+      "name": "validar_firma_ts_rol"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "id": "e6c9a2cc-c6a3-4335-9773-8e5fde281efe",
+      "name": "leer_ambiente",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a25-ingresos — verificar_acceso. Compara ambiente y arma el envelope de rechazo\n// (D-C-18/35). En exito marca {ok:true}; el envelope final de exito lo arma el render.\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\n\nfunction envErr(code, message, detail) {\n  return [{ json: { ok: false, error: { code, message, detail: detail ?? null } } }];\n}\n\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'payload invalido (periodo mal formado, inversion explicita o clave no permitida)',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\n\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\n\nreturn [{ json: { ok: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "a1369ca5-91f0-4b8e-a550-761e6c5e021a",
+      "name": "verificar_acceso"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1cd8471-2010-47a4-9e87-f17d55a6bf5a",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "4c9298a7-a3a0-4bc8-ab58-79cefa84c6ab",
+      "name": "IF acceso"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH reserva_por_prereserva AS (\n  SELECT id_pre_reserva, MIN(id_reserva) AS id_reserva\n  FROM reservas\n  WHERE id_pre_reserva IS NOT NULL\n  GROUP BY id_pre_reserva\n),\npagos_periodo AS (\n  SELECT p.id_pago, p.tipo, p.medio_pago, p.monto_recibido, p.created_at, p.validado_en,\n         COALESCE(p.id_reserva, rpp.id_reserva) AS id_reserva\n  FROM pagos p\n  LEFT JOIN reserva_por_prereserva rpp ON rpp.id_pre_reserva = p.id_prereserva\n  WHERE p.estado = 'confirmado'\n    AND p.tipo IN ('sena','saldo','extra','ajuste','reembolso')\n    -- FLOOR DURO (D-NEG-02): nunca antes de 2026-07-01, aunque periodo_desde venga menor.\n    AND p.created_at >= GREATEST(DATE '2026-07-01', (($1::jsonb)->>'periodo_desde')::date)\n    -- periodo_hasta INCLUSIVO: half-open al dia siguiente.\n    AND p.created_at <  ((($1::jsonb)->>'periodo_hasta')::date + 1)\n)\nSELECT\n  pp.id_pago,\n  pp.id_reserva,\n  c.nombre AS cabana,\n  pp.tipo,\n  pp.medio_pago,\n  pp.monto_recibido,\n  -- mes: criterio Carril B vigente sobre created_at, sin conversion adicional (sin AT TIME ZONE).\n  to_char(date_trunc('month', pp.created_at), 'YYYY-MM') AS mes,\n  pp.created_at,\n  pp.validado_en\nFROM pagos_periodo pp\nLEFT JOIN reservas r ON r.id_reserva = pp.id_reserva\nLEFT JOIN cabanas  c ON c.id_cabana  = r.id_cabana\nORDER BY pp.created_at, pp.id_pago;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($('validar_firma_ts_rol').first().json.payload_norm) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -150
+      ],
+      "id": "f2ab44fc-dae1-4f58-8aec-a216827a4888",
+      "name": "PG: leer ingresos",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== portal-a25-ingresos — render JSON (caja percibida) =====\n// total_cobrado = SOLO sena+saldo confirmados (D-9G-03). otros_movimientos (extra/ajuste/\n// reembolso) INFORMATIVO: no suma, no neto, no cascada, no matriz, no reabre Carril B (D-C-27).\n// Suma sobre pagos (incluye residuo); cabana por LEFT JOIN (null en residuo). Montos sumados\n// en CENTAVOS (sin float drift). filas paginadas (sena+saldo); total = cantidad de pagos\n// sena+saldo (pager). IDs BIGINT -> numero (C2). Periodo vacio -> totales 0, arrays [], ok:true.\nfunction safeAll(nodeName, keyField) {\n  try {\n    const items = $(nodeName).all();\n    const failed = items.some(it => it && it.json && (it.json.error || it.error));\n    if (failed) return { ok: false, rows: [] };\n    const rows = items.map(it => it.json).filter(j => j && j[keyField] !== undefined && j[keyField] !== null);\n    return { ok: true, rows };\n  } catch (e) { return { ok: false, rows: [] }; }\n}\nfunction num(v) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; }\nfunction int0(v) { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : 0; }\nfunction centsOf(v) { const n = Number(v); return Number.isFinite(n) ? Math.round(n * 100) : 0; }\n\nconst r = safeAll('PG: leer ingresos', 'id_pago');\nif (!r.ok) {\n  return [{ json: { ok: false, error: { code: 'error_interno', message: 'no se pudo cargar los ingresos', detail: null } } }];\n}\n\nconst pn = $('validar_firma_ts_rol').first().json.payload_norm || {};\nconst limit = int0(pn.limit);\nconst offset = int0(pn.offset);\n\nconst esCaja = (t) => t === 'sena' || t === 'saldo';\nconst esOtro = (t) => t === 'extra' || t === 'ajuste' || t === 'reembolso';\nconst caja = r.rows.filter(x => esCaja(x.tipo));\nconst otros = r.rows.filter(x => esOtro(x.tipo));\n\nfunction agrupar(rows, key) {\n  const m = new Map();\n  for (const x of rows) {\n    const k = x[key];\n    const cur = m.get(k) || { c: 0, n: 0 };\n    cur.c += centsOf(x.monto_recibido);\n    cur.n += 1;\n    m.set(k, cur);\n  }\n  return m;\n}\nfunction salida(m, keyName) {\n  const out = [];\n  for (const [k, v] of m) out.push({ [keyName]: k, monto: v.c / 100, n: v.n });\n  return out;\n}\n\nlet totalC = 0;\nfor (const x of caja) totalC += centsOf(x.monto_recibido);\nconst total_cobrado = totalC / 100;\nconst total = caja.length;\n\nconst por_tipo  = salida(agrupar(caja, 'tipo'), 'tipo');\nconst por_medio = salida(agrupar(caja, 'medio_pago'), 'medio_pago');\nconst por_mes   = salida(agrupar(caja, 'mes'), 'mes');\nconst otros_por_tipo = salida(agrupar(otros, 'tipo'), 'tipo');\n\nconst filasAll = caja.map(x => ({\n  id_pago: int0(x.id_pago),\n  id_reserva: (x.id_reserva !== null && x.id_reserva !== undefined) ? int0(x.id_reserva) : null,\n  cabana: x.cabana ?? null,\n  tipo: x.tipo,\n  medio_pago: x.medio_pago,\n  monto: num(x.monto_recibido),\n  created_at: x.created_at,\n  validado_en: x.validado_en ?? null\n}));\nconst filas = filasAll.slice(offset, offset + limit);\n\nreturn [{ json: { ok: true, data: {\n  periodo_desde: pn.periodo_desde ?? null,\n  periodo_hasta: pn.periodo_hasta ?? null,\n  total_cobrado,\n  total,\n  por_tipo,\n  por_medio,\n  por_mes,\n  otros_movimientos: { por_tipo: otros_por_tipo },\n  filas,\n  limit,\n  offset\n} } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -150
+      ],
+      "id": "d40e41c4-edd5-4e23-880f-b2a53a5b8ff9",
+      "name": "Code: render envelope"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        0
+      ],
+      "id": "f2135d4a-c006-4247-a98d-0687d7be35c2",
+      "name": "Respond"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF acceso": {
+      "main": [
+        [
+          {
+            "node": "PG: leer ingresos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer ingresos": {
+      "main": [
+        [
+          {
+            "node": "Code: render envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: render envelope": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}

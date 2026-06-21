@@ -131,12 +131,13 @@ ORDER BY p.tipo, p.estado;
 
 -- ===========================================================================
 -- S8 -- A25 / CAJA PERCIBIDA (D-9G-03): reproduce el criterio del Carril B
---       (mes calendario de created_at, sena+saldo CONFIRMADOS) para que A25
---       quede byte-alineado con la step 1 de 9G. Tambien aisla 'extra' aparte.
---       ASI DEBE LUCIR el headline de A25; comparar contra 9G_CIERRE si hay dudas.
+--       (mes calendario de created_at, sena+saldo CONFIRMADOS). Muestra TODOS los
+--       meses (incluido pre-julio) con flag de scope: A25 SOLO devuelve los meses
+--       con dentro_floor_a25 = true (floor D-NEG-02). Comparar contra 9G_CIERRE.
 -- ===========================================================================
 SELECT
   date_trunc('month', p.created_at)                                              AS mes,
+  (date_trunc('month', p.created_at) >= DATE '2026-07-01')                       AS dentro_floor_a25,
   SUM(p.monto_recibido) FILTER (WHERE p.tipo IN ('sena','saldo'))                AS ingreso_operativo,
   COUNT(*)              FILTER (WHERE p.tipo IN ('sena','saldo'))                AS n_pagos_operativos,
   SUM(p.monto_recibido) FILTER (WHERE p.tipo = 'extra')                          AS extras_recargos,
@@ -149,8 +150,9 @@ ORDER BY 1;
 
 
 -- ===========================================================================
--- S9 -- A25 / DESGLOSE por medio_pago (caja percibida, sena+saldo confirmados).
---       Valida el contrato 'por_medio' de A25 y que la suma cuadre con S8.
+-- S9 -- A25 / DESGLOSE por medio_pago, CON FLOOR APLICADO (created_at >= 2026-07-01).
+--       Esto es lo que A25 devuelve realmente: pre-julio se recorta, no se rechaza.
+--       Valida el contrato 'por_medio' y que la suma cuadre con el headline floored.
 -- ===========================================================================
 SELECT
   date_trunc('month', p.created_at)  AS mes,
@@ -159,7 +161,9 @@ SELECT
   COUNT(*)                           AS n
 FROM pagos p
 JOIN configuracion_general cg ON cg.clave = 'ambiente' AND cg.valor = 'test'
-WHERE p.estado = 'confirmado' AND p.tipo IN ('sena','saldo')
+WHERE p.estado = 'confirmado'
+  AND p.tipo IN ('sena','saldo')
+  AND p.created_at >= DATE '2026-07-01'   -- FLOOR D-NEG-02 (recorta, no rechaza)
 GROUP BY 1, p.medio_pago
 ORDER BY 1, p.medio_pago;
 
@@ -186,18 +190,23 @@ JOIN configuracion_general cg ON cg.clave = 'ambiente' AND cg.valor = 'test';
 WITH gate AS (
   SELECT 1 FROM configuracion_general WHERE clave = 'ambiente' AND valor = 'test'
 ),
+-- CTE de mapeo desde RESERVAS (NO desde pagos): reservas.id_pre_reserva -> id_reserva.
+-- Sale de reservas para no perder senas asociadas SOLO por pre-reserva (D-C-49); si
+-- saliera de pagos con id_reserva IS NOT NULL, esas senas no se atribuirian y saldo_real
+-- quedaria inflado. OJO naming: reservas.id_pre_reserva (CON guiones) vs pagos.id_prereserva
+-- (SIN guiones); ambas referencian pre_reservas.id_pre_reserva.
 reserva_por_prereserva AS (
-  SELECT id_prereserva, MIN(id_reserva) AS id_reserva
-  FROM pagos
-  WHERE id_prereserva IS NOT NULL AND id_reserva IS NOT NULL
-  GROUP BY id_prereserva
+  SELECT id_pre_reserva, MIN(id_reserva) AS id_reserva
+  FROM reservas
+  WHERE id_pre_reserva IS NOT NULL
+  GROUP BY id_pre_reserva
 ),
 pagos_norm AS (
   SELECT
     COALESCE(p.id_reserva, rpp.id_reserva) AS id_reserva,
     p.monto_recibido, p.tipo, p.estado
   FROM pagos p
-  LEFT JOIN reserva_por_prereserva rpp ON rpp.id_prereserva = p.id_prereserva
+  LEFT JOIN reserva_por_prereserva rpp ON rpp.id_pre_reserva = p.id_prereserva
 )
 SELECT
   r.id_reserva,
