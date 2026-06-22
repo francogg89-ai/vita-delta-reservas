@@ -214,7 +214,7 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
 - **P-C-6** — Contabilidad societaria lectura (A14–A18) y escritura (A19–A23): fases posteriores, solo `socio`; arrancan con la operación de julio.
 - **P-C-7** — **CORS de `portal-api`:** hoy abierto (`*`) en Slice 0; **restringir al origin real** del Portal Operativo antes de exponerlo. No bloqueante para TEST.
 - **P-C-8** — **Secreto HMAC de OPS:** generar `VITA_HMAC_SECRET` propio de OPS (distinto del de TEST) en la promoción del portal a OPS; mismo nombre de variable, valor distinto por entorno (D-C-33). El de TEST se rotó 2026-06-16.
-- **P-C-9** — **Store anti-replay de `nonce`:** en Slice 0 alcanza la ventana `ts` ±300 s; agregar tabla de unicidad de `nonce` al entrar la **primera escritura no-idempotente sin guard** sobre n8n (realísticamente A11) (D-C-29).
+- **P-C-9** — **Store anti-replay de `nonce`:** en Slice 0 alcanza la ventana `ts` ±300 s; agregar tabla de unicidad de `nonce` al entrar la **primera escritura no-idempotente sin guard** sobre n8n (realísticamente A11) (D-C-29). **✅ RESUELTO EN TEST para Carril C.** No queda gap de diseño; su aplicación en OPS viaja dentro de la promoción coordinada. (Slice 3b — A11 lo materializa con `UNIQUE(nonce)` en `portal_idempotencia`, infra TEST-only fuera del canónico; `C_SLICE3B_CIERRE.md`.)
 - **P-C-10** — **Rol Postgres dedicado de mínimos** para el lookup de `portal_usuarios`, en lugar de `service_role`, como endurecimiento posterior. No bloqueante.
 - **P-C-11** — **Edge Functions por Dashboard:** el toggle "Verify JWT with legacy secret" se reactiva en cada redeploy desde el editor (L-C-06); migrar `portal-api` a CLI + `config.toml` (`verify_jwt=false`) si los redeploys se vuelven frecuentes.
 

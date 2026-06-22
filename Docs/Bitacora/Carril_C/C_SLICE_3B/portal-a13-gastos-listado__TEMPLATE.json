@@ -1,0 +1,254 @@
+{
+  "name": "portal-a13-gastos-listado",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a13-gastos-listado",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "2ea5d017-81e5-43af-b2ed-3b3a2ff081a8",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a13-gastos-listado — validar_firma_ts_rol.\n// Recomputa HMAC-SHA256 sobre los bytes EXACTOS (D-C-29). Revalida ts (300s), rol\n// (allowlist, D-C-39), action binding (D-C-41) y -A13- el payload de gastos.listado.\nconst crypto = require('crypto');\n\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado en n8n Variables; abortando (assert duro).');\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\nfunction rej(motivo, b) {\n  return [{ json: { ok_firma: false, motivo,\n    ambiente_esperado: (b && b.ambiente_esperado) ?? null,\n    rol: (b && b.rol) ?? null, action: (b && b.action) ?? null,\n    ts: (b && b.ts) ?? null, payload_norm: null } }];\n}\n\n// 1) Raw body como Buffer EXACTO. Prioridad: binario 'data'. Fallback: wh.rawBody (L-C-05).\nlet buf = null;\ntry {\n  if (item.binary && item.binary.data) {\n    buf = await this.helpers.getBinaryDataBuffer(0, 'data');\n  }\n} catch (e) {\n  buf = null;\n}\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) return rej('raw_body_ausente', null);\n\n// 2) Firma del header.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\n\n// 3) HMAC recomputado sobre los MISMOS bytes.\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\n\n// 4) Comparacion timing-safe.\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(sigHeader);\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) {\n  firmaOk = false;\n}\nif (!firmaOk) return rej('firma_invalida', null);\n\n// 5) Parseo (firma ya validada sobre bytes crudos).\nlet body;\ntry {\n  body = JSON.parse(buf.toString('utf8'));\n} catch (e) {\n  return rej('payload_invalido', null);\n}\n\n// 6) Ventana de ts (D-C-29): |now - ts| <= 300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) {\n  return rej('ts_fuera_de_ventana', { ...body, ts: body.ts });\n}\nbody.ts = ts;\n\n// 7) Allowlist de rol (D-C-39). A13 = vicky/socio (sin jenny, D-C-03).\nconst ROLES_OK = ['vicky', 'socio'];\nif (!ROLES_OK.includes(body.rol)) return rej('rol_no_permitido', body);\n\n// 8) Action binding (D-C-41): EXPECTED_ACTION = gastos.listado (A13).\nconst EXPECTED_ACTION = 'gastos.listado';\nif (body.action !== EXPECTED_ACTION) return rej('accion_desconocida', body);\n\n// 9) Payload A13. Reject-unknown + normalizacion.\n//    Eje = periodo CONTABLE (dia 1). periodo_desde/periodo_hasta se TRUNCAN a primer dia\n//    de mes (D1): un borde a mitad de mes incluye el mes completo. Floor 2026-07-01\n//    (D-NEG-02) clampea periodo_desde (el SQL ademas lo impone con GREATEST).\n//    periodo_hasta HIBRIDO:\n//      - OMITIDO -> mes actual (primer dia del mes de hoy). SIN check de inversion: con\n//        floor futuro queda periodo_desde>periodo_hasta -> la query devuelve vacio ok:true.\n//      - EXPLICITO -> YMD valido y, truncado y tras el clamp, >= periodo_desde; sino payload_invalido.\n//    Filtros opcionales (ausente/null = sin filtro, sin sentinela): clase {A,C,D,E},\n//    id_zona/id_cabana (entero seguro >0), pagador_tipo {socio,caja}, q (string 1..120, ILIKE).\nconst FLOOR = '2026-07-01';\nconst PERMITIDAS = ['periodo_desde', 'periodo_hasta', 'clase', 'id_zona', 'id_cabana', 'pagador_tipo', 'q', 'limit', 'offset'];\n\nlet pl = {};\nif (body.payload === undefined || body.payload === null) {\n  pl = {};\n} else if (typeof body.payload === 'object' && !Array.isArray(body.payload)) {\n  pl = body.payload;\n} else {\n  return rej('payload_invalido', body);\n}\nfor (const k of Object.keys(pl)) {\n  if (!PERMITIDAS.includes(k)) return rej('payload_invalido', body);\n}\n\nfunction isYMD(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const Y = +s.slice(0, 4), M = +s.slice(5, 7), D = +s.slice(8, 10);\n  if (M < 1 || M > 12 || D < 1 || D > 31) return false;\n  const dt = new Date(Date.UTC(Y, M - 1, D));\n  return dt.getUTCFullYear() === Y && dt.getUTCMonth() === M - 1 && dt.getUTCDate() === D;\n}\nfunction firstOfMonth(s) { return s.slice(0, 8) + '01'; }            // YYYY-MM-01 (D1)\nfunction thisMonthYMD() { return new Date().toISOString().slice(0, 8) + '01'; }\n\n// periodo_desde: opcional; YMD; truncado a mes; clamp al floor. Default = floor (ya dia 1).\nlet periodo_desde = FLOOR;\nif (pl.periodo_desde !== undefined && pl.periodo_desde !== null) {\n  if (!isYMD(pl.periodo_desde)) return rej('payload_invalido', body);\n  const d1 = firstOfMonth(pl.periodo_desde);\n  periodo_desde = (d1 < FLOOR) ? FLOOR : d1;\n}\n\n// periodo_hasta: hibrido. Truncado a mes. Inversion solo si EXPLICITO (a nivel mes).\nlet periodo_hasta;\nconst hastaExplicito = (pl.periodo_hasta !== undefined && pl.periodo_hasta !== null);\nif (hastaExplicito) {\n  if (!isYMD(pl.periodo_hasta)) return rej('payload_invalido', body);\n  const h1 = firstOfMonth(pl.periodo_hasta);\n  if (h1 < periodo_desde) return rej('payload_invalido', body); // inversion explicita\n  periodo_hasta = h1;\n} else {\n  periodo_hasta = thisMonthYMD(); // floor futuro -> periodo_desde>periodo_hasta -> vacio OK\n}\n\n// clase: opcional; enum {A,C,D,E}. Ausente/null = sin filtro.\nconst CLASES_OK = ['A', 'C', 'D', 'E'];\nlet clase;\nif (pl.clase !== undefined && pl.clase !== null) {\n  if (typeof pl.clase !== 'string' || !CLASES_OK.includes(pl.clase)) return rej('payload_invalido', body);\n  clase = pl.clase;\n}\n\n// id_zona / id_cabana: opcional; entero seguro > 0. Ausente/null = sin filtro.\nfunction idOpt(v) {\n  if (v === undefined || v === null) return undefined;                 // sin filtro\n  if (typeof v !== 'number' || !Number.isSafeInteger(v) || v <= 0) return null; // invalido\n  return v;\n}\nconst id_zona = idOpt(pl.id_zona);\nif (id_zona === null) return rej('payload_invalido', body);\nconst id_cabana = idOpt(pl.id_cabana);\nif (id_cabana === null) return rej('payload_invalido', body);\n\n// pagador_tipo: opcional; enum {socio,caja}. Ausente/null = sin filtro.\nconst PAGADOR_OK = ['socio', 'caja'];\nlet pagador_tipo;\nif (pl.pagador_tipo !== undefined && pl.pagador_tipo !== null) {\n  if (typeof pl.pagador_tipo !== 'string' || !PAGADOR_OK.includes(pl.pagador_tipo)) return rej('payload_invalido', body);\n  pagador_tipo = pl.pagador_tipo;\n}\n\n// q: opcional; string trim 1..120. Ausente/null = sin filtro. Vacio/oversized -> payload_invalido.\nlet q;\nif (pl.q !== undefined && pl.q !== null) {\n  if (typeof pl.q !== 'string') return rej('payload_invalido', body);\n  const qt = pl.q.trim();\n  if (qt.length < 1 || qt.length > 120) return rej('payload_invalido', body);\n  q = qt;\n}\n\n// limit: opcional; entero; clamp [1,200]; default 50.\nlet limit = 50;\nif (pl.limit !== undefined && pl.limit !== null) {\n  if (typeof pl.limit !== 'number' || !Number.isSafeInteger(pl.limit)) return rej('payload_invalido', body);\n  limit = Math.min(Math.max(pl.limit, 1), 200);\n}\n\n// offset: opcional; entero >= 0; default 0.\nlet offset = 0;\nif (pl.offset !== undefined && pl.offset !== null) {\n  if (typeof pl.offset !== 'number' || !Number.isSafeInteger(pl.offset) || pl.offset < 0) return rej('payload_invalido', body);\n  offset = pl.offset;\n}\n\n// payload_norm: los filtros presentes se incluyen; los ausentes NO van (el SQL usa IS NULL).\nconst payload_norm = { periodo_desde, periodo_hasta, limit, offset };\nif (clase !== undefined) payload_norm.clase = clase;\nif (id_zona !== undefined) payload_norm.id_zona = id_zona;\nif (id_cabana !== undefined) payload_norm.id_cabana = id_cabana;\nif (pagador_tipo !== undefined) payload_norm.pagador_tipo = pagador_tipo;\nif (q !== undefined) payload_norm.q = q;\n\nreturn [{ json: { ok_firma: true, motivo: null,\n  ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null,\n  action: body.action ?? null, ts, payload_norm } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "c94b44df-efe3-4775-9099-c27797c1c8f7",
+      "name": "validar_firma_ts_rol"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "id": "795b48fa-af4e-4907-b511-974efc7e9e2f",
+      "name": "leer_ambiente",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a13-gastos-listado — verificar_acceso. Compara ambiente y arma el envelope de\n// rechazo (D-C-18/35). En exito marca {ok:true}; el envelope final de exito lo arma el render.\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\n\nfunction envErr(code, message, detail) {\n  return [{ json: { ok: false, error: { code, message, detail: detail ?? null } } }];\n}\n\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'payload invalido (periodo/filtro mal formado, inversion explicita o clave no permitida)',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\n\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\n\nreturn [{ json: { ok: true } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "c35ded5a-2642-40d8-8db5-d98f87f8d471",
+      "name": "verificar_acceso"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1cd8471-2010-47a4-9e87-f17d55a6bf5a",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "a1699e20-d963-408e-b652-4eb604d9ebe8",
+      "name": "IF acceso"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  g.id_gasto, g.periodo, g.fecha, g.clase, g.clase_sugerida, g.etiqueta,\n  g.monto, g.moneda, g.pagador_tipo, g.id_socio_pagador, s.nombre AS socio_pagador_nombre,\n  g.id_zona, z.nombre AS zona, g.id_cabana, c.nombre AS cabana,\n  g.medio_pago, g.comentario, g.comprobante_url, g.creado_por, g.created_at\nFROM gastos_internos g\nLEFT JOIN socios   s ON s.id_socio  = g.id_socio_pagador\nLEFT JOIN zonas    z ON z.id_zona   = g.id_zona\nLEFT JOIN cabanas  c ON c.id_cabana = g.id_cabana\nWHERE g.periodo >= GREATEST(DATE '2026-07-01', ($1::jsonb->>'periodo_desde')::date)\n  AND g.periodo <= ($1::jsonb->>'periodo_hasta')::date\n  AND (($1::jsonb->>'clase')        IS NULL OR g.clase        = ($1::jsonb->>'clase'))\n  AND (($1::jsonb->>'id_zona')      IS NULL OR g.id_zona      = ($1::jsonb->>'id_zona')::int)\n  AND (($1::jsonb->>'id_cabana')    IS NULL OR g.id_cabana    = ($1::jsonb->>'id_cabana')::int)\n  AND (($1::jsonb->>'pagador_tipo') IS NULL OR g.pagador_tipo = ($1::jsonb->>'pagador_tipo'))\n  AND (($1::jsonb->>'q')            IS NULL\n       OR g.etiqueta                ILIKE '%' || ($1::jsonb->>'q') || '%'\n       OR COALESCE(g.comentario,'') ILIKE '%' || ($1::jsonb->>'q') || '%')\nORDER BY g.periodo, g.id_gasto;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($('validar_firma_ts_rol').first().json.payload_norm) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -150
+      ],
+      "id": "43760104-8804-46cd-a09e-33a6f773fbeb",
+      "name": "PG: leer gastos",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== portal-a13-gastos-listado — render JSON (gastos por periodo) =====\n// total_gastos = SUM(monto) sobre el universo FILTRADO COMPLETO, en CENTAVOS (sin float drift).\n// por_clase = [{clase, monto, n}] sobre el universo completo (NO solo la pagina). filas paginadas.\n// IDs BIGINT -> numero (L-C-19). Universo vacio -> total 0, por_clase [], filas [], ok:true.\n// NOTA: los agregados monetarios asumen moneda homogenea del sistema operativo MVP.\nfunction safeAll(nodeName, keyField) {\n  try {\n    const items = $(nodeName).all();\n    const failed = items.some(it => it && it.json && (it.json.error || it.error));\n    if (failed) return { ok: false, rows: [] };\n    const rows = items.map(it => it.json).filter(j => j && j[keyField] !== undefined && j[keyField] !== null);\n    return { ok: true, rows };\n  } catch (e) { return { ok: false, rows: [] }; }\n}\nfunction num(v) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; }\nfunction int0(v) { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : 0; }\nfunction intN(v) { if (v === null || v === undefined) return null; const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; }\nfunction centsOf(v) { const n = Number(v); return Number.isFinite(n) ? Math.round(n * 100) : 0; }\n\nconst r = safeAll('PG: leer gastos', 'id_gasto');\nif (!r.ok) {\n  return [{ json: { ok: false, error: { code: 'error_interno', message: 'no se pudo cargar los gastos', detail: null } } }];\n}\n\nconst pn = $('validar_firma_ts_rol').first().json.payload_norm || {};\nconst limit = int0(pn.limit);\nconst offset = int0(pn.offset);\n\n// total_gastos (centavos) sobre el universo completo.\nlet totalC = 0;\nfor (const x of r.rows) totalC += centsOf(x.monto);\nconst total_gastos = totalC / 100;\n\n// por_clase sobre el universo completo: [{clase, monto, n}].\nconst m = new Map();\nfor (const x of r.rows) {\n  const k = x.clase;\n  const cur = m.get(k) || { c: 0, n: 0 };\n  cur.c += centsOf(x.monto);\n  cur.n += 1;\n  m.set(k, cur);\n}\nconst por_clase = [];\nfor (const [k, v] of m) por_clase.push({ clase: k, monto: v.c / 100, n: v.n });\n\n// filas paginadas, columnas lockeadas (20). BIGINT -> numero; opcionales null-safe.\nconst filasAll = r.rows.map(x => ({\n  id_gasto: int0(x.id_gasto),\n  periodo: x.periodo,\n  fecha: x.fecha,\n  clase: x.clase,\n  clase_sugerida: x.clase_sugerida ?? null,\n  etiqueta: x.etiqueta,\n  monto: num(x.monto),\n  moneda: x.moneda ?? null,\n  pagador_tipo: x.pagador_tipo,\n  id_socio_pagador: intN(x.id_socio_pagador),\n  socio_pagador_nombre: x.socio_pagador_nombre ?? null,\n  id_zona: intN(x.id_zona),\n  zona: x.zona ?? null,\n  id_cabana: intN(x.id_cabana),\n  cabana: x.cabana ?? null,\n  medio_pago: x.medio_pago ?? null,\n  comentario: x.comentario ?? null,\n  comprobante_url: x.comprobante_url ?? null,\n  creado_por: x.creado_por,\n  created_at: x.created_at\n}));\nconst filas = filasAll.slice(offset, offset + limit);\n\nreturn [{ json: { ok: true, data: {\n  periodo_desde: pn.periodo_desde ?? null,\n  periodo_hasta: pn.periodo_hasta ?? null,\n  total_gastos,\n  por_clase,\n  filas,\n  limit,\n  offset\n} } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -150
+      ],
+      "id": "a4c7cadc-b9bd-4887-9bf9-d4b92a8a18cd",
+      "name": "Code: render envelope"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        0
+      ],
+      "id": "ccf67cd4-1216-4d49-a532-fdb067e1ae33",
+      "name": "Respond"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF acceso": {
+      "main": [
+        [
+          {
+            "node": "PG: leer gastos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: render envelope": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer gastos": {
+      "main": [
+        [
+          {
+            "node": "Code: render envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}

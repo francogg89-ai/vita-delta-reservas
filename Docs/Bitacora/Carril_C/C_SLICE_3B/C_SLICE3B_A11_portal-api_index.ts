@@ -415,107 +415,6 @@ export const payloadCargarGastoInterno: PayloadValidator = (payload) => {
   return { ok: true, value };
 };
 
-// A13 (Slice 3b) -- gastos.listado (gastos internos por periodo contable, LECTURA; companion de A11).
-// ESPEJO del paso 9 del wrapper portal-a13-gastos-listado (verdad de referencia de A13). Eje =
-// periodo CONTABLE (dia 1): periodo_desde/periodo_hasta se TRUNCAN a primer dia de mes (D-C-59/D-C-60)
-// ANTES del clamp y del check de inversion, para que el gateway NO sea mas estricto que su wrapper (un
-// rango del MISMO mes con dia de hasta < dia de desde NO es inversion a nivel mes: el wrapper lo acepta,
-// el gateway debe aceptarlo tambien). Floor 2026-07-01 (D-NEG-02) clampea periodo_desde (el SQL ademas
-// lo impone con GREATEST). periodo_hasta HIBRIDO: si el cliente lo OMITE (undefined) O lo manda null,
-// el value NO incluye la clave -> paridad con el wrapper directo, que trata null como OMITIDO y defaultea
-// al mes actual SIN check de inversion (con floor futuro el {} por defecto da vacio ok:true). Si viene
-// STRING -> YMD valido, truncado a mes y, tras el clamp, >= periodo_desde (a nivel mes). Otro tipo
-// (no-string, no-null) o mal formado/invertido a nivel mes -> payload_invalido (null = omitido, no rebota).
-// Filtros opcionales (ausente/null = sin filtro, sin sentinela; presente-pero-invalido -> payload_invalido):
-// clase {A,C,D,E}, id_zona/id_cabana (entero seguro >0), pagador_tipo {socio,caja}, q (string trim 1..120).
-// Los presentes van en value (trimmeados donde corresponde); los ausentes NO (el wrapper usa IS NULL).
-// LECTURA: SIN injectActor, SIN isWrite, SIN needsIdempotencyKey. Reusa isYMD_GW, ENUM_CLASE_GW,
-// ENUM_PAGADOR_GW (declarados arriba para A11) y el floor de Carril B. q usa cap propio 120 (NO MAXLEN_GW).
-const FLOOR_A13_GW = FLOOR_A24_GW; // mismo floor Carril B (2026-07-01, D-NEG-02)
-const Q_MAXLEN_A13_GW = 120;
-function firstOfMonth_GW(s: string): string { return s.slice(0, 8) + '01'; } // YYYY-MM-01 (D-C-59/60)
-export const payloadGastosListado: PayloadValidator = (payload) => {
-  const bad = (message: string): PayloadValidation => ({ ok: false, message });
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return bad('payload inválido: se esperaba un objeto');
-  const p = payload as Record<string, unknown>;
-  const PERMITIDAS = ['periodo_desde', 'periodo_hasta', 'clase', 'id_zona', 'id_cabana', 'pagador_tipo', 'q', 'limit', 'offset'];
-  for (const k of Object.keys(p)) if (!PERMITIDAS.includes(k)) return bad(`clave no permitida en payload: ${k}`);
-
-  // periodo_desde: opcional; YMD; TRUNCADO a mes (D-C-60); clamp al floor. Default = floor (ya dia 1).
-  let periodo_desde = FLOOR_A13_GW;
-  if (p.periodo_desde !== undefined && p.periodo_desde !== null) {
-    if (!isYMD_GW(p.periodo_desde)) return bad('periodo_desde inválida (YYYY-MM-DD)');
-    const d1 = firstOfMonth_GW(p.periodo_desde as string);
-    periodo_desde = d1 < FLOOR_A13_GW ? FLOOR_A13_GW : d1;
-  }
-
-  const value: Record<string, unknown> = { periodo_desde };
-
-  // periodo_hasta: incluida en value SOLO si viene como STRING. Omitida (undefined) O null -> NO se
-  // incluye en value (paridad con el wrapper directo A13: trata null como omitido y defaultea al mes
-  // actual, sin check de inversion). String -> YMD valido, TRUNCADO a mes (D-C-60) y, tras el clamp,
-  // >= periodo_desde (a nivel mes); invertida a nivel mes -> payload_invalido. Otro tipo o mal formado
-  // -> payload_invalido. NO se firma un default cuando se omite/null (la autoridad es el wrapper).
-  if (p.periodo_hasta !== undefined && p.periodo_hasta !== null) {
-    if (!isYMD_GW(p.periodo_hasta)) return bad('periodo_hasta inválida (YYYY-MM-DD)');
-    const h1 = firstOfMonth_GW(p.periodo_hasta as string);
-    if (h1 < periodo_desde) return bad('periodo_hasta no puede ser anterior a periodo_desde');
-    value.periodo_hasta = h1;
-  }
-
-  // clase: opcional; enum {A,C,D,E} (reuse ENUM_CLASE_GW). Ausente/null = sin filtro.
-  if (p.clase !== undefined && p.clase !== null) {
-    if (typeof p.clase !== 'string' || !ENUM_CLASE_GW.includes(p.clase)) return bad('clase inválida');
-    value.clase = p.clase;
-  }
-
-  // id_zona: opcional; entero seguro > 0. Ausente/null = sin filtro.
-  if (p.id_zona !== undefined && p.id_zona !== null) {
-    const z = p.id_zona;
-    if (typeof z !== 'number' || !Number.isSafeInteger(z) || z <= 0) return bad('id_zona debe ser un entero positivo');
-    value.id_zona = z;
-  }
-
-  // id_cabana: opcional; entero seguro > 0. Ausente/null = sin filtro.
-  if (p.id_cabana !== undefined && p.id_cabana !== null) {
-    const c = p.id_cabana;
-    if (typeof c !== 'number' || !Number.isSafeInteger(c) || c <= 0) return bad('id_cabana debe ser un entero positivo');
-    value.id_cabana = c;
-  }
-
-  // pagador_tipo: opcional; enum {socio,caja} (reuse ENUM_PAGADOR_GW). Ausente/null = sin filtro.
-  if (p.pagador_tipo !== undefined && p.pagador_tipo !== null) {
-    if (typeof p.pagador_tipo !== 'string' || !ENUM_PAGADOR_GW.includes(p.pagador_tipo)) return bad('pagador_tipo inválido');
-    value.pagador_tipo = p.pagador_tipo;
-  }
-
-  // q: opcional; string trim 1..120. Ausente/null = sin filtro. Vacio/oversized -> payload_invalido.
-  if (p.q !== undefined && p.q !== null) {
-    if (typeof p.q !== 'string') return bad('q inválido');
-    const qt = p.q.trim();
-    if (qt.length < 1 || qt.length > Q_MAXLEN_A13_GW) return bad('q inválido (1..120)');
-    value.q = qt;
-  }
-
-  // limit: opcional; entero; clamp [1,200]; default 50.
-  let limit = 50;
-  if (p.limit !== undefined && p.limit !== null) {
-    if (typeof p.limit !== 'number' || !Number.isSafeInteger(p.limit)) return bad('limit debe ser un entero');
-    limit = Math.min(Math.max(p.limit, 1), 200);
-  }
-  value.limit = limit;
-
-  // offset: opcional; entero >= 0; default 0.
-  let offset = 0;
-  if (p.offset !== undefined && p.offset !== null) {
-    if (typeof p.offset !== 'number' || !Number.isSafeInteger(p.offset) || p.offset < 0) return bad('offset debe ser un entero >= 0');
-    offset = p.offset;
-  }
-  value.offset = offset;
-
-  return { ok: true, value };
-};
-
 // Coherencia rol↔actor (server-side, ANTES de firmar): el rol gobierna la allowlist;
 // el actor (persona) gobierna validado_por/created_by aguas abajo (D-C-22). vicky es
 // rol y persona; socio agrupa a franco/rodrigo/remo. jenny no llega (rebota por rol).
@@ -574,16 +473,6 @@ const CATALOG: Record<string, CatalogEntry> = {
   // hoy sin check de inversion; explicito -> YMD y, tras el clamp al floor, >= periodo_desde).
   // LECTURA: sin injectActor, sin isWrite. El key DEBE coincidir con EXPECTED_ACTION (D-C-41).
   'ingresos.cobrados_periodo': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a25-ingresos', validate: payloadIngresosPeriodo },
-  // A13 (Slice 3b) -- Gastos internos por periodo contable (LECTURA, companion de A11). Wrapper n8n
-  // firmado (portal-a13-gastos-listado; SIN __TEST: convencion de lecturas A12/A24/A25). SOLO
-  // vicky/socio (D-C-03): jenny excluida (contenido economico), rebota con rol_no_permitido EN EL
-  // GATEWAY antes de firmar. validate: payloadGastosListado, que espeja la semantica MENSUAL del wrapper
-  // (D-C-59/D-C-60): trunca periodo_desde/periodo_hasta a primer dia de mes ANTES del clamp y del check
-  // de inversion (asi el gateway no rebota un rango del mismo mes que el wrapper aceptaria), y PRESERVA
-  // la ausencia de periodo_hasta (omitido O null NO van en value -> el wrapper defaultea al mes actual;
-  // paridad con el wrapper directo A13). LECTURA: sin injectActor, sin isWrite, sin needsIdempotencyKey.
-  // El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
-  'gastos.listado': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a13-gastos-listado', validate: payloadGastosListado },
   // A07 (Slice 2) — Crear reserva manual. PRIMERA ESCRITURA vía gateway. Wrapper n8n
   // firmado (portal-a07-crear-reserva__TEST). SOLO vicky/socio (D-C-39): jenny rebota
   // con rol_no_permitido EN EL GATEWAY antes de firmar. validate: payloadCrearManual

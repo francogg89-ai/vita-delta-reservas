@@ -1,0 +1,299 @@
+{
+ "name": "portal-a11-cargar-gasto-interno__TEST",
+ "nodes": [
+  {
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "portal-a11-cargar-gasto-interno__TEST",
+    "responseMode": "responseNode",
+    "options": {
+     "rawBody": true
+    }
+   },
+   "id": "75db5722-f49b-406c-bb0d-512fbf0aec9b",
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2.1,
+   "position": [
+    0,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// portal-a11-cargar-gasto-interno__TEST - validar_firma_ts_rol (ESCRITURA / A11) v1.\n// Clonado del molde a07 (HMAC sobre buffer crudo, timing-safe, ventana ts, raw body\n// binario con fallback, assert por prefijo __PEGAR_). A11 (D-C-55 / D-C-56):\n//   - EXPECTED_ACTION = 'cargar.gasto_interno'.\n//   - nonce DERIVADO de la firma ESPERADA recomputada y normalizada (D-C-56,\n//     microcorr. 1): nonce = expectedHex.toLowerCase(). NO del header crudo, NO del body.\n//   - idempotency_key con formato estricto ^[A-Za-z0-9_-]{8,64}$ (microcorr. 2).\n//   - payload de negocio REJECT-UNKNOWN + tipos + 2 enums (clase, pagador_tipo); la\n//     coherencia (clase x zona/cabana, pagador, comentario, horas) la validan las 18\n//     constraints de gastos_internos dentro de la funcion.\nconst crypto = require('crypto');\n\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado (assert por prefijo, L-C-10).');\n}\n\nconst ROLES_OK     = ['vicky','socio'];\nconst ENUM_ACTOR   = ['vicky','franco','rodrigo','remo'];\nconst ENUM_CLASE   = ['A','C','D','E'];\nconst ENUM_PAGADOR = ['socio','caja'];\nconst EXPECTED_ACTION = 'cargar.gasto_interno';\nconst IDEM_RE = /^[A-Za-z0-9_-]{8,64}$/;\nconst MAXLEN = 1000;\n\nfunction rej(motivo, body) {\n  body = body || {};\n  return [{ json: { ok_firma:false, motivo, ambiente_esperado: body.ambiente_esperado ?? null,\n    rol: body.rol ?? null, action: body.action ?? null, ts: (typeof body.ts!=='undefined'?body.ts:null),\n    actor: body.actor ?? null, idempotency_key: body.idempotency_key ?? null, nonce: null, payload: null } }];\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\n// 1) Raw body Buffer exacto (binario 'data' prioridad; fallback rawBody, L-C-05).\nlet buf = null;\ntry { if (item.binary && item.binary.data) buf = await this.helpers.getBinaryDataBuffer(0, 'data'); } catch (e) { buf = null; }\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) return rej('raw_body_ausente', {});\n\n// 2) Firma HMAC recomputada sobre los mismos bytes (hex en minuscula).\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\nconst expectedHex = crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\nconst expected = 'sha256=' + expectedHex;\nlet firmaOk = false;\ntry { const a = Buffer.from(sigHeader); const b = Buffer.from(expected); firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b); } catch (e) { firmaOk = false; }\nif (!firmaOk) return rej('firma_invalida', {});\n\n// 3) nonce = firma ESPERADA calculada y normalizada (D-C-56, microcorr. 1).\nconst nonce = expectedHex.toLowerCase();\n\n// 4) Parseo (firma ya validada).\nlet body;\ntry { body = JSON.parse(buf.toString('utf8')); } catch (e) { return rej('payload_invalido', {}); }\n\n// 5) Ventana ts +-300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) return rej('ts_fuera_de_ventana', body);\n\n// 6) Rol allowlist (D-C-39).\nif (!ROLES_OK.includes(body.rol)) return rej('rol_no_permitido', body);\n// 7) Action binding (D-C-41).\nif (body.action !== EXPECTED_ACTION) return rej('accion_desconocida', body);\n// 8) actor (sobre firmado; persona, no rol).\nif (typeof body.actor !== 'string' || !ENUM_ACTOR.includes(body.actor)) return rej('payload_invalido', body);\n// 9) idempotency_key formato estricto (D-C-56, microcorr. 2).\nif (typeof body.idempotency_key !== 'string' || !IDEM_RE.test(body.idempotency_key)) return rej('payload_invalido', body);\n\n// 10) Payload de negocio: REJECT-UNKNOWN + tipos + 2 enums. Coherencia -> funcion.\nconst p = body.payload;\nif (!p || typeof p !== 'object' || Array.isArray(p)) return rej('payload_invalido', body);\nconst PERMITIDAS = ['fecha','periodo','clase','clase_sugerida','etiqueta','monto',\n  'id_zona','id_cabana','pagador_tipo','id_socio_pagador','medio_pago','comentario','comprobante_url'];\nfor (const k of Object.keys(p)) { if (!PERMITIDAS.includes(k)) return rej('payload_invalido', body); }\n\nconst isStr = (v) => typeof v === 'string';\nconst okLen = (v) => v.length <= MAXLEN;\nconst isYMD = (s) => {\n  if (!isStr(s) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const Y=+s.slice(0,4), M=+s.slice(5,7), D=+s.slice(8,10);\n  if (M<1||M>12||D<1||D>31) return false;\n  const dt=new Date(Date.UTC(Y,M-1,D));\n  return dt.getUTCFullYear()===Y && dt.getUTCMonth()===M-1 && dt.getUTCDate()===D;\n};\nconst isPosInt = (v) => typeof v==='number' && Number.isSafeInteger(v) && v>0;\n\nif (!isYMD(p.fecha)) return rej('payload_invalido', body);\nif (p.periodo != null && !isYMD(p.periodo)) return rej('payload_invalido', body);\nif (!isStr(p.clase) || !ENUM_CLASE.includes(p.clase)) return rej('payload_invalido', body);\nif (p.clase_sugerida != null && (!isStr(p.clase_sugerida) || !ENUM_CLASE.includes(p.clase_sugerida))) return rej('payload_invalido', body);\nif (!isStr(p.etiqueta) || p.etiqueta.trim()==='' || !okLen(p.etiqueta)) return rej('payload_invalido', body);\nif (typeof p.monto !== 'number' || !Number.isFinite(p.monto) || p.monto <= 0) return rej('payload_invalido', body);\nif (p.id_zona != null && !isPosInt(p.id_zona)) return rej('payload_invalido', body);\nif (p.id_cabana != null && !isPosInt(p.id_cabana)) return rej('payload_invalido', body);\nif (!isStr(p.pagador_tipo) || !ENUM_PAGADOR.includes(p.pagador_tipo)) return rej('payload_invalido', body);\nif (p.id_socio_pagador != null && !isPosInt(p.id_socio_pagador)) return rej('payload_invalido', body);\nfor (const k of ['medio_pago','comentario','comprobante_url']) {\n  if (p[k] != null && (!isStr(p[k]) || !okLen(p[k]))) return rej('payload_invalido', body);\n}\n\n// payloadWL: null/undefined = ausente; numeros van como numero (la funcion castea con\n// ($1::jsonb)->>'campo'::tipo; monto -> numeric(12,2) en la funcion).\nconst payloadWL = {\n  fecha: p.fecha,\n  periodo: (p.periodo != null ? p.periodo : null),\n  clase: p.clase,\n  clase_sugerida: (p.clase_sugerida != null ? p.clase_sugerida : null),\n  etiqueta: p.etiqueta.trim(),\n  monto: p.monto,\n  id_zona: (p.id_zona != null ? p.id_zona : null),\n  id_cabana: (p.id_cabana != null ? p.id_cabana : null),\n  pagador_tipo: p.pagador_tipo,\n  id_socio_pagador: (p.id_socio_pagador != null ? p.id_socio_pagador : null),\n  medio_pago: (p.medio_pago != null ? p.medio_pago.trim() : null),\n  comentario: (p.comentario != null ? p.comentario.trim() : null),\n  comprobante_url: (p.comprobante_url != null ? p.comprobante_url.trim() : null)\n};\n\nreturn [{ json: { ok_firma:true, motivo:null, ambiente_esperado: body.ambiente_esperado ?? null,\n  rol: body.rol, action: body.action, ts, actor: body.actor,\n  idempotency_key: body.idempotency_key, nonce, payload: payloadWL } }];"
+   },
+   "id": "fd8a5aee-2693-4431-8b09-daaf2dc41dd4",
+   "name": "validar_firma_ts_rol",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    240,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+    "options": {}
+   },
+   "id": "903af24d-c485-4ed0-8c87-3120657b9caf",
+   "name": "leer_ambiente",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.6,
+   "position": [
+    480,
+    0
+   ],
+   "credentials": {
+    "postgres": {
+     "id": "REEMPLAZAR_POR_CRED_TEST",
+     "name": "vita_supabase_test (reemplazar al importar)"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "jsCode": "// portal-a11-cargar-gasto-interno__TEST - verificar_acceso (ambiente + envelope de rechazo).\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\nfunction envErr(code, message, detail) { return [{ json: { ok:false, error: { code, message, detail: detail ?? null } } }]; }\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'payload invalido (campos de negocio, actor o idempotency_key)',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\nreturn [{ json: { ok:true } }];"
+   },
+   "id": "c6c920df-aced-4205-bff7-e32314e93966",
+   "name": "verificar_acceso",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    720,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "099da4fa-ca43-4c48-94ed-7dacb11ce626",
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": true,
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "6a1f3c4f-7d3e-4603-9c1e-1657ad8dfe48",
+   "name": "IF acceso",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    960,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// portal-a11-cargar-gasto-interno__TEST - Code: derivar.\n// Arma el jsonb para portal_cargar_gasto_interno: payload de negocio + control\n// server-side (actor/rol/nonce/request_ts) + idempotency_key. source_event y\n// creado_por NO se mandan: los deriva la funcion ('portal_a11_'||idempotency_key ; =actor).\nconst v = $('validar_firma_ts_rol').first().json;\nconst idem = v.idempotency_key;\nconst fnPayload = Object.assign({}, v.payload, {\n  idempotency_key: idem,\n  actor: v.actor,\n  rol: v.rol,\n  nonce: v.nonce,\n  request_ts: v.ts\n});\nconst payload1 = JSON.stringify(fnPayload);\nreturn [{ json: { payload1, idem, sev: 'portal_a11_' + idem } }];"
+   },
+   "id": "05449ca1-fb55-427e-8987-02d7ce9db585",
+   "name": "Code: derivar",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1200,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "SELECT portal_cargar_gasto_interno($1::jsonb) AS resultado;",
+    "options": {
+     "queryReplacement": "={{ $('Code: derivar').first().json.payload1 }}"
+    }
+   },
+   "id": "c47d3b59-482a-4f6b-a46b-34bfcc900d60",
+   "name": "PG cargar_gasto",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.6,
+   "position": [
+    1440,
+    0
+   ],
+   "credentials": {
+    "postgres": {
+     "id": "REEMPLAZAR_POR_CRED_TEST",
+     "name": "vita_supabase_test (reemplazar al importar)"
+    }
+   },
+   "onError": "continueRegularOutput",
+   "alwaysOutputData": true
+  },
+  {
+   "parameters": {
+    "jsCode": "// portal-a11-cargar-gasto-interno__TEST - router_cargar.\n// La funcion ya devuelve el contrato final {ok,data|error} con codigos de la allowlist\n// (ok idempotente/nuevo; conflicto nonce_replay/payload_mismatch/actor_mismatch;\n// payload_invalido con constraint; rol_no_permitido; error_interno). Solo agregamos\n// estado_incierto si el nodo PG no devolvio el contrato (fallo de dispatch; L-8D-01).\nconst res = $json.resultado;\nconst D = $('Code: derivar').first().json;\nif (!res || typeof res !== 'object') {\n  return [{ json: { ok:false, error: { code:'estado_incierto',\n    message:'estado incierto al cargar el gasto; verificar antes de reintentar con la misma idempotency_key',\n    detail: { idempotency_key: D.idem, source_event: D.sev } } } }];\n}\nreturn [{ json: res }];"
+   },
+   "id": "b4f3b883-a5c1-4775-81ec-c421081c1371",
+   "name": "router_cargar",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1680,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// portal-a11-cargar-gasto-interno__TEST - Code: render. Punto unico de salida.\n// Extrae el envelope de router; o pasa el rechazo de verificar_acceso ($json {ok:false,error}).\nconst e = ($json && $json.envelope) ? $json.envelope : $json;\nreturn [{ json: e }];"
+   },
+   "id": "be8c9ab3-13fe-4fa0-9ad7-a3ee756e3f6c",
+   "name": "Code: render",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1920,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "respondWith": "firstIncomingItem",
+    "options": {
+     "responseCode": 200
+    }
+   },
+   "id": "84527d89-f03a-45f3-87b8-bf6ed396b27b",
+   "name": "Respond",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.5,
+   "position": [
+    2160,
+    0
+   ]
+  }
+ ],
+ "pinData": {},
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "validar_firma_ts_rol",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "validar_firma_ts_rol": {
+   "main": [
+    [
+     {
+      "node": "leer_ambiente",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "leer_ambiente": {
+   "main": [
+    [
+     {
+      "node": "verificar_acceso",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "verificar_acceso": {
+   "main": [
+    [
+     {
+      "node": "IF acceso",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "IF acceso": {
+   "main": [
+    [
+     {
+      "node": "Code: derivar",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Code: render",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Code: derivar": {
+   "main": [
+    [
+     {
+      "node": "PG cargar_gasto",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "PG cargar_gasto": {
+   "main": [
+    [
+     {
+      "node": "router_cargar",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "router_cargar": {
+   "main": [
+    [
+     {
+      "node": "Code: render",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Code: render": {
+   "main": [
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "active": false,
+ "settings": {
+  "executionOrder": "v1",
+  "binaryMode": "separate"
+ },
+ "tags": []
+}
