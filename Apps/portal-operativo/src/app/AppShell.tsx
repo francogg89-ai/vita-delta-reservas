@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/useAuth';
 import { Menu } from './Menu';
-import { PlaceholderView } from './PlaceholderView';
-import type { ActionMeta } from '../lib/actionRegistry';
+import { AppRoutes } from './rutas';
 
 const ROL_LABEL: Record<string, string> = {
   jenny: 'Limpieza',
@@ -12,18 +11,10 @@ const ROL_LABEL: Record<string, string> = {
 
 export function AppShell() {
   const { contexto, logout } = useAuth();
-  const [seleccion, setSeleccion] = useState<ActionMeta | null>(null);
   const [navAbierto, setNavAbierto] = useState(false);
 
   // App solo monta AppShell en estado 'autenticado', con contexto presente.
   if (!contexto) return null;
-
-  const primerNombre = contexto.nombre.split(' ')[0];
-
-  function elegir(meta: ActionMeta) {
-    setSeleccion(meta);
-    setNavAbierto(false);
-  }
 
   return (
     <div className="flex min-h-full flex-col bg-mist">
@@ -69,22 +60,12 @@ export function AppShell() {
             (navAbierto ? 'block' : 'hidden')
           }
         >
-          <Menu
-            acciones={contexto.acciones}
-            seleccion={seleccion?.action ?? null}
-            onSelect={elegir}
-          />
+          {/* La navegacion la maneja el router (D-FE-12); onNavigate cierra el drawer mobile. */}
+          <Menu acciones={contexto.acciones} onNavigate={() => setNavAbierto(false)} />
         </aside>
 
         <main className="flex-1 p-6">
-          {seleccion ? (
-            <PlaceholderView meta={seleccion} />
-          ) : (
-            <div className="mx-auto max-w-2xl rounded-2xl border border-sand bg-white p-8">
-              <h2 className="text-xl font-semibold text-ink">Hola, {primerNombre}</h2>
-              <p className="mt-2 text-reed">Elegi una opcion del menu para empezar.</p>
-            </div>
-          )}
+          <AppRoutes />
         </main>
       </div>
     </div>

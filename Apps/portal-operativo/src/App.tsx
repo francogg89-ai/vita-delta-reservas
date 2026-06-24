@@ -1,3 +1,4 @@
+import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthProvider';
 import { useAuth } from './auth/useAuth';
 import { LoginScreen } from './auth/LoginScreen';
@@ -50,10 +51,15 @@ function Pantalla() {
   return <LoginScreen />;
 }
 
+// BrowserRouter envuelve TODA la app (D-FE-12): asi la URL persiste a traves del login
+// (deep-link a una ruta sin sesion -> login -> tras autenticar aterriza en la ruta).
+// El login/error/cargando no usan rutas, pero viven bajo el Router sin efecto adverso.
 export default function App() {
   return (
-    <AuthProvider>
-      <Pantalla />
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <Pantalla />
+      </AuthProvider>
+    </BrowserRouter>
   );
 }

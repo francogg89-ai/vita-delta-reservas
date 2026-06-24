@@ -1,12 +1,13 @@
-import { construirMenu, type ActionMeta } from '../lib/actionRegistry';
+import { NavLink } from 'react-router-dom';
+import { construirMenu } from '../lib/actionRegistry';
 
 interface MenuProps {
   acciones: string[];
-  seleccion: string | null;
-  onSelect: (meta: ActionMeta) => void;
+  /** Se invoca al navegar (cierra el drawer mobile en AppShell). */
+  onNavigate?: () => void;
 }
 
-export function Menu({ acciones, seleccion, onSelect }: MenuProps) {
+export function Menu({ acciones, onNavigate }: MenuProps) {
   const grupos = construirMenu(acciones);
 
   if (grupos.length === 0) {
@@ -23,26 +24,22 @@ export function Menu({ acciones, seleccion, onSelect }: MenuProps) {
             {g.label}
           </p>
           <ul className="mt-2 space-y-0.5">
-            {g.items.map((item) => {
-              const activo = item.action === seleccion;
-              return (
-                <li key={item.action}>
-                  <button
-                    type="button"
-                    onClick={() => onSelect(item)}
-                    aria-current={activo ? 'page' : undefined}
-                    className={
-                      'w-full rounded-lg px-3 py-2 text-left text-sm transition ' +
-                      (activo
-                        ? 'bg-river-light font-medium text-river-dark'
-                        : 'text-ink hover:bg-mist')
-                    }
-                  >
-                    {item.label}
-                  </button>
-                </li>
-              );
-            })}
+            {g.items.map((item) => (
+              <li key={item.action}>
+                <NavLink
+                  to={item.ruta}
+                  onClick={onNavigate}
+                  className={({ isActive }) =>
+                    'block w-full rounded-lg px-3 py-2 text-left text-sm transition ' +
+                    (isActive
+                      ? 'bg-river-light font-medium text-river-dark'
+                      : 'text-ink hover:bg-mist')
+                  }
+                >
+                  {item.label}
+                </NavLink>
+              </li>
+            ))}
           </ul>
         </div>
       ))}
