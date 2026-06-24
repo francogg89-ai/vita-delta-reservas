@@ -8,6 +8,9 @@ import { CalendarioLimpieza, CalendarioOperativo } from '../screens/Calendarios'
 import { ReservaDetalle } from '../screens/ReservaDetalle';
 import { PrereservasActivas } from '../screens/PrereservasActivas';
 import { CobranzaSaldos } from '../screens/CobranzaSaldos';
+import { HistoricoReservas } from '../screens/HistoricoReservas';
+import { IngresosPeriodo } from '../screens/IngresosPeriodo';
+import { GastosListado } from '../screens/GastosListado';
 
 /**
  * Pantallas reales ya implementadas (action -> componente). Los placeholders se reemplazan
@@ -20,6 +23,9 @@ const PANTALLAS: Record<string, ComponentType> = {
   'reserva.detalle': ReservaDetalle,
   'prereservas.activas': PrereservasActivas,
   'cobranza.saldos': CobranzaSaldos,
+  'historico.reservas': HistoricoReservas,
+  'ingresos.cobrados_periodo': IngresosPeriodo,
+  'gastos.listado': GastosListado,
 };
 
 /**

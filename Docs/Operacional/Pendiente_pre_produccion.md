@@ -218,6 +218,17 @@ se vuelve frecuente, sería una capa posterior con su propio formulario. No urge
 - **P-C-10** — **Rol Postgres dedicado de mínimos** para el lookup de `portal_usuarios`, en lugar de `service_role`, como endurecimiento posterior. No bloqueante.
 - **P-C-11** — **Edge Functions por Dashboard:** el toggle "Verify JWT with legacy secret" se reactiva en cada redeploy desde el editor (L-C-06); migrar `portal-api` a CLI + `config.toml` (`verify_jwt=false`) si los redeploys se vuelven frecuentes.
 
+## Carril C — Frontend (Portal Operativo) — pendientes
+
+Pendientes surgidos del frontend del Portal Operativo Interno (**sub-slice 1**, las 8 lecturas; cierre `FRONTEND_SUBSLICE1_CIERRE.md`, 2026-06-24). Namespace `P-FE-XX`.
+
+- **P-FE-01** — **`CABANAS_TEST` no portable → catálogo.** El mapeo `id_cabana→nombre` del filtro de cabaña (A24) está hardcodeado como constante **solo TEST** (IDs 1–5; en DEV son 17–21 y en OPS difieren por la secuencia SERIAL). Reemplazar por un **endpoint de catálogo** del backend antes de promover a OPS. Las filas igual muestran el nombre vía el campo `cabana` del backend; esto solo afecta las etiquetas del filtro.
+- **P-FE-02** — **Anti-sobrecobro (pre-OPS, transversal).** Validar que **todos** los flujos productivos de cobro impidan sobrecobro no intencional, en especial **A10 `cobranza.registrar_saldo`** y los futuros flujos **web / Mercado Pago**. Aceptar sobrepago/crédito debe ser una decisión **explícita**, nunca accidental. (Hoy en TEST hay sobrepagos de fixtures; A04 los muestra como `$0` por D-C-62, A24 los muestra crudos por ser reporte.)
+- **P-FE-03** — **Limpieza de datos TEST.** Depurar pagos duplicados / por encima de `monto_total` en TEST como **mini-etapa separada** (escritura acotada por id, con backup, ejecutada por Franco), si hace falta. No bloqueante; no se hace ahora para no romper smokes/reportes históricos de TEST.
+- **P-FE-04** — **UX diferidas (sin patch ahora).** (a) Evitar desde el frontend `fecha_hasta < fecha_desde` (A24) y el rango de meses invertido (A25/A13) — el backend ya valida (A24 rebota; A25/A13 devuelven vacío). (b) Aclaración explícita en A25 (“muestra pagos según fecha de cobro, no de estadía”) y en A13 (“muestra gastos según período contable”).
+- **P-FE-05** — **A13 filtros `id_zona` / `id_cabana` diferidos.** El payload de `gastos.listado` los admite, pero la UI no los expone todavía: necesitan endpoint de catálogo de zonas/cabañas (familia P-FE-01). Implementados: período (mes) + `clase {A,C,D,E}` + `pagador_tipo {socio,caja}` + `q`.
+- **P-FE-06** — **A05 `nota` / `notas_reserva` en el contrato.** Incluir formalmente en el contrato frontend (la prosa original de A05 no las enumeraba; la visibilidad quedó resuelta por **D-C-63**: visibles para {vicky, socio}, no a jenny ni web pública).
+
 ## Pendiente — Corrección canónica v1.8.1 (hardening de funciones base en Parte B)
 
 **Estado:** ✅ CERRADA (canonizado en v1.8.1, jun-2026; el Bloque 23 incorpora el `REVOKE EXECUTE` de las 13 funciones base a PARTE B). Registrado 2026-06-15 en la reconstrucción de DEV.
