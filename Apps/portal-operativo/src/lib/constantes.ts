@@ -44,3 +44,60 @@ export const CLASES_GASTO: ReadonlyArray<{ valor: string; etiqueta: string }> = 
 
 /** Tipo de pagador del gasto (gastos_internos.pagador_tipo). */
 export const PAGADOR_TIPOS: readonly string[] = ['socio', 'caja'];
+
+/**
+ * P-FE-01 - Socios en TEST. id_socio->nombre, CONFIRMADO por snapshot read-only en TEST
+ * (2026-06-24: 1 Franco, 2 Rodrigo, 3 Remo, los tres activos). Solo valido en TEST (la
+ * secuencia SERIAL difiere en DEV/OPS). NO portable: reemplazar por endpoint de catalogo
+ * antes de OPS. Se usa en A11 cuando pagador_tipo='socio' (id_socio_pagador).
+ */
+export const SOCIOS_TEST: ReadonlyArray<{ id: number; nombre: string }> = [
+  { id: 1, nombre: 'Franco' },
+  { id: 2, nombre: 'Rodrigo' },
+  { id: 3, nombre: 'Remo' },
+];
+
+/**
+ * P-FE-01 / P-FE-05 - Zonas en TEST. id_zona->nombre, CONFIRMADO por snapshot read-only en TEST
+ * (2026-06-24: 1 grandes, 2 chicas). Solo valido en TEST. NO portable: reemplazar por endpoint
+ * de catalogo antes de OPS. Se usa en A11 cuando clase='D' (id_zona).
+ */
+export const ZONAS_TEST: ReadonlyArray<{ id: number; nombre: string }> = [
+  { id: 1, nombre: 'grandes' },
+  { id: 2, nombre: 'chicas' },
+];
+
+/** Motivos de bloqueo (A08, enum del wrapper crear_bloqueo). */
+export const MOTIVOS_BLOQUEO: ReadonlyArray<{ valor: string; etiqueta: string }> = [
+  { valor: 'mantenimiento', etiqueta: 'Mantenimiento' },
+  { valor: 'uso_propio', etiqueta: 'Uso propio' },
+  { valor: 'tormenta', etiqueta: 'Tormenta' },
+  { valor: 'overbooking', etiqueta: 'Overbooking' },
+  { valor: 'otro', etiqueta: 'Otro' },
+];
+
+/**
+ * Medios de pago para A07 crear reserva (canal_pago_esperado + medio_pago, mismo enum).
+ * Incluye mp_link (link de pago). Distinto de A10 (carga de saldo ya cobrado, sin mp_link).
+ */
+export const MEDIOS_PAGO_RESERVA: ReadonlyArray<{ valor: string; etiqueta: string }> = [
+  { valor: 'efectivo', etiqueta: 'Efectivo' },
+  { valor: 'transferencia_bancaria', etiqueta: 'Transferencia bancaria' },
+  { valor: 'transferencia_mp', etiqueta: 'Transferencia Mercado Pago' },
+  { valor: 'mp_link', etiqueta: 'Link de pago (Mercado Pago)' },
+  { valor: 'cripto', etiqueta: 'Cripto' },
+];
+
+/** Medios de pago para A10 registrar cobro (saldo ya cobrado). SIN mp_link (D-C-50 / contrato). */
+export const MEDIOS_PAGO_COBRO: ReadonlyArray<{ valor: string; etiqueta: string }> = [
+  { valor: 'efectivo', etiqueta: 'Efectivo' },
+  { valor: 'transferencia_bancaria', etiqueta: 'Transferencia bancaria' },
+  { valor: 'transferencia_mp', etiqueta: 'Transferencia Mercado Pago' },
+  { valor: 'cripto', etiqueta: 'Cripto' },
+];
+
+/** Pagador de gasto (A11) con etiquetas legibles. Valores = gastos_internos.pagador_tipo. */
+export const PAGADORES_GASTO: ReadonlyArray<{ valor: string; etiqueta: string }> = [
+  { valor: 'caja', etiqueta: 'Caja' },
+  { valor: 'socio', etiqueta: 'Socio' },
+];

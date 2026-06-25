@@ -186,3 +186,37 @@ export interface GastosData {
   limit: number;
   offset: number;
 }
+
+// ===== Escrituras: data de RESPUESTA (forma EXACTA leida de los wrappers/funcion) =====
+// A07/A08/A10: del nodo `render`/routers del wrapper. A11: de la funcion portal_cargar_gasto_interno.
+// Montos en pesos (L-FE-02). IDs BIGINT ya normalizados a number.
+
+/** A07 reserva.crear_manual. `idempotent_match:true` => cayo sobre una reserva ya existente. */
+export interface CrearReservaData {
+  id_reserva: number;
+  id_pre_reserva: number;
+  id_huesped: number;
+  idempotent_match: boolean;
+}
+
+/** A08 bloqueo.crear_manual. */
+export interface CrearBloqueoData {
+  id_bloqueo: number;
+  id_cabana: number;
+  tipo_bloqueo: string;
+}
+
+/** A10 cobranza.registrar_saldo. `saldo_real_actual` recomputado post-commit (puede ser 0). */
+export interface RegistrarSaldoData {
+  id_pago: number;
+  estado_pago: string;
+  idempotent_match: boolean;
+  saldo_real_actual: number | null;
+  saldo_real_previo?: number | null;
+}
+
+/** A11 cargar.gasto_interno. OJO: la clave es `idempotente` (no `idempotent_match`). */
+export interface CargarGastoData {
+  id_gasto: number;
+  idempotente: boolean;
+}

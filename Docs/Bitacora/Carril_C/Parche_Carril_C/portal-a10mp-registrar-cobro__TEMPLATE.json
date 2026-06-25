@@ -1,0 +1,358 @@
+{
+  "name": "Vita A10-MP portal-a10mp-registrar-cobro__TEST (wrapper directo)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a10mp-registrar-cobro__TEST",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1104,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\n// Secreto (L-C-10): $vars.__PEGAR_SECRETO_O_USAR_VARIABLE__ si existe; si no, placeholder pegado a mano (Modo B).\n// Assert duro POR PREFIJO sobrevive al find-replace del placeholder.\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.__PEGAR_SECRETO_O_USAR_VARIABLE__)\n  ? $vars.__PEGAR_SECRETO_O_USAR_VARIABLE__\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('__PEGAR_SECRETO_O_USAR_VARIABLE__ no configurado; abortando (assert duro por prefijo).');\n}\n\nconst EXPECTED_ACTION = 'cobranza.registrar_cobro';\nconst ROLES_OK = ['vicky', 'socio'];\nconst ENUM_ACTOR = ['vicky', 'franco', 'rodrigo', 'remo'];\nconst ENUM_SUBTIPO = ['bancaria', 'mp'];\nconst MONTO_MAX = 9999999999.99;\nconst ORIGEN_MAX = 120;\nconst DESC_MAX = 200;\nconst TS_WINDOW_MS = 300000;\nconst MAXLEN = 1000;\nconst ENVELOPE_KEYS = ['action', 'payload', 'rol', 'ambiente_esperado', 'ts', 'nonce', 'actor'];\nconst PAYLOAD_KEYS = ['id_reserva', 'monto_efectivo', 'monto_transferencia', 'subtipo_transferencia',\n  'monto_otros', 'origen_otros', 'descripcion_otros', 'idempotency_key', 'notas'];\n\nfunction actorCoherente(rol, nombre) {\n  if (rol === 'vicky') return nombre === 'vicky';\n  if (rol === 'socio') return nombre === 'franco' || nombre === 'rodrigo' || nombre === 'remo';\n  return false;\n}\nconst fail = (error, message) => [{ json: { __auth_ok: false, error: error, message: message } }];\n\n// Raw body como Buffer EXACTO (PATRON A12; L-C-05). Webhook typeVersion 2.1.\nconst item = $input.first();\nconst wh = item.json;\n\nlet raw = null;\nlet via = 'none';\nconst diag = { rawread: 'v5' };\ntry {\n  if (item.binary && item.binary.data) {\n    raw = await this.helpers.getBinaryDataBuffer(0, 'data');\n    if (raw && raw.length) via = 'getBinaryDataBuffer';\n  }\n} catch (e) { diag.getBinErr = String((e && e.message) || e); raw = null; }\nif (!raw || !raw.length) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) { raw = rawField; via = 'rawBody.buffer'; }\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) { raw = Buffer.from(rawField.data); via = 'rawBody.serialized'; }\n  else if (typeof rawField === 'string') { raw = Buffer.from(rawField, 'utf8'); via = 'rawBody.string'; }\n}\nif (!raw || raw.length === 0) {\n  diag.via = via;\n  diag.binary = !!(item && item.binary);\n  const bd = (item && item.binary && item.binary.data) ? item.binary.data : null;\n  diag.binaryDataKeys = bd ? Object.keys(bd) : [];\n  diag.rawBodyType = typeof wh.rawBody;\n  return fail('raw_body_ausente', 'raw body ausente | diag ' + JSON.stringify(diag));\n}\n\n// Firma HMAC-SHA256 timing-safe (patron A12).\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(raw).digest('hex');\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(String(sigHeader || ''));\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) { firmaOk = false; }\nif (!firmaOk) return fail('firma_invalida', 'firma invalida');\n\nlet env;\ntry { env = JSON.parse(raw.toString('utf8')); } catch (e) { return fail('payload_invalido', 'sobre no es JSON'); }\nif (typeof env !== 'object' || env === null || Array.isArray(env)) return fail('payload_invalido', 'sobre invalido');\nfor (const k of Object.keys(env)) if (!ENVELOPE_KEYS.includes(k)) return fail('payload_invalido', 'clave de sobre no permitida: ' + k);\n\nif (typeof env.ts !== 'number' || !Number.isFinite(env.ts)) return fail('payload_invalido', 'ts invalido');\nif (Math.abs(Date.now() - env.ts) > TS_WINDOW_MS) return fail('ts_fuera_de_ventana', 'ts fuera de ventana');\nif (env.action !== EXPECTED_ACTION) return fail('payload_invalido', 'action no coincide con el endpoint');\nif (!ROLES_OK.includes(env.rol)) return fail('rol_no_permitido', 'rol no habilitado');\nif (typeof env.actor !== 'string' || !ENUM_ACTOR.includes(env.actor)) return fail('payload_invalido', 'actor invalido');\nif (!actorCoherente(env.rol, env.actor)) return fail('rol_no_permitido', 'actor incoherente con rol');\nif (typeof env.ambiente_esperado !== 'string' || env.ambiente_esperado.length === 0) return fail('payload_invalido', 'ambiente_esperado invalido');\nif (typeof env.nonce !== 'string' || env.nonce.length === 0) return fail('payload_invalido', 'nonce invalido');\n\n// ---- Revalidacion del payload multi-porcion (2da defensa, ESPEJO de payloadRegistrarCobro) ----\nconst p = env.payload;\nif (typeof p !== 'object' || p === null || Array.isArray(p)) return fail('payload_invalido', 'payload invalido');\nfor (const k of Object.keys(p)) if (!PAYLOAD_KEYS.includes(k)) return fail('payload_invalido', 'clave de payload no permitida: ' + k);\n\nif (typeof p.id_reserva !== 'number' || !Number.isSafeInteger(p.id_reserva) || p.id_reserva <= 0) return fail('payload_invalido', 'id_reserva debe ser entero positivo');\n\nfunction montoPorcion(v, nombre) {\n  if (v === undefined || v === null) return { ok: true, val: 0 };\n  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return { ok: false, message: nombre + ' debe ser numero >= 0 finito' };\n  const cents = Math.round(v * 100);\n  if (Math.abs(v * 100 - cents) > 1e-6) return { ok: false, message: nombre + ' admite maximo 2 decimales' };\n  if (v > MONTO_MAX) return { ok: false, message: nombre + ' fuera de rango' };\n  return { ok: true, val: v };\n}\nconst ef = montoPorcion(p.monto_efectivo, 'monto_efectivo'); if (!ef.ok) return fail('payload_invalido', ef.message);\nconst tr = montoPorcion(p.monto_transferencia, 'monto_transferencia'); if (!tr.ok) return fail('payload_invalido', tr.message);\nconst ot = montoPorcion(p.monto_otros, 'monto_otros'); if (!ot.ok) return fail('payload_invalido', ot.message);\n\nconst suma = ef.val + tr.val + ot.val;\nif (!(suma > 0)) return fail('payload_invalido', 'al menos una porcion de saldo debe ser mayor a cero');\n\nlet subtipo = 'bancaria';\nif (p.subtipo_transferencia !== undefined && p.subtipo_transferencia !== null) {\n  if (typeof p.subtipo_transferencia !== 'string' || !ENUM_SUBTIPO.includes(p.subtipo_transferencia)) return fail('payload_invalido', 'subtipo_transferencia invalido (bancaria|mp)');\n  subtipo = p.subtipo_transferencia;\n}\n\nlet origen = null;\nlet descripcion = null;\nif (ot.val > 0) {\n  if (typeof p.origen_otros !== 'string' || p.origen_otros.trim() === '' || p.origen_otros.length > ORIGEN_MAX) return fail('payload_invalido', 'origen_otros requerido (1..120) cuando monto_otros > 0');\n  if (typeof p.descripcion_otros !== 'string' || p.descripcion_otros.trim() === '' || p.descripcion_otros.length > DESC_MAX) return fail('payload_invalido', 'descripcion_otros requerido (1..200) cuando monto_otros > 0');\n  origen = p.origen_otros.trim();\n  descripcion = p.descripcion_otros.trim();\n} else if ((p.origen_otros !== undefined && p.origen_otros !== null) || (p.descripcion_otros !== undefined && p.descripcion_otros !== null)) {\n  return fail('payload_invalido', 'origen_otros/descripcion_otros no permitidos cuando monto_otros es 0');\n}\n\nconst key = p.idempotency_key;\nif (typeof key !== 'string' || key.length < 8 || key.length > 64 || !/^[A-Za-z0-9_-]+$/.test(key)) return fail('payload_invalido', 'idempotency_key invalida');\n\nif (p.notas !== undefined && p.notas !== null && (typeof p.notas !== 'string' || p.notas.length > MAXLEN)) return fail('payload_invalido', 'notas invalida');\n\nreturn [{ json: {\n  __auth_ok: true,\n  action: env.action, rol: env.rol, actor: env.actor,\n  ambiente_esperado: env.ambiente_esperado, ts: env.ts, nonce: env.nonce,\n  payload: {\n    id_reserva: p.id_reserva,\n    monto_efectivo: ef.val,\n    monto_transferencia: tr.val,\n    subtipo_transferencia: subtipo,\n    monto_otros: ot.val,\n    origen_otros: origen,\n    descripcion_otros: descripcion,\n    idempotency_key: key,\n    notas: (p.notas != null ? p.notas : null)\n  }\n}}];\n"
+      },
+      "name": "validar_firma_ts_rol",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor AS ambiente FROM configuracion_general WHERE clave = 'ambiente';",
+        "options": {}
+      },
+      "name": "leer_ambiente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -656,
+        128
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combina el resultado de validar_firma_ts_rol con el ambiente leido de la BD.\nconst v = $('validar_firma_ts_rol').first().json;\nif (!v.__auth_ok) {\n  return [{ json: { acceso: false, error: v.error, message: v.message } }];\n}\nconst ambRow = $('leer_ambiente').first().json;\nconst dbAmbiente = ambRow.ambiente;\nif (dbAmbiente !== v.ambiente_esperado) {\n  return [{ json: { acceso: false, error: 'ambiente_incorrecto', message: 'ambiente no coincide' } }];\n}\nif (dbAmbiente !== 'test') {\n  return [{ json: { acceso: false, error: 'ambiente_incorrecto', message: 'wrapper TEST-only' } }];\n}\nreturn [{ json: { acceso: true, rol: v.rol, actor: v.actor, payload: v.payload, ambiente: dbAmbiente } }];"
+      },
+      "name": "verificar_acceso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-acceso",
+              "leftValue": "={{ $json.acceso }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF_acceso",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A10-MP -- Derivacion server-side: source_event determinista (PII-free) + lineas[] payload-ready\n// para registrar_pago (consolida N3+N4.5 de W09: porciones, recargo 5%, otros como efectivo-equiv ARS\n// con traza, orden efectivo->otros->transferencia(saldo)->extra). NO registra: el alta ocurre en PG_cobro_mp.\nconst crypto = require('crypto');\nconst va = $('verificar_acceso').first().json;\nconst p = va.payload;\nconst actor = va.actor;\n\nconst ef = Number(p.monto_efectivo || 0);\nconst tr = Number(p.monto_transferencia || 0);\nconst ot = Number(p.monto_otros || 0);\n\n// Recargo 5% SOLO sobre la porcion de transferencia (interno, no lo carga el operador).\nconst recargo = tr > 0 ? Math.round(tr * 0.05) : 0;\nconst suma_saldo = ef + tr + ot;\n\n// Punto #5: 'mp' (gateway normalizado) -> 'transferencia_mp'; cualquier otro -> 'transferencia_bancaria'.\nconst MEDIO_TRANSFERENCIA = (p.subtipo_transferencia === 'mp') ? 'transferencia_mp' : 'transferencia_bancaria';\n\n// source_event UNICO y determinista del evento (mismo para TODAS las lineas). Patron W10.\nconst canon = String(p.id_reserva) + '|' + p.idempotency_key;\nconst hash = crypto.createHash('sha256').update(canon, 'utf8').digest('hex').slice(0, 12);\nconst source_event = 'portal_test_a10mp_res' + p.id_reserva + '_' + hash;\n\n// Traza de \"otros\" (medio_original + registrado_como); origen/descripcion ya validados/trim por el preambulo.\nconst nota_otros = ot > 0\n  ? ('medio_original=otros; origen_otros=' + p.origen_otros + '; descripcion_otros=' + p.descripcion_otros + '; registrado_como=efectivo_ars')\n  : '';\n\n// Cada linea ES un payload completo para registrar_pago (shape de N4.5).\nfunction linea(tipo, medio_pago, monto, notas_linea) {\n  return {\n    id_reserva: p.id_reserva,\n    tipo: tipo,\n    medio_pago: medio_pago,\n    monto_esperado: monto,\n    monto_recibido: monto,        // capa fuerza recibido = esperado\n    moneda: 'ARS',\n    estado_inicial: 'confirmado', // capa fuerza confirmado\n    validado_por: actor,\n    notas: notas_linea,\n    source_event: source_event\n  };\n}\n\n// B3.2 -- Nota del operador (campo opcional `notas` del payload). Se ANEXA a las notas internas de las\n// lineas saldo SIN pisar la traza interna (porcion_efectivo / porcion_transferencia / traza de otros).\n// NO se aplica a la linea `extra` (auto-generada, conserva 'recargo_5_saldo_transferencia').\n// Forma parte de la firma canonica (vive en notas): misma key + nota distinta -> conflicto (correcto).\nfunction appendNotaOperador(base) {\n  const n = (p.notas != null) ? String(p.notas).trim() : '';\n  return (n === '') ? base : (base + '; nota_operador=' + n);\n}\n\nconst lineas = [];\nif (ef > 0) lineas.push(linea('saldo', 'efectivo', ef, appendNotaOperador('porcion_efectivo')));\nif (ot > 0) lineas.push(linea('saldo', 'efectivo', ot, appendNotaOperador(nota_otros)));   // otros -> efectivo-equivalente ARS\nif (tr > 0) {\n  lineas.push(linea('saldo', MEDIO_TRANSFERENCIA, tr, appendNotaOperador('porcion_transferencia')));\n  // Linea extra SOLO si recargo>0: registrar_pago exige monto_esperado>0 (chk_pagos_monto_esperado);\n  // una transferencia tan chica que redondea recargo a 0 no genera extra (y no rompe el cobro).\n  // El extra NO lleva nota_operador (es interno/automatico).\n  if (recargo > 0) lineas.push(linea('extra', MEDIO_TRANSFERENCIA, recargo, 'recargo_5_saldo_transferencia'));\n}\n\n// sql_payload = $1 de PG_cobro_mp (y de PG_verif_post). Lleva lineas[] + firma del evento.\nconst sql_payload = {\n  id_reserva: p.id_reserva,\n  source_event: source_event,\n  validado_por: actor,\n  suma_saldo: suma_saldo,\n  recargo: recargo,\n  cant_lineas: lineas.length,\n  lineas: lineas\n};\n\n// detalle: echo para el render (no autoridad de montos; los autoritativos salen de PG_verif_post).\nconst detalle = {\n  efectivo: ef,\n  transferencia: tr,\n  subtipo_transferencia: (tr > 0 ? p.subtipo_transferencia : null),\n  otros: ot,\n  recargo: recargo\n};\n\nreturn [{ json: { sql_payload: sql_payload, source_event: source_event, id_reserva: p.id_reserva, actor: actor, detalle: detalle } }];\n"
+      },
+      "name": "derivar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- A10-MP -- PG_cobro_mp (St1 + St2, queryBatching: transaction). $1 = sql_payload jsonb (de derivar).\n-- Generaliza el PG_cobranza de W10 (A10). B3.1: idempotencia por FIRMA CANONICA DE LINEAS (tipo+\n-- medio_pago+monto_recibido+notas), comparada como MULTISET (arrays de texto ordenados, order-independent).\n-- La firma ESPERADA se deriva de sql_payload.lineas y la EXISTENTE de pagos, ambas con la MISMA\n-- normalizacion EN SQL (sin render JS->SQL): asi un replay con misma key pero medio/traza distintos\n-- (bancaria vs mp, efectivo vs otros, descripcion_otros distinta) da idempotency_mismatch, no match.\n-- Saldo BYTE-ALINEADO a A12. Branch F registra TODAS las lineas via CTE MATERIALIZED (abortar_si_falla\n-- por linea -> rollback atomico si una falla, D-9B-19). NO toca registrar_pago/tablas/enums: solo invoca.\n\n-- St1 -- Lock transaccional por id_reserva (advisory xact; se libera en COMMIT/ROLLBACK).\nSELECT pg_advisory_xact_lock( hashtext('a10mp_cobro_saldo:' || (($1::jsonb)->>'id_reserva')) );\n\n-- St2 -- Idempotencia (firma canonica de lineas) -> saldo in-txn -> alta multi-linea atomica.\nWITH\n  existing_arr AS (                                -- (1) firma de las lineas YA registradas (source_event)\n    SELECT COALESCE(array_agg(obj::text ORDER BY obj::text), ARRAY[]::text[]) AS a\n    FROM (\n      SELECT jsonb_build_object(\n               't',  tipo,\n               'm',  medio_pago,\n               'mr', to_char(monto_recibido, 'FM999999999990.00'),\n               'n',  COALESCE(notas, '')\n             ) AS obj\n      FROM pagos\n      WHERE source_event = ($1::jsonb)->>'source_event'\n    ) e\n  ),\n  expected_arr AS (                                -- (1b) firma de las lineas ENTRANTES (MISMA normalizacion)\n    SELECT COALESCE(array_agg(obj::text ORDER BY obj::text), ARRAY[]::text[]) AS a\n    FROM (\n      SELECT jsonb_build_object(\n               't',  l->>'tipo',\n               'm',  l->>'medio_pago',\n               'mr', to_char((l->>'monto_recibido')::numeric, 'FM999999999990.00'),\n               'n',  COALESCE(l->>'notas', '')\n             ) AS obj\n      FROM jsonb_array_elements( ($1::jsonb)->'lineas' ) AS l\n    ) x\n  ),\n  r AS (                                           -- (2) reserva objetivo\n    SELECT estado, monto_total\n    FROM reservas\n    WHERE id_reserva = (($1::jsonb)->>'id_reserva')::bigint\n  ),\n  reserva_por_prereserva AS (                      -- (3) mapeo prereserva->reserva (D-C-49/L-C-14)\n    SELECT id_pre_reserva, MIN(id_reserva) AS id_reserva\n    FROM reservas\n    WHERE id_pre_reserva IS NOT NULL\n    GROUP BY id_pre_reserva\n  ),\n  pagos_reserva_normalizados AS (                  -- (4) pagos normalizados (igual que A12)\n    SELECT p.estado, p.tipo, p.monto_recibido,\n           COALESCE(p.id_reserva, rpp.id_reserva) AS id_reserva_normalizado\n    FROM pagos p\n    LEFT JOIN reserva_por_prereserva rpp ON rpp.id_pre_reserva = p.id_prereserva\n  ),\n  pagado AS (                                      -- (5) total confirmado (sena+saldo) del objetivo\n    SELECT COALESCE(SUM(prn.monto_recibido) FILTER (\n             WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena', 'saldo')), 0) AS total_pagado_confirmado\n    FROM pagos_reserva_normalizados prn\n    WHERE prn.id_reserva_normalizado = (($1::jsonb)->>'id_reserva')::bigint\n  ),\n  sr AS (                                          -- (6) saldo vivo (NUNCA reservas.monto_saldo)\n    SELECT (SELECT monto_total FROM r) - (SELECT total_pagado_confirmado FROM pagado) AS saldo_real\n  )\nSELECT\n  CASE\n    -- A) Idempotencia PRIMERO: ya hay lineas con este source_event. Compara FIRMA CANONICA (multiset).\n    WHEN cardinality((SELECT a FROM existing_arr)) > 0 THEN\n      CASE\n        WHEN (SELECT a FROM existing_arr) = (SELECT a FROM expected_arr)\n        THEN jsonb_build_object('ok', true, 'idempotent_match', true)\n        ELSE jsonb_build_object('ok', false, 'error', 'idempotency_mismatch')\n      END\n    -- B) Reserva inexistente.\n    WHEN NOT EXISTS (SELECT 1 FROM r) THEN\n      jsonb_build_object('ok', false, 'error', 'reserva_no_existe')\n    -- C) Estado no cobrable (solo confirmada/activa).\n    WHEN (SELECT estado::text FROM r) NOT IN ('confirmada', 'activa') THEN\n      jsonb_build_object('ok', false, 'error', 'estado_no_cobrable', 'estado_reserva', (SELECT estado::text FROM r))\n    -- D) Saldo ya cancelado.\n    WHEN (SELECT saldo_real FROM sr) <= 0 THEN\n      jsonb_build_object('ok', false, 'error', 'saldo_ya_cancelado', 'saldo_real', (SELECT saldo_real FROM sr))\n    -- E) Sobrepago: la SUMA de saldo supera el saldo_real.\n    WHEN (($1::jsonb)->>'suma_saldo')::numeric > (SELECT saldo_real FROM sr) THEN\n      jsonb_build_object('ok', false, 'error', 'excede_saldo', 'saldo_real', (SELECT saldo_real FROM sr))\n    -- F) Alta valida y nueva: registrar TODAS las lineas, atomico (abortar_si_falla por linea, D-9B-19).\n    ELSE\n      ( WITH _ins AS MATERIALIZED (\n          SELECT public.abortar_si_falla( public.registrar_pago( l.value ) ) AS res\n          FROM jsonb_array_elements( ($1::jsonb)->'lineas' ) AS l\n        )\n        SELECT jsonb_build_object(\n          'ok', true,\n          'idempotent_match', false,\n          'cant_lineas', (SELECT count(*) FROM _ins),\n          'saldo_real_previo', (SELECT saldo_real FROM sr)\n        ) )\n  END AS resultado;\n",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ JSON.stringify($json.sql_payload) }}"
+        }
+      },
+      "name": "PG_cobro_mp",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        0
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- A10-MP -- PG_verif_post (read-only, post-COMMIT). $1 = sql_payload jsonb (de derivar).\n-- Relee TODAS las lineas del evento por source_event (suma_saldo/suma_extra/cant/confirmadas) y\n-- RECALCULA saldo_real_actual con la MISMA normalizacion byte-alineada a A12. No escribe.\nWITH\n  ev AS (\n    SELECT\n      COUNT(*) AS cant_lineas,\n      COALESCE(SUM(monto_recibido) FILTER (WHERE tipo = 'saldo'), 0) AS suma_saldo,\n      COALESCE(SUM(monto_recibido) FILTER (WHERE tipo = 'extra'), 0) AS suma_extra,\n      COALESCE(bool_and(estado::text = 'confirmado'), false) AS todos_confirmados\n    FROM pagos\n    WHERE source_event = ($1::jsonb)->>'source_event'\n  ),\n  reserva_por_prereserva AS (\n    SELECT id_pre_reserva, MIN(id_reserva) AS id_reserva\n    FROM reservas\n    WHERE id_pre_reserva IS NOT NULL\n    GROUP BY id_pre_reserva\n  ),\n  pagos_reserva_normalizados AS (\n    SELECT p.estado, p.tipo, p.monto_recibido,\n           COALESCE(p.id_reserva, rpp.id_reserva) AS id_reserva_normalizado\n    FROM pagos p\n    LEFT JOIN reserva_por_prereserva rpp ON rpp.id_pre_reserva = p.id_prereserva\n  ),\n  pagado AS (\n    SELECT COALESCE(SUM(prn.monto_recibido) FILTER (\n             WHERE prn.estado = 'confirmado' AND prn.tipo IN ('sena', 'saldo')), 0) AS total_pagado_confirmado\n    FROM pagos_reserva_normalizados prn\n    WHERE prn.id_reserva_normalizado = (($1::jsonb)->>'id_reserva')::bigint\n  )\nSELECT jsonb_build_object(\n  'cant_lineas',       (SELECT cant_lineas FROM ev),\n  'suma_saldo',        (SELECT suma_saldo FROM ev),\n  'suma_extra',        (SELECT suma_extra FROM ev),\n  'todos_confirmados', (SELECT todos_confirmados FROM ev),\n  'saldo_real_actual', (SELECT monto_total FROM reservas WHERE id_reserva = (($1::jsonb)->>'id_reserva')::bigint)\n                       - (SELECT total_pagado_confirmado FROM pagado)\n) AS resultado;\n",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($('derivar').first().json.sql_payload) }}"
+        }
+      },
+      "name": "PG_verif_post",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        0
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// A10-MP -- RENDER (camino exito). Lee resultado de PG_cobro_mp + verif de PG_verif_post + detalle de derivar.\n// Mapea etiquetas internas -> codigos EXTERNOS de la allowlist del gateway (D-C-18).\nfunction pick(nodeName) {\n  const items = $(nodeName).all();\n  for (const it of items) { if (it.json && it.json.resultado !== undefined) {\n    let r = it.json.resultado;\n    if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) {} }\n    return r;\n  }}\n  return null;\n}\nconst out = (env) => [{ json: env }];\nconst resultado = pick('PG_cobro_mp');\nconst verif = pick('PG_verif_post');\nconst der = $('derivar').first().json;\n\n// Sin resultado en la salida principal (no deberia pasar: el write rutea errores a render_error_pg).\nif (!resultado) {\n  return out({ ok: false, error: { code: 'estado_incierto', message: 'no se pudo determinar el resultado; verifica la reserva antes de reintentar' } });\n}\n\n// resultado.ok===true es confirmacion AUTORITATIVA: en alta nueva, abortar_si_falla (D-9B-19) garantiza\n// que todas las lineas quedaron confirmadas o habria tirado P0001 (ruteado a render_error_pg). En\n// idempotent_match, las lineas previas ya existen. verif aporta los montos post-commit (por source_event).\nif (resultado.ok === true) {\n  const suma_saldo = verif ? Number(verif.suma_saldo) : null;\n  const suma_extra = verif ? Number(verif.suma_extra) : null;\n  const saldo_real_actual = verif ? Number(verif.saldo_real_actual) : null;\n  const saldo_anterior = (saldo_real_actual !== null && suma_saldo !== null) ? (saldo_real_actual + suma_saldo) : null;\n  const total_cobrado = (suma_saldo !== null && suma_extra !== null) ? (suma_saldo + suma_extra) : null;\n  const data = {\n    source_event: der.source_event,\n    cant_lineas: verif ? verif.cant_lineas : der.sql_payload.cant_lineas,\n    suma_saldo: suma_saldo,\n    suma_extra: suma_extra,\n    total_cobrado: total_cobrado,\n    saldo_anterior: saldo_anterior,\n    saldo_real_actual: saldo_real_actual,\n    saldada: (saldo_real_actual === 0),\n    idempotent_match: resultado.idempotent_match === true,\n    detalle: der.detalle\n  };\n  return out({ ok: true, data: data });\n}\n\nconst motivo = resultado.error;\nconst estadoRes = (resultado.estado_reserva) ? (' (estado: ' + resultado.estado_reserva + ')') : '';\nconst MAP = {\n  reserva_no_existe:    { code: 'no_encontrado', message: 'reserva inexistente' },\n  estado_no_cobrable:   { code: 'conflicto',     message: 'la reserva no admite cobranza de saldo' + estadoRes },\n  saldo_ya_cancelado:   { code: 'conflicto',     message: 'la reserva ya no tiene saldo pendiente' },\n  excede_saldo:         { code: 'conflicto',     message: 'la suma aplicada a saldo excede el saldo pendiente' },\n  idempotency_mismatch: { code: 'conflicto',     message: 'idempotency_key reutilizada con datos distintos' }\n};\nconst ext = MAP[motivo] || { code: 'error_interno', message: 'error interno' };\nreturn out({ ok: false, error: ext });\n"
+      },
+      "name": "render",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// RENDER de rechazo de acceso (rama IF-false). Los codigos vienen de validar_firma /\n// verificar_acceso y ya pertenecen a la allowlist; defensivo: si no, error_interno.\nconst ALLOW = new Set(['payload_invalido','no_autorizado','rol_no_permitido','accion_desconocida','no_encontrado','conflicto','error_entorno','error_interno','estado_incierto','firma_invalida','ts_fuera_de_ventana','raw_body_ausente','ambiente_incorrecto']);\nconst va = $('verificar_acceso').first().json;\nconst code = ALLOW.has(va.error) ? va.error : 'error_interno';\nconst message = ALLOW.has(va.error) ? (va.message || 'error') : 'error interno';\nreturn [{ json: { ok: false, error: { code: code, message: message } } }];"
+      },
+      "name": "render_error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// RENDER de error del nodo PG_cobranza (P0001 abortar_si_falla o error crudo).\n// La transaccion se revirtio: NADA persistio. Externo: error_interno (allowlist; el gateway\n// impone el mensaje fijo). Un retry con la MISMA idempotency_key es seguro (idempotente).\nreturn [{ json: { ok: false, error: { code: 'error_interno', message: 'error interno' } } }];"
+      },
+      "name": "render_error_pg",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        880,
+        128
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF_acceso": {
+      "main": [
+        [
+          {
+            "node": "derivar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "render_error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "derivar": {
+      "main": [
+        [
+          {
+            "node": "PG_cobro_mp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG_cobro_mp": {
+      "main": [
+        [
+          {
+            "node": "PG_verif_post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "render_error_pg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG_verif_post": {
+      "main": [
+        [
+          {
+            "node": "render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "render": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "render_error": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "render_error_pg": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
