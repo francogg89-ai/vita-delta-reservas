@@ -6,20 +6,15 @@ según `CONTRATO_FRONTEND_PORTAL_v1.md` (CATALOG 13, TEST). El frontend habla **
 
 > Ubicación canónica de la doc de contrato: `Docs/Implementacion/Carril_C/Portal_Frontend/`.
 
-## Estado: Sub-slice 0 — shell de auth + menú por rol
+## Estado: Sub-slice 2 cerrado — las 4 escrituras (TEST)
 
-Alcance de este sub-slice:
+Construido y validado por rol sobre TEST:
 
-- Shell del frontend (estructura del proyecto).
-- Login / logout con Supabase Auth; persistencia y refresh de sesión.
-- Primera llamada a `sesion.contexto` (A02) → estado `{ nombre, rol, acciones }`.
-- Menú por rol armado desde `acciones` (no hardcodeado).
-- Placeholder por acción (las pantallas reales llegan en sub-slices siguientes).
-- Manejo de `no_autorizado` → re-login.
+- **Sub-slice 0 — shell:** estructura del proyecto, login/logout con Supabase Auth (persistencia + refresh), `sesion.contexto` (A02) → `{ nombre, rol, acciones }`, **menú por rol armado desde `acciones`** (no hardcodeado), placeholder por acción, `no_autorizado` → re-login.
+- **Sub-slice 1 — las 8 lecturas:** A03/A04 (calendarios en `<iframe srcDoc>` sandbox sin scripts), A05/A06/A12 y A24/A25/A13 (filtros nativos + paginación server-side); router `react-router-dom`, hook `useAction`, `DataTable`/`Paginador`, `Money` que **nunca divide por 100**.
+- **Sub-slice 2 — las 4 escrituras:** A08 `bloqueo.crear_manual`, A07 `reserva.crear_manual` (seña 0 = auto 50%), A11 `cargar.gasto_interno` (key sibling) y A10-MP `cobranza.registrar_cobro` (multi-porción + recargo 5% + **bloqueo de sobrepago** UI+backend). Patrón `useEnviar` + idempotencia por intento de submit + `estado_incierto`; W10 `cobranza.registrar_saldo` queda deprecated-in-place, oculto del frontend por tolerancia-forward.
 
-**Fuera de alcance (todavía):** pantallas reales de lectura (sub-slice 1), formularios de
-escritura (sub-slice 2), router, QA/UAT (sub-slice 3). Sin cambios en backend, n8n, OPS ni
-`6B_SCHEMA_SQL.md`.
+**Próximo:** sub-slice 3 — **QA/UAT por rol** (TEST, Jenny / Vicky / socios); recién después se evalúa la promoción coordinada del Carril C a OPS. Sin cambios en backend, n8n, OPS ni `6B_SCHEMA_SQL.md` (el frontend solo consume `portal-api` vía `action`).
 
 ## Stack
 
@@ -37,9 +32,10 @@ escritura (sub-slice 2), router, QA/UAT (sub-slice 3). Sin cambios en backend, n
   presentación (`label`, `grupo`, `orden`, `ruta`) por acción. Acción que venga en `acciones`
   pero no esté en el registry se ignora silenciosamente por pin de versión; entrada del registry
   no presente en `acciones` no se muestra. Cero hardcodeo de visibilidad por rol.
-- **D-FE-10 (a formalizar en el cierre)** — Stack del sub-slice 0: React + Vite + Supabase JS
+- **D-FE-10 (lockeada)** — Stack del sub-slice 0: React + Vite + Supabase JS
   para auth + `fetch` propio para `portal-api`.
-- **D-FE-11 (a formalizar en el cierre)** — UI base con Tailwind desde el sub-slice 0.
+- **D-FE-11 (lockeada)** — UI base con Tailwind desde el sub-slice 0.
+- Set completo del frontend: **D-FE-01…28 / L-FE-01…07** (ver `DECISIONES_NO_REABRIR.md`, `Lecciones_Aprendidas.md` y el contrato `CONTRATO_FRONTEND_PORTAL_v1.md`).
 
 ## Cómo correrlo
 
