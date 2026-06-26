@@ -525,6 +525,98 @@ export function actorCoherente(rol: Rol, nombre: string): boolean {
   return false;
 }
 
+// A10-MP (mini-etapa) — Validador del payload de cobranza multi-porción (cobranza.registrar_cobro).
+// Expone la lógica multi-porción + recargo 5% de W09 por el gateway (D-C-61). ESPEJO de la capa de
+// payload del wrapper portal-a10mp-registrar-cobro (validar_firma_ts_rol): reject-unknown; montos de
+// porción number finitos >=0 con <=2 decimales dentro de NUMERIC(12,2); suma de porciones (ef+tr+ot)
+// > 0 (al menos una); subtipo_transferencia en {bancaria,mp} default bancaria (relevante solo si
+// transferencia>0); "otros" exige origen_otros+descripcion_otros si monto_otros>0, y los prohíbe si
+// es 0 (D-C-62); idempotency_key 8-64 [A-Za-z0-9_-] EN PAYLOAD como A10/W10 (D-C-63); notas opcional.
+// El tope suma_saldo <= saldo_real NO se valida acá: es autoridad del wrapper, que conoce el saldo
+// vivo (anti-sobrepago HARD in-txn, D-C-64). `actor` NO es clave del payload: viaja en el sobre,
+// inyectado server-side (injectActor), y el wrapper lo usa como validado_por. Doble allowlist
+// (D-C-39): el gateway valida ANTES de firmar; el wrapper revalida antes del Postgres. Devuelve el
+// payload NORMALIZADO/whitelisteado (montos default 0, subtipo default 'bancaria', otros trim|null).
+const ENUM_SUBTIPO_TRANSF_GW = ['bancaria', 'mp'];
+const ORIGEN_OTROS_MAX_GW = 120;
+const DESC_OTROS_MAX_GW = 200;
+// idempotency_key SÍ es clave legítima del payload acá (como A10/W10) -> NO está en esta lista
+// (a diferencia de CONTROL_EN_PAYLOAD_A11, donde la key es sibling).
+const CONTROL_EN_PAYLOAD_A10MP = ['actor', 'rol', 'nonce', 'source_event', 'creado_por', 'request_ts'];
+export const payloadRegistrarCobro: PayloadValidator = (payload) => {
+  const bad = (message: string): PayloadValidation => ({ ok: false, message });
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return bad('payload inválido: se esperaba un objeto');
+  const p = payload as Record<string, unknown>;
+  // Rechazo explícito de control en payload (fail-fast); el reject-unknown de abajo igual los bouncearía.
+  for (const k of CONTROL_EN_PAYLOAD_A10MP) if (k in p) return bad(`campo de control no permitido en payload: ${k}`);
+  const PERMITIDAS = ['id_reserva', 'monto_efectivo', 'monto_transferencia', 'subtipo_transferencia',
+    'monto_otros', 'origen_otros', 'descripcion_otros', 'idempotency_key', 'notas'];
+  for (const k of Object.keys(p)) if (!PERMITIDAS.includes(k)) return bad(`clave no permitida en payload: ${k}`);
+
+  const isStr = (v: unknown): v is string => typeof v === 'string';
+
+  // id_reserva: entero positivo estricto (igual que A05/A10).
+  if (typeof p.id_reserva !== 'number' || !Number.isSafeInteger(p.id_reserva) || p.id_reserva <= 0) return bad('id_reserva debe ser entero positivo');
+
+  // Montos de porción: opcionales (ausente/null -> 0). Cada uno number finito >=0, <=2 decimales,
+  // dentro de NUMERIC(12,2). Devuelve el número normalizado.
+  const montoPorcion = (v: unknown, nombre: string): { ok: true; val: number } | { ok: false; message: string } => {
+    if (v == null) return { ok: true, val: 0 };
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return { ok: false, message: `${nombre} debe ser número >= 0 finito` };
+    const cents = Math.round(v * 100);
+    if (Math.abs(v * 100 - cents) > 1e-6) return { ok: false, message: `${nombre} admite máximo 2 decimales` };
+    if (v > MONTO_MAX_A10_GW) return { ok: false, message: `${nombre} fuera de rango` };
+    return { ok: true, val: v };
+  };
+  const ef = montoPorcion(p.monto_efectivo, 'monto_efectivo'); if (!ef.ok) return bad(ef.message);
+  const tr = montoPorcion(p.monto_transferencia, 'monto_transferencia'); if (!tr.ok) return bad(tr.message);
+  const ot = montoPorcion(p.monto_otros, 'monto_otros'); if (!ot.ok) return bad(ot.message);
+
+  // Suma de porciones de saldo > 0 (al menos una). El tope <= saldo_real lo impone el wrapper (D-C-64).
+  const suma = ef.val + tr.val + ot.val;
+  if (!(suma > 0)) return bad('al menos una porción de saldo debe ser mayor a cero');
+
+  // subtipo_transferencia: opcional, {bancaria, mp}, default bancaria. Lenient: se acepta aunque
+  // transferencia sea 0 (queda inerte aguas abajo), para no ser más estricto que el wrapper.
+  let subtipo = 'bancaria';
+  if (p.subtipo_transferencia != null) {
+    if (!isStr(p.subtipo_transferencia) || !ENUM_SUBTIPO_TRANSF_GW.includes(p.subtipo_transferencia)) return bad('subtipo_transferencia inválido (bancaria|mp)');
+    subtipo = p.subtipo_transferencia;
+  }
+
+  // "otros": si monto_otros>0 exige origen+descripcion no vacíos; si ==0, no deben venir (D-C-62).
+  let origen: string | null = null;
+  let descripcion: string | null = null;
+  if (ot.val > 0) {
+    if (!isStr(p.origen_otros) || p.origen_otros.trim() === '' || p.origen_otros.length > ORIGEN_OTROS_MAX_GW) return bad('origen_otros requerido (1..120) cuando monto_otros > 0');
+    if (!isStr(p.descripcion_otros) || p.descripcion_otros.trim() === '' || p.descripcion_otros.length > DESC_OTROS_MAX_GW) return bad('descripcion_otros requerido (1..200) cuando monto_otros > 0');
+    origen = p.origen_otros.trim();
+    descripcion = p.descripcion_otros.trim();
+  } else if (p.origen_otros != null || p.descripcion_otros != null) {
+    return bad('origen_otros/descripcion_otros no permitidos cuando monto_otros es 0');
+  }
+
+  // idempotency_key EN PAYLOAD (D-C-63), 8..64 [A-Za-z0-9_-] (IDEM_RE_GW, igual que A10/W10).
+  const key = p.idempotency_key;
+  if (!isStr(key) || !IDEM_RE_GW.test(key)) return bad('idempotency_key inválida');
+
+  // notas opcional.
+  if (p.notas != null && (!isStr(p.notas) || p.notas.length > MAXLEN_GW)) return bad('notas inválida');
+
+  const value = {
+    id_reserva: p.id_reserva,
+    monto_efectivo: ef.val,
+    monto_transferencia: tr.val,
+    subtipo_transferencia: subtipo,
+    monto_otros: ot.val,
+    origen_otros: origen,
+    descripcion_otros: descripcion,
+    idempotency_key: key,
+    notas: (p.notas != null ? p.notas : null),
+  };
+  return { ok: true, value };
+};
+
 const CATALOG: Record<string, CatalogEntry> = {
   'sesion.contexto': { handler: 'edge', roles: ['jenny', 'vicky', 'socio'] },
   // A03 (Slice 1 / Bloque 3) — Calendario de limpieza. Wrapper n8n firmado
@@ -621,6 +713,19 @@ const CATALOG: Record<string, CatalogEntry> = {
   // payload_mismatch/actor_mismatch -> conflicto, constraint -> payload_invalido; todos allowlisted.
   // El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
   'cargar.gasto_interno': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a11-cargar-gasto-interno__TEST', validate: payloadCargarGastoInterno, injectActor: true, isWrite: true, needsIdempotencyKey: true },
+  // A10-MP (mini-etapa) — Cobranza multi-porción (cobranza.registrar_cobro). Expone la lógica
+  // multi-porción + recargo 5% de W09 por el gateway (D-C-61); CONVIVE con cobranza.registrar_saldo
+  // (W10/A10), que queda DEPRECADO-IN-PLACE (sigue desplegado, el portal deja de llamarlo; B5 usa
+  // solo el nuevo). Wrapper n8n firmado (portal-a10mp-registrar-cobro__TEST). SOLO vicky/socio
+  // (D-C-03): jenny rebota con rol_no_permitido EN EL GATEWAY antes de firmar. validate:
+  // payloadRegistrarCobro (espejo del wrapper). injectActor: el actor (persona) se inyecta server-side
+  // desde portal_usuarios.nombre y el wrapper lo usa como validado_por, NUNCA del frontend. isWrite:
+  // ante dispatch no confiable, estado_incierto (la escritura pudo aplicarse). idempotency_key EN
+  // PAYLOAD (D-C-63, como A10/W10): NO usa needsIdempotencyKey; el wrapper deriva source_event
+  // determinista (id_reserva+key), dedup por source_event, mismatch -> conflicto. El wrapper mapea
+  // excede_saldo/idempotency_mismatch -> conflicto, reserva_no_existe -> no_encontrado, P0001 ->
+  // error_interno; todos allowlisted. El key DEBE coincidir con EXPECTED_ACTION del wrapper (D-C-41).
+  'cobranza.registrar_cobro': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a10mp-registrar-cobro__TEST', validate: payloadRegistrarCobro, injectActor: true, isWrite: true },
 };
 
 const ROLES_VALIDOS: ReadonlySet<Rol> = new Set<Rol>(['jenny', 'vicky', 'socio']);
