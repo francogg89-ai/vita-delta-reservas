@@ -87,8 +87,8 @@ export const ACTION_REGISTRY: Record<string, ActionMeta> = {
     orden: 10,
     ruta: '/cobranzas/saldos',
   },
-  'cobranza.registrar_saldo': {
-    action: 'cobranza.registrar_saldo',
+  'cobranza.registrar_cobro': {
+    action: 'cobranza.registrar_cobro',
     label: 'Registrar cobro',
     grupo: 'cobranzas',
     orden: 20,

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useAction } from '../hooks/useAction';
 import { Cargando } from '../ui/Cargando';
 import { ErrorCard } from '../ui/ErrorCard';
@@ -5,6 +6,7 @@ import { Vacio } from '../ui/Vacio';
 import { DataTable, type Columna } from '../ui/DataTable';
 import { Money } from '../ui/Money';
 import { Fecha } from '../ui/Fecha';
+import { botonSecundario } from '../ui/estilos';
 import type { SaldosData, SaldoFila } from '../lib/contratos';
 
 const COLUMNAS: Columna<SaldoFila>[] = [
@@ -34,6 +36,18 @@ const COLUMNAS: Columna<SaldoFila>[] = [
   { key: 'total', header: 'Total', align: 'right', render: (f) => (f.monto_total != null ? <Money monto={f.monto_total} /> : '—') },
   { key: 'pagado', header: 'Pagado', align: 'right', render: (f) => (f.total_pagado_confirmado != null ? <Money monto={f.total_pagado_confirmado} /> : '—') },
   { key: 'saldo', header: 'Saldo', align: 'right', render: (f) => (f.saldo_real != null ? <Money monto={f.saldo_real} /> : '—') },
+  {
+    key: 'accion',
+    header: '',
+    align: 'right',
+    // B3: deep-link de solo navegacion hacia A10-MP (no toca el endpoint A12). La pantalla
+    // destino revalida cobrabilidad (estado/saldo) y el saldo real lo trae reserva.detalle.
+    render: (f) => (
+      <Link to={`/cobranzas/registrar?id_reserva=${f.id_reserva}`} className={botonSecundario}>
+        Cobrar
+      </Link>
+    ),
+  },
 ];
 
 export function CobranzaSaldos() {

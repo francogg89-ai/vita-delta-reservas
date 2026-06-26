@@ -1,5 +1,7 @@
 // Constantes de presentación del portal.
 
+import type { SubtipoTransferencia } from './contratos';
+
 /** Floor contable duro (D-NEG-02 / D-C-11/20): no hay datos ni filtros antes de esta fecha. */
 export const FLOOR_CONTABLE = '2026-07-01';
 
@@ -94,6 +96,16 @@ export const MEDIOS_PAGO_COBRO: ReadonlyArray<{ valor: string; etiqueta: string 
   { valor: 'transferencia_bancaria', etiqueta: 'Transferencia bancaria' },
   { valor: 'transferencia_mp', etiqueta: 'Transferencia Mercado Pago' },
   { valor: 'cripto', etiqueta: 'Cripto' },
+];
+
+/**
+ * A10-MP `cobranza.registrar_cobro` - subtipo de la porcion de transferencia
+ * (`subtipo_transferencia` en {bancaria, mp}, default 'bancaria'). Solo aplica cuando
+ * `monto_transferencia > 0`; el gateway lo acepta lenient aunque la transferencia sea 0.
+ */
+export const SUBTIPOS_TRANSFERENCIA: ReadonlyArray<{ valor: SubtipoTransferencia; etiqueta: string }> = [
+  { valor: 'bancaria', etiqueta: 'Bancaria' },
+  { valor: 'mp', etiqueta: 'Mercado Pago' },
 ];
 
 /** Pagador de gasto (A11) con etiquetas legibles. Valores = gastos_internos.pagador_tipo. */

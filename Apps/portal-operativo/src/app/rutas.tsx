@@ -14,11 +14,13 @@ import { GastosListado } from '../screens/GastosListado';
 import { CrearBloqueo } from '../screens/CrearBloqueo';
 import { CrearReserva } from '../screens/CrearReserva';
 import { CargarGasto } from '../screens/CargarGasto';
+import { RegistrarCobro } from '../screens/RegistrarCobro';
 
 /**
  * Pantallas reales ya implementadas (action -> componente). Los placeholders se reemplazan
- * por bloque. Lecturas (sub-slice 1): A03/A04/A05/A06/A12/A24/A25/A13. Escrituras (sub-slice 2)
- * entran de a una: B2 A08, B3 A07, B4 A11. Falta A10 -> sigue en PlaceholderView hasta su bloque.
+ * por bloque. Lecturas (sub-slice 1): A03/A04/A05/A06/A12/A24/A25/A13. Escrituras (sub-slice 2):
+ * B2 A08, B3 A07, B4 A11, B5 A10-MP (cobranza.registrar_cobro). W10 (cobranza.registrar_saldo)
+ * queda fuera del registry: deprecated-in-place en backend, sin pantalla en el portal.
  */
 const PANTALLAS: Record<string, ComponentType> = {
   'calendario.limpieza': CalendarioLimpieza,
@@ -26,6 +28,7 @@ const PANTALLAS: Record<string, ComponentType> = {
   'reserva.detalle': ReservaDetalle,
   'prereservas.activas': PrereservasActivas,
   'cobranza.saldos': CobranzaSaldos,
+  'cobranza.registrar_cobro': RegistrarCobro,
   'historico.reservas': HistoricoReservas,
   'ingresos.cobrados_periodo': IngresosPeriodo,
   'gastos.listado': GastosListado,

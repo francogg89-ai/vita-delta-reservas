@@ -206,13 +206,50 @@ export interface CrearBloqueoData {
   tipo_bloqueo: string;
 }
 
-/** A10 cobranza.registrar_saldo. `saldo_real_actual` recomputado post-commit (puede ser 0). */
+/**
+ * A10 cobranza.registrar_saldo (W10) — DEPRECATED en el frontend (B5). El portal ya no llama
+ * registrar_saldo; el tipo queda solo por referencia historica (W10 sigue desplegado en backend,
+ * deprecated-in-place). B5 usa RegistrarCobroData. `saldo_real_actual` recomputado post-commit.
+ */
 export interface RegistrarSaldoData {
   id_pago: number;
   estado_pago: string;
   idempotent_match: boolean;
   saldo_real_actual: number | null;
   saldo_real_previo?: number | null;
+}
+
+/** Subtipo de la porcion de transferencia (contrato A10-MP): solo `bancaria` o `mp`. */
+export type SubtipoTransferencia = 'bancaria' | 'mp';
+
+/** A10-MP `cobranza.registrar_cobro` -> `detalle` (eco de `derivar`, no autoridad de montos). */
+export interface RegistrarCobroDetalle {
+  efectivo: number;
+  transferencia: number;
+  /** null si `transferencia == 0` (cierre A10-MP §4.5). */
+  subtipo_transferencia: SubtipoTransferencia | null;
+  otros: number;
+  recargo: number;
+}
+
+/**
+ * A10-MP `cobranza.registrar_cobro` (cobranza multi-porcion + recargo 5%). Forma EXACTA del
+ * `response.data` (cierre A10-MP §4.5). `suma_saldo`/`suma_extra`/`saldo_real_actual` son
+ * autoritativos (recomputados post-COMMIT por PG_verif_post); `detalle` es eco de `derivar`.
+ * Contabilidad (D-C-68): las lineas `saldo` bajan saldo y entran al 25%; el `extra` (recargo) NO
+ * baja saldo (no se resta del saldo) pero SI es caja percibida. `saldada` = saldo_real_actual === 0.
+ */
+export interface RegistrarCobroData {
+  source_event: string;
+  cant_lineas: number;
+  suma_saldo: number;
+  suma_extra: number;
+  total_cobrado: number;
+  saldo_anterior: number;
+  saldo_real_actual: number;
+  saldada: boolean;
+  idempotent_match: boolean;
+  detalle: RegistrarCobroDetalle;
 }
 
 /** A11 cargar.gasto_interno. OJO: la clave es `idempotente` (no `idempotent_match`). */

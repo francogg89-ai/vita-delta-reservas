@@ -4,7 +4,7 @@ import type { ActionMeta } from '../lib/actionRegistry';
 const ESCRITURAS = new Set([
   'reserva.crear_manual',
   'bloqueo.crear_manual',
-  'cobranza.registrar_saldo',
+  'cobranza.registrar_cobro',
   'cargar.gasto_interno',
 ]);
 
