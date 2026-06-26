@@ -3,6 +3,8 @@ import { AuthProvider } from './auth/AuthProvider';
 import { useAuth } from './auth/useAuth';
 import { LoginScreen } from './auth/LoginScreen';
 import { AppShell } from './app/AppShell';
+import { BannerAmbiente } from './app/BannerAmbiente';
+import { MOSTRAR_BANNER } from './lib/ambiente';
 
 function Pantalla() {
   const { status, errorMessage, reintentarContexto, logout } = useAuth();
@@ -58,7 +60,14 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Pantalla />
+        {/* Banner de ambiente: fijo arriba de todo, visible incluido pre-login. */}
+        <BannerAmbiente />
+        {/* h-full = 100% de #root (cadena html/body/#root height:100% en index.css).
+            pt-8 reserva la franja del banner fijo (border-box por defecto en Tailwind),
+            asi el min-h-full de cada pantalla resuelve contra el area util correcta. */}
+        <div className={MOSTRAR_BANNER ? 'h-full pt-8' : 'h-full'}>
+          <Pantalla />
+        </div>
       </AuthProvider>
     </BrowserRouter>
   );
