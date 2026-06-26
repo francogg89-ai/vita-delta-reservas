@@ -600,6 +600,8 @@ formulario de carga 8B. Decisiones finales respecto de lo previsto en 8C:
   ejecución real quedará registrada con la próxima reserva en ventana.
 Ver `8C-bis_CIERRE.md` y decisiones D-8Cbis-01 a D-8Cbis-10.
 
+**Actualización (2026-06-26) — el aviso ahora cubre también el alta por el portal (A07).** Hasta ahora el aviso 8C-bis se disparaba **solo desde el form de 8B**; el wrapper A07 del portal no lo invocaba. Se enganchó al A07 una **rama lateral no bloqueante** (espejo del patrón de 8B) que llama al mismo sub-workflow `vita_w8cbis_alerta`, **sin lógica nueva de mail**, validado end-to-end en TEST (5 gates verdes, incluido el de no-afectación). Así, cuando el equipo cree reservas por el portal en OPS, también saldrá el aviso. **No promovido a OPS** (viaja en la promoción coordinada del Carril C: el `Call` apuntará al 8C-bis OPS con `entorno` resuelto a `'ops'`). Decisiones **D-C-71…73**, lecciones **L-C-24/25**. Ver `AVISO_8CBIS_PORTAL_A07_CIERRE.md`.
+
 ### 3.2 Endpoint obligatorio antes de web pública — `consultar_disponibilidad_precio`
 
 **Estado actual:** no implementado en DEV.
