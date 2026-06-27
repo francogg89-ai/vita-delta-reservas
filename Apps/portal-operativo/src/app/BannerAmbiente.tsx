@@ -13,6 +13,7 @@ import { AMBIENTE, type Ambiente } from '../lib/ambiente';
 
 const TITULOS: Record<Ambiente, string> = {
   test: 'TEST · Vita Delta - Portal operativo',
+  ops: 'Vita Delta - Portal operativo',
   desconocido: 'NO RECONOCIDO · Vita Delta - Portal',
 };
 
@@ -20,6 +21,10 @@ export function BannerAmbiente() {
   useEffect(() => {
     document.title = TITULOS[AMBIENTE];
   }, []);
+
+  // 'ops' (produccion reconocida): sin banner. La barra de arriba desaparece;
+  // App.tsx ya omite el pt-8 cuando MOSTRAR_BANNER es false, asi que no queda hueco.
+  if (AMBIENTE === 'ops') return null;
 
   if (AMBIENTE === 'test') {
     return (

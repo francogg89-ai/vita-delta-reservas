@@ -55,7 +55,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Combina el resultado de validar_firma_ts_rol con el ambiente leido de la BD.\nconst v = $('validar_firma_ts_rol').first().json;\nif (!v.__auth_ok) {\n  return [{ json: { acceso: false, error: v.error, message: v.message } }];\n}\nconst ambRow = $('leer_ambiente').first().json;\nconst dbAmbiente = ambRow.ambiente;\nif (dbAmbiente !== v.ambiente_esperado) {\n  return [{ json: { acceso: false, error: 'ambiente_incorrecto', message: 'ambiente no coincide' } }];\n}\nif (dbAmbiente !== 'test') {\n  return [{ json: { acceso: false, error: 'ambiente_incorrecto', message: 'wrapper TEST-only' } }];\n}\nreturn [{ json: { acceso: true, rol: v.rol, actor: v.actor, payload: v.payload, ambiente: dbAmbiente } }];"
+        "jsCode": "// Combina el resultado de validar_firma_ts_rol con el ambiente leido de la BD.\nconst v = $('validar_firma_ts_rol').first().json;\nif (!v.__auth_ok) {\n  return [{ json: { acceso: false, error: v.error, message: v.message } }];\n}\nconst ambRow = $('leer_ambiente').first().json;\nconst dbAmbiente = ambRow.ambiente;\nif (dbAmbiente !== v.ambiente_esperado) {\n  return [{ json: { acceso: false, error: 'ambiente_incorrecto', message: 'ambiente no coincide' } }];\n}\nreturn [{ json: { acceso: true, rol: v.rol, actor: v.actor, payload: v.payload, ambiente: dbAmbiente } }];"
       },
       "name": "verificar_acceso",
       "type": "n8n-nodes-base.code",

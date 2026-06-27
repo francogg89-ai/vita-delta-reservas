@@ -15,12 +15,17 @@
 // a proposito: un build sin configurar grita en vez de parecer produccion.
 
 const REF_TEST = 'bdskhhbmcksskkzqkcdp';
+const REF_OPS = 'lpiatqztudxiwdlcoasv';
 
-export type Ambiente = 'test' | 'desconocido';
+export type Ambiente = 'test' | 'ops' | 'desconocido';
 
 const urlSupabase: string = import.meta.env.VITE_SUPABASE_URL ?? '';
 
-export const AMBIENTE: Ambiente = urlSupabase.includes(REF_TEST) ? 'test' : 'desconocido';
+export const AMBIENTE: Ambiente = urlSupabase.includes(REF_OPS)
+  ? 'ops'
+  : urlSupabase.includes(REF_TEST)
+    ? 'test'
+    : 'desconocido';
 
 // En ambos estados actuales (test y defensivo) se muestra banner. Solo un futuro
 // 'ops' reconocido no lo mostraria (rama a agregar en la etapa OPS).
