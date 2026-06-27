@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useEnviar } from '../hooks/useEnviar';
 import { Campo } from '../ui/Campo';
@@ -9,6 +9,7 @@ import { controlClass, botonPrimario, botonSecundario } from '../ui/estilos';
 import { CABANAS_TEST, MEDIOS_PAGO_RESERVA } from '../lib/constantes';
 import { mensajeUsuario } from '../lib/erroresEscritura';
 import type { CrearReservaData } from '../lib/contratos';
+import { supabase } from '../lib/supabase';
 
 // A07 reserva.crear_manual (escritura, sin idempotency_key: el wrapper deriva idempotencia de
 // cabana+fechas+contacto -> la respuesta trae idempotent_match). Validacion cliente = espejo del
@@ -46,7 +47,7 @@ const INICIAL: FormReserva = {
 type CampoError = keyof FormReserva | 'contacto';
 type Errores = Partial<Record<CampoError, string>>;
 
-function validar(f: FormReserva): Errores {
+function validar(f: FormReserva, emailUsuario: string | null): Errores {
   const e: Errores = {};
   if (!f.id_cabana) e.id_cabana = 'Elegi una cabana.';
   if (!f.fecha_in) e.fecha_in = 'Indica el check-in.';
@@ -91,6 +92,12 @@ function validar(f: FormReserva): Errores {
   // Espejo del gateway: si hay email NO vacio, debe ser valido, aunque el telefono sea valido
   // (el gateway rechaza huesped.email no vacio mal formado de forma independiente).
   if (emailPresente && !emailOk) e.huesped_email = 'El email cargado no es valido.';
+  // Anti-autofill: el navegador puede rellenar el email del huesped con el del operador
+  // logueado. Si coinciden, se rechaza: ese email es del operador, no del huesped (evita
+  // que upsert_huesped dedupee distintas reservas al mismo huesped por el email).
+  if (emailPresente && emailOk && emailUsuario && emailTrim.toLowerCase() === emailUsuario) {
+    e.huesped_email = 'Ese es tu email de operador, no el del huesped. Dejalo vacio si no tenes el del huesped.';
+  }
   // Requisito de contacto: al menos un telefono valido O un email valido.
   if (!telOk && !(emailPresente && emailOk)) {
     e.contacto = 'Indica un telefono valido o un email valido.';
@@ -115,6 +122,12 @@ function Seccion({ titulo }: { titulo: string }) {
 export function CrearReserva() {
   const [form, setForm] = useState<FormReserva>(INICIAL);
   const [errores, setErrores] = useState<Errores>({});
+  const [emailUsuario, setEmailUsuario] = useState<string | null>(null);
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => {
+      setEmailUsuario(data.session?.user?.email?.toLowerCase() ?? null);
+    });
+  }, []);
   const { enviar, enviando, resultado, error, estadoIncierto, reset } =
     useEnviar<CrearReservaData>('reserva.crear_manual', 'none');
 
@@ -125,7 +138,7 @@ export function CrearReserva() {
   }
 
   function submit() {
-    const e = validar(form);
+    const e = validar(form, emailUsuario);
     setErrores(e);
     if (Object.values(e).some(Boolean)) return;
 
@@ -268,7 +281,7 @@ export function CrearReserva() {
             <input type="tel" value={form.huesped_telefono} onChange={(e) => set('huesped_telefono', e.target.value)} placeholder="Ej. 1155..." className={controlClass} />
           </Campo>
           <Campo label="Email" error={errores.huesped_email} hint="Telefono o email: al menos uno.">
-            <input type="email" value={form.huesped_email} onChange={(e) => set('huesped_email', e.target.value)} className={controlClass} />
+            <input type="email" autoComplete="off" value={form.huesped_email} onChange={(e) => set('huesped_email', e.target.value)} className={controlClass} />
           </Campo>
         </div>
 
