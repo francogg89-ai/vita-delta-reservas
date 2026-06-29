@@ -1,9 +1,9 @@
 # 6B_SCHEMA_SQL.md
 # Schema PostgreSQL — Vita Delta Reservas
 
-**Versión:** 1.8.1
+**Versión:** 1.9.0
 **Fecha:** Junio 2026
-**Estado:** Canónico vigente: **`6B_SCHEMA_SQL.md v1.8.1`**. v1.8.0 consolidó el **Carril B** (contabilidad operativa interna, sub-etapas 9C→9H + helper 9B) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026; **v1.8.1 canoniza el hardening de las funciones base del motor** (Bloque 23, `REVOKE EXECUTE`), que se venía aplicando fuera de banda por entorno. La base (Partes A y B) refleja el estado alineado DEV/TEST/OPS de v1.7.3; el Carril B (sección 24 y PARTE C) refleja el estado final TEST=OPS verificado por huella estructural (K1, `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17`). El canónico es autocontenido y apto para bootstrappear un entorno nuevo de cero. **DEV fue reconstruido desde cero desde v1.8.0** (jun-2026, proyecto nuevo `wsrdzjmvnzxidjlovlja`, cerrado como OPS); el hallazgo que motivó v1.8.1 surgió en esa reconstrucción (ver changelog).
+**Estado:** Canónico vigente: **`6B_SCHEMA_SQL.md v1.9.0`**. v1.8.0 consolidó el **Carril B** (contabilidad operativa interna, sub-etapas 9C→9H + helper 9B) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026; **v1.8.1 canoniza el hardening de las funciones base del motor** (Bloque 23, `REVOKE EXECUTE`), que se venía aplicando fuera de banda por entorno; **v1.9.0 consolida el Carril C — Portal Operativo Interno** (las tablas `portal_usuarios` y `portal_idempotencia` y la función `portal_cargar_gasto_interno(jsonb)`) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026 (bloques A→H). La base (Partes A y B) refleja el estado alineado DEV/TEST/OPS de v1.7.3; el Carril B (sección 24 y PARTE C) refleja el estado final TEST=OPS verificado por huella estructural (K1, `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17`); el Carril C (sección 25 y PARTE D) parte de la estructura certificada por la huella del Bloque H (`TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`), con un único delta intencional respecto de esa huella: dos comentarios SQL actualizados al estatus canónico (ver changelog v1.8.1 → v1.9.0). El canónico es autocontenido y apto para bootstrappear un entorno nuevo de cero. **DEV fue reconstruido desde cero desde v1.8.0** (jun-2026, proyecto nuevo `wsrdzjmvnzxidjlovlja`, cerrado como OPS); el hallazgo que motivó v1.8.1 surgió en esa reconstrucción (ver changelog).
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1
@@ -12,8 +12,52 @@
 > **IMPORTANTE:** El SQL de la Parte B se ejecuta bloque por bloque siguiendo `Docs/Implementacion/6B_PLAN_FASES.md`. Los Bloques 1-22 ya fueron ejecutados y verificados en Supabase DEV. Sobre ese estado, durante Etapa 6D se aplicó el hardening estructural H2-H6-bis y se validó concurrencia en H7; Etapa 6D quedó cerrada formalmente el 2026-05-27. Durante Etapa 7A se aplicaron correcciones pre-TEST/pre-OPS: patch de `crear_prereserva`, limpieza legacy de `ninos='false'` y horizonte configurable para `vista_disponibilidad`/`vista_calendario`. v1.7.3 refleja el estado funcional de DEV post-7A, adoptando cuerpos persistidos reales vía `pg_get_functiondef()` / `pg_get_viewdef()` donde aplica.
 > **NOTA DE SANITIZACIÓN:** Este documento fue revisado para subir a GitHub. No contiene Project ID, Project URL, passwords, connection strings, anon keys, service role keys, JWTs ni datos reales de huéspedes. Los teléfonos en tests funcionales son sintéticos. Las credenciales reales del proyecto Supabase deben vivir fuera del repositorio.
 > **NOTA — Carril B / contabilidad operativa interna (9C→9H), consolidado en el canónico v1.8.0:** El Carril B (sub-etapas 9C a 9H + helper 9B) fue **promovido a OPS** en una operación coordinada (junio 2026) y ahora **forma parte de este canónico**: nuevas columnas en `cabanas` (`valor_relativo`, `id_socio_beneficiario`), tablas `zonas`/`cabana_zona`/`activaciones_operativas`/`gastos_internos` y las cinco tablas de la cuenta corriente (`liquidaciones_periodo`/`liquidacion_cascada`/`liquidacion_socio`/`movimientos_socio`/`revaluaciones`), el marcador `configuracion_general('ambiente')`, los triggers de inmutabilidad y las funciones de matriz, cascada y cuenta corriente, más el helper `abortar_si_falla(jsonb)`. El **diseño conceptual** está en la **sección 24** y el **DDL ejecutable autocontenido** en la **PARTE C**. La paridad estructural TEST↔OPS quedó verificada (huella `TOTAL_CARRIL` idéntica, ver changelog v1.7.3 → v1.8.0). Cierres formales de referencia: `9B_CIERRE.md`, `9C_CIERRE.md` … `9H_CIERRE.md`.
+> **NOTA — Carril C / Portal Operativo Interno, consolidado en el canónico v1.9.0:** El Carril C (Portal Operativo Interno: gateway `portal-api` + identidad→rol del personal) fue **promovido a OPS** en una operación coordinada bloque por bloque (junio 2026, bloques A→H) y ahora **forma parte de este canónico** en su capa de base de datos: la tabla `portal_usuarios` (mapeo identidad `auth.users`→rol), la tabla `portal_idempotencia` (anti-replay de nonce + idempotencia de negocio) y la función `portal_cargar_gasto_interno(jsonb)` (carga atómica de gasto). El **diseño conceptual** está en la **sección 25** y el **DDL ejecutable autocontenido** en la **PARTE D**. La paridad estructural TEST↔OPS quedó verificada por huella estructural (Bloque H, `TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`, 3 objetos); la PARTE D parte de esa estructura certificada y su único delta intencional son dos comentarios SQL actualizados al estatus canónico (ver changelog v1.8.1 → v1.9.0). Esta capa es **solo estructura**: el seed de `portal_usuarios`, los usuarios de Auth y los secretos del gateway viven **fuera** del canónico. Cierre de referencia de la promoción: `PROMO_C_BLOQUE_H_CIERRE.md`.
 
 ---
+
+## RESUMEN DE CAMBIOS v1.8.1 → v1.9.0
+
+Bump mayor que **consolida el Carril C (Portal Operativo Interno) dentro del canónico**, en su capa de base de datos, tras la **promoción coordinada TEST→OPS de junio 2026** (bloques A→H). Hasta v1.8.1 las estructuras del portal vivían solo en TEST como capa no canónica; v1.9.0 las incorpora como capa real, autocontenida y apta para bootstrappear un entorno de cero. La base (Partes A y B) y el Carril B (Parte C) no cambian su esquema; los cambios son la nueva **sección 25** (diseño), la nueva **PARTE D** (DDL ejecutable) y la actualización de conteos.
+
+### a) Promoción del Carril C a OPS (bloques A→H)
+
+Se promovió a OPS, como una sola operación coordinada bloque por bloque (sin copiar datos de TEST), toda la infra del Portal Operativo Interno: snapshot baseline (A), infra del portal por DDL sin seed (B), usuarios Auth + seed de `portal_usuarios` (C), gateway `portal-api` (D), los 13 wrappers n8n (E), el aviso 8C-bis enganchado al alta por el portal A07 (F), el frontend en Vercel (G) y los smokes read-only end-to-end + fingerprint estructural (H). De toda esa infra, v1.9.0 canoniza únicamente las **tres estructuras de base de datos** del portal —`portal_usuarios`, `portal_idempotencia` y `portal_cargar_gasto_interno(jsonb)`—; el gateway, los wrappers n8n, el frontend y los secretos quedan **fuera** del canónico (no son estructura de base de datos).
+
+### b) Paridad estructural TEST↔OPS (Bloque H)
+
+Huella estructural determinística de doble corrida (el mismo script simétrico en TEST y en OPS) sobre los 3 objetos del portal. Las huellas por objeto y la total resultaron **idénticas** entre TEST y OPS:
+
+- `func:public.portal_cargar_gasto_interno(jsonb)` = `82136c79acc451344e53f88f0b972bc7`
+- `tabla:portal_idempotencia` = `3143abbae64521b2600a9c8e118f8091`
+- `tabla:portal_usuarios` = `bb12480a2b316155c94302697ae1ea88`
+- **`TOTAL_PORTAL (3 objetos)` = `dee953e867aed06a9c65836bac14e8f7`**
+
+La huella cubre, por objeto: columnas (nombre+tipo+nullability), constraints, índices, triggers no internos, ACL, estado RLS y policies, comentarios de tabla y de columna, y para la función el cuerpo completo + ACL + comentario; resuelve la función por firma exacta (`to_regprocedure`), ordena los `aclitem` por texto y normaliza `\r` antes del `md5`. No entra al hash ninguna fila, secreto, uuid, valor de secuencia, marcador de ambiente, fecha/hora ni ref del proyecto. Los smokes read-only end-to-end por rol contra el gateway de OPS dieron **14/14 críticos en verde** (anti-OPS respetado: cero escrituras, cero consumo de secuencias).
+
+### c) Consolidación en el canónico
+
+- Nueva **sección 25** (PARTE A): diseño conceptual e inventario del Carril C / Portal Operativo Interno.
+- Nueva **PARTE D**: DDL ejecutable autocontenido (bloques D1→D5), que corre **después de la PARTE C** sobre una base fresca. Excluye la maquinaria de promoción (gate de ambiente, asserts de migración, veredicto de promoción, teardown), que permanece en los artefactos `PROMO_C_BLOQUE_*` y en los cierres.
+- **Delta cosmético respecto de la huella `dee953…` (decisión de este bump):** la estructura de la PARTE D **parte de la estructura certificada** por el Bloque H, con **un único delta intencional**: se actualizaron **dos comentarios SQL** que decían "TEST-only / fuera del canónico" —factualmente falsos una vez que el portal **es** canónico— a redacción canónica. El cambio es **100% cosmético**: no toca columnas, constraints, índices, ACL, RLS, triggers ni el cuerpo de la función. Concretamente, el `COMMENT` de `portal_idempotencia` y el de `portal_cargar_gasto_interno(jsonb)` (`portal_usuarios` no tenía ese texto). **Por ese delta, un bootstrap fresco de v1.9.0 NO reproduce byte-idéntico la huella `dee953e867aed06a9c65836bac14e8f7`**: parte de esa estructura certificada y difiere únicamente en esos dos strings de comentario. Es el mismo criterio con que v1.8.0 alineó funciones del Carril B por diferencias de formato/comentarios, documentado como cosmético.
+
+### d) Conteos de objetos
+
+- **Tablas: 29 → 31** (20 base + 9 Carril B + **2 Carril C**: `portal_usuarios`, `portal_idempotencia`).
+- **Funciones: 30 → 31** (conteo curado: 9 base + 21 Carril B + **1 Carril C**, `portal_cargar_gasto_interno(jsonb)`, `SECURITY INVOKER`).
+- **Secuencias: +1** (`portal_idempotencia_id_registro_seq`, del `bigserial`; `portal_usuarios` usa PK `uuid`, sin secuencia).
+- **Vistas: 6 (sin cambios)**; **triggers/enums/extensiones: sin cambios** (el portal no agrega ninguno).
+
+### e) Lo que NO cambió
+
+- La base (Parte B, Bloques 1→23) y el Carril B (Parte C, C0→C14) quedan **intactos** en esquema, funciones, triggers, seeds y hardening.
+- **La PARTE D es solo estructura:** sin seed de `portal_usuarios`, sin usuarios de Auth, sin secretos, sin URLs, sin Project ID, sin datos reales y **sin marcador de ambiente** (`test`/`ops`/`dev`). El seed de `portal_usuarios` y los secretos del gateway viven fuera del canónico.
+- **No se acuñan IDs `D-PROMO-C-XX` / `L-PROMO-C-XX`** ni se tocan los satélites en este bump: eso es del cierre final de la promoción, posterior a este Bloque I (documental).
+- **W10** (`cobranza.registrar_saldo`) sigue **deprecated-in-place**, catálogo legado, **no es deuda**, y no aparece en la PARTE D.
+
+### f) Validación
+
+DDL de la PARTE D validado con `pglast`; conteos verificados contra el DDL extraído (no de memoria); paridad anclada a la huella del Bloque H (`dee953…`); EOL del canónico verificado en LF. El **bootstrap kit** se regeneró pineado a v1.9.0 (`bootstrap_entorno_nuevo_v1.9.0/`, con una nueva PARTE D y verificación final), dejando intacta la carpeta `bootstrap_entorno_nuevo_v1.8.1/`. La verificación D5 (y su espejo read-only `03_VERIFY_FINAL_ENTORNO.sql`) es **estricta**: valida las FKs contra la tabla y columna exactas, `CHECK`/`UNIQUE` en la relación correcta y por conjunto de columnas, la firma de la función, el hardening por **ACL real** (cubriendo `TRUNCATE`/`REFERENCES`/`TRIGGER` y `MAINTAIN`) y el estado de RLS/policies.
 
 ## RESUMEN DE CAMBIOS v1.8.0 → v1.8.1
 
@@ -727,6 +771,7 @@ Esta versión incorpora 17 ajustes derivados de la revisión técnica de Franco 
 22. Decisiones tomadas y registradas
 23. Dudas que quedaron resueltas
 24. Carril B — contabilidad operativa interna (9C→9H)
+25. Carril C — Portal Operativo Interno (slices 0→3b; promoción A→H)
 
 ### PARTE B — SQL ejecutable propuesto para revisión
 
@@ -772,6 +817,14 @@ Esta versión incorpora 17 ajustes derivados de la revisión técnica de Franco 
 - Bloque C13. Seeds estructurales reales
 - Bloque C14. Verificación de seeds y consistencia
 
+### PARTE D — SQL ejecutable Carril C (Portal Operativo Interno)
+
+- Bloque D1. Tabla `portal_usuarios`
+- Bloque D2. Tabla `portal_idempotencia`
+- Bloque D3. Función `portal_cargar_gasto_interno`
+- Bloque D4. Hardening — REVOKE/GRANT
+- Bloque D5. Verificación estructural y de hardening
+
 ---
 
 # PARTE A — DISEÑO EXPLICADO
@@ -788,11 +841,11 @@ El schema implementa el modelo de datos cerrado en Etapa 5A sobre PostgreSQL, co
 - Triggers automáticos manejan `updated_at` y logs de cambios de estado.
 - Pre-reservas se crean exclusivamente vía `crear_prereserva()` con advisory lock; nunca por INSERT directo.
 
-**Tablas totales:** 29 tablas en el canónico v1.8.1 — 20 tablas base (Parte B) + 9 tablas del Carril B (sección 24 / Parte C).
+**Tablas totales:** 31 tablas en el canónico v1.9.0 — 20 tablas base (Parte B) + 9 tablas del Carril B (sección 24 / Parte C) + 2 tablas del Carril C / portal (sección 25 / Parte D: `portal_usuarios`, `portal_idempotencia`).
 
 **Vistas SQL:** 6 vistas operativas (incluyendo dos nuevas para los Sistemas 3 y 4 mencionados por Franco).
 
-**Funciones:** 9 funciones base críticas (8 transaccionales + 1 helper IMMUTABLE para normalización de teléfono), más 21 funciones del Carril B (sección 24 / Parte C). Total canónico v1.8.1: 30 funciones.
+**Funciones:** 9 funciones base críticas (8 transaccionales + 1 helper IMMUTABLE para normalización de teléfono), más 21 funciones del Carril B (sección 24 / Parte C), más 1 función del Carril C / portal (sección 25 / Parte D: `portal_cargar_gasto_interno(jsonb)`, `SECURITY INVOKER`). Total canónico v1.9.0: 31 funciones.
 
 **Principios rectores:**
 
@@ -2138,6 +2191,38 @@ Toda la capa está **cerrada al Data API**: `REVOKE` total sobre las 9 tablas, l
 ### Paridad TEST↔OPS
 
 La promoción se cerró con una **huella estructural determinística** (etapa K1) que comparó 31 objetos del Carril B entre TEST y OPS. Tras alinear cuatro funciones (diferencia puramente cosmética) y limpiar grants residuales en TEST, la huella `TOTAL_CARRIL` quedó **idéntica** en ambos entornos (`f5187092083451ceb5b182334bdb4a17`). Los detalles están en el changelog v1.7.3 → v1.8.0 y en el cierre de promoción.
+
+---
+
+## 25. CARRIL C — PORTAL OPERATIVO INTERNO
+
+El **Carril C** es el **Portal Operativo Interno** del complejo: una aplicación web por la que el personal (limpieza, reservas y socios) opera el sistema con su propia identidad y su propio rol, sin tocar la base directamente. Su frontera de confianza es un **gateway/BFF** (la Edge Function `portal-api`) que autentica al usuario, resuelve su rol y aplica una allowlist rol×acción antes de despachar a los wrappers de n8n o al motor. Esta sección consolida en el canónico **la capa de base de datos** del portal: las dos tablas y la función que viven en PostgreSQL. El gateway, los wrappers de n8n, el frontend y los secretos **no** son estructura de base de datos y quedan fuera del canónico.
+
+Fue construido en las slices **0→3b** (espina de seguridad, lecturas y escrituras reuse, lecturas nuevas y gastos) sobre TEST, y **promovido a OPS** en una operación coordinada bloque por bloque (junio 2026, bloques A→H). Su DDL ejecutable y autocontenido está en la **PARTE D**; el detalle de diseño y las decisiones, en los cierres del Carril C y de la promoción (`PROMO_C_BLOQUE_H_CIERRE.md`).
+
+### Inventario de objetos
+
+| Objeto | Tipo | Rol |
+|---|---|---|
+| `portal_usuarios` | tabla | Mapeo identidad (`auth.users`) → rol del portal (`jenny`/`vicky`/`socio`), con baja lógica (`activo`) |
+| `portal_idempotencia` | tabla | Anti-replay de `nonce` (`UNIQUE`) + idempotencia de negocio (`UNIQUE(action, idempotency_key)`) + traza, para escrituras del portal |
+| `portal_cargar_gasto_interno(jsonb)` | función | Carga atómica de gasto interno (gasto + traza en una transacción, con guard de dos capas) |
+
+En total: **2 tablas** nuevas (una de ellas con su secuencia `bigserial`) y **1 función** `SECURITY INVOKER`. El portal **no** agrega vistas, triggers, enums ni extensiones.
+
+### Conceptos clave
+
+- **Identidad → rol (`portal_usuarios`).** La PK es el `user_id` (`uuid`) de `auth.users` (patrón *profiles* de Supabase, `ON DELETE CASCADE`). El `nombre` es el identificador de **persona** (vicky/franco/rodrigo/remo/jenny), usado como `creado_por`/`validado_por` (D-C-22), no el rol; el `rol` es un set cerrado `{jenny,vicky,socio}` con `CHECK` (D-C-14). La baja lógica (`activo=false`) hace que la Edge Function devuelva `no_autorizado` sin borrar la fila.
+- **Anti-replay + idempotencia (`portal_idempotencia`).** Una fila = una escritura committeada del portal, con su traza. `UNIQUE(nonce)` es el store anti-replay (P-C-9; el `nonce` lo deriva el gateway de la firma HMAC del sobre, nunca el cliente). `UNIQUE(action, idempotency_key)` es la idempotencia de negocio; `payload_norm` (jsonb canónico de los campos de negocio) + `actor` permiten distinguir un reintento idéntico de un conflicto. Lleva una FK `RESTRICT` a `gastos_internos`, porque hoy la usa la carga de gastos.
+- **Carga atómica (`portal_cargar_gasto_interno`).** Recibe el control inyectado server-side por el gateway (`actor`/`rol`/`nonce`/`idempotency_key`, confiables) y los campos de negocio del gasto. En una sola transacción: toma un advisory lock por `(action, idempotency_key)`, chequea anti-replay por `nonce`, resuelve idempotencia por `payload_norm`+`actor` y, si es alta nueva, inserta el gasto **y** su traza en el mismo sub-bloque con savepoint (si la traza choca, revierte también el gasto → sin huérfanos). Devuelve `{ok:true,data:{id_gasto,idempotente}}` o `{ok:false,error:{code,message,detail}}`. El `actor` y el `source_event` los deriva la función, no el payload; las 18 constraints de `gastos_internos` son el gate de coherencia.
+
+### Hardening
+
+La capa está **cerrada al Data API** con una **asimetría deliberada** (D-C-34): `portal_usuarios` la lee la Edge Function `portal-api` vía `service_role` (`REVOKE` total a los cuatro roles, luego `GRANT SELECT` solo a `service_role`; nunca escritura en runtime); `portal_idempotencia` y `portal_cargar_gasto_interno` no las toca ningún rol del Data API (`REVOKE` total a `PUBLIC`/`anon`/`authenticated`/`service_role` sobre tabla, secuencia y función; sin `GRANT`), porque las opera solo n8n vía `postgres` (owner), igual que las funciones del motor.
+
+### Paridad TEST↔OPS
+
+La promoción del portal a OPS se cerró con una **huella estructural determinística** de doble corrida (Bloque H) sobre los 3 objetos, con total **`TOTAL_PORTAL (3 objetos) = dee953e867aed06a9c65836bac14e8f7`** idéntico en TEST y OPS. La PARTE D **parte de esa estructura certificada**; su único delta intencional respecto de la huella son **dos comentarios SQL** actualizados —los `COMMENT` de `portal_idempotencia` y de `portal_cargar_gasto_interno(jsonb)` decían "TEST-only / fuera del canónico", lo cual deja de ser cierto al incorporarse al canónico—. El cambio es **100% cosmético** (no toca columnas, constraints, índices, ACL, RLS, triggers ni el cuerpo de la función); por eso un bootstrap fresco de la PARTE D **no reproduce byte-idéntico** la huella `dee953…`: difiere únicamente en esos dos strings de comentario. Detalles en el changelog v1.8.1 → v1.9.0 y en el cierre del Bloque H.
 
 ---
 
@@ -6608,6 +6693,494 @@ BEGIN
   RAISE NOTICE 'PARTE C OK: zonas=2, cabana_zona=5, beneficiarios sin NULL, activaciones=5, seam 5/5, matriz 378/456, reparto Σ=100000.00, hardening tablas/secuencias/funciones sin exposición.';
 END
 $verif_carril_b$;
+```
+
+---
+
+# PARTE D — SQL EJECUTABLE CARRIL C (PORTAL OPERATIVO INTERNO)
+
+Esta parte contiene el **DDL canónico** de la capa de base de datos del Carril C / Portal Operativo Interno: las tablas `portal_usuarios` y `portal_idempotencia` y la función `portal_cargar_gasto_interno(jsonb)`. Es **autocontenida** y corre **después de la Parte C** sobre una base fresca.
+
+Representa la **estructura**, no los wrappers de promoción: no incluye gate de ambiente, asserts de migración, veredicto de promoción ni teardown (esos viven en los artefactos `PROMO_C_BLOQUE_*` y en los cierres). Incluye una verificación de estructura/hardening (D5) como auto-test del bootstrap.
+
+La estructura **parte de la certificada por el Bloque H** (`TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`), con un único delta intencional: dos comentarios SQL actualizados al estatus canónico (los de `portal_idempotencia` y `portal_cargar_gasto_interno(jsonb)`; ver sección 25 y el changelog). Por ese delta de comentarios, un bootstrap de esta PARTE D **no** reproduce byte-idéntico esa huella.
+
+**Prerrequisitos.** Corre sobre un proyecto **Supabase** (usa el schema `auth` para la FK de `portal_usuarios` y los roles `anon`/`authenticated`/`service_role` del Data API en el hardening) y **después de la PARTE C** (la FK de `portal_idempotencia` apunta a `gastos_internos`). El portal no requiere ninguna extensión adicional.
+
+**Orden de dependencias:** las dos tablas (D1, D2) van antes que la función (D3), que va antes del hardening (D4) y de la verificación (D5).
+
+> **Nota sobre datos:** la PARTE D es **solo estructura**. **No** siembra nada: ni el seed de `portal_usuarios`, ni usuarios de `auth`, ni secretos, ni URLs, ni Project ID, ni datos reales, ni el marcador de ambiente (`test`/`ops`/`dev`). Las tablas nacen **vacías**. El seed de `portal_usuarios` y los secretos del gateway viven **fuera** del canónico.
+
+## BLOQUE D1 — Tabla `portal_usuarios`
+
+**Descripción:** Mapeo identidad (`auth.users`) → rol del portal. PK `user_id` (`uuid`) con FK a `auth.users` (`ON DELETE CASCADE`); `nombre` libre `UNIQUE` (persona, D-C-22); `rol` con `CHECK` sobre el set cerrado `{jenny,vicky,socio}` (D-C-14); baja lógica `activo`. El hardening de esta tabla se aplica en D4.
+
+```sql
+CREATE TABLE public.portal_usuarios (
+  user_id     uuid        PRIMARY KEY
+                          REFERENCES auth.users(id) ON DELETE CASCADE,
+  nombre      text        NOT NULL,
+  rol         text        NOT NULL,
+  activo      boolean     NOT NULL DEFAULT true,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_portal_usuarios_nombre     UNIQUE (nombre),
+  CONSTRAINT chk_portal_usuarios_rol       CHECK (rol IN ('jenny','vicky','socio')),
+  CONSTRAINT chk_portal_usuarios_nombre_ne CHECK (length(btrim(nombre)) > 0)
+);
+
+COMMENT ON TABLE public.portal_usuarios IS
+  'Carril C / Slice 0: mapeo identidad(auth.users)->rol del Portal Operativo Interno. Interna: sin acceso por Data API (D-C-34); la lee solo la Edge Function portal-api vía service_role.';
+COMMENT ON COLUMN public.portal_usuarios.nombre IS
+  'Identificador de persona (vicky/franco/rodrigo/remo/jenny) usado como creado_por/validado_por (D-C-22), no el rol.';
+```
+
+## BLOQUE D2 — Tabla `portal_idempotencia`
+
+**Descripción:** Anti-replay de `nonce` (`UNIQUE`, P-C-9) + idempotencia de negocio (`UNIQUE(action, idempotency_key)`, D-C-55) + `payload_norm`/`actor` para detección de conflicto + traza; FK `RESTRICT` a `gastos_internos`. Su secuencia `bigserial` y su hardening se cubren en D4.
+
+```sql
+CREATE TABLE public.portal_idempotencia (
+  id_registro      bigserial   PRIMARY KEY,
+  action           text        NOT NULL,
+  actor            text        NOT NULL,
+  rol              text        NOT NULL,
+  source_event     text        NOT NULL,
+  nonce            text        NOT NULL,
+  idempotency_key  text        NOT NULL,
+  payload_norm     jsonb       NOT NULL,
+  id_gasto         bigint      NOT NULL,
+  estado           text        NOT NULL DEFAULT 'ok',
+  request_ts       bigint,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT uq_portal_idempotencia_nonce      UNIQUE (nonce),
+  CONSTRAINT uq_portal_idempotencia_action_key UNIQUE (action, idempotency_key),
+  CONSTRAINT fk_portal_idempotencia_gasto
+    FOREIGN KEY (id_gasto) REFERENCES public.gastos_internos(id_gasto) ON DELETE RESTRICT,
+  CONSTRAINT chk_portal_idempotencia_action_ne CHECK (length(btrim(action)) > 0),
+  CONSTRAINT chk_portal_idempotencia_actor_ne  CHECK (length(btrim(actor)) > 0),
+  CONSTRAINT chk_portal_idempotencia_source_ne CHECK (length(btrim(source_event)) > 0),
+  CONSTRAINT chk_portal_idempotencia_nonce_ne  CHECK (length(btrim(nonce)) > 0),
+  CONSTRAINT chk_portal_idempotencia_idem_ne   CHECK (length(btrim(idempotency_key)) > 0),
+  CONSTRAINT chk_portal_idempotencia_rol       CHECK (rol IN ('vicky','socio')),
+  CONSTRAINT chk_portal_idempotencia_estado    CHECK (estado = 'ok')
+);
+
+COMMENT ON TABLE public.portal_idempotencia IS
+  'Carril C / Slice 3b (D-C-55): infra canonica del portal (PARTE D, consolidada en v1.9.0). nonce UNIQUE = anti-replay (P-C-9); (action,idempotency_key) UNIQUE = idempotencia de negocio; payload_norm + actor = deteccion de conflicto; source_event/actor/action = traza que NO cabe en gastos_internos. Interna: sin Data API (D-C-34); la toca solo n8n via postgres.';
+```
+
+## BLOQUE D3 — Función `portal_cargar_gasto_interno`
+
+**Descripción:** Carga atómica de gasto interno (A11): advisory lock por `(action, idempotency_key)` → anti-replay por `nonce` → idempotencia por `payload_norm`+`actor` → INSERT del gasto + INSERT de la traza en el mismo sub-bloque con savepoint (sin huérfanos). `SECURITY INVOKER`; contrato `{ok:…}`. Cuerpo idéntico a la estructura certificada (lógica pura, sin referencias a ambiente). Se crea con `DROP … IF EXISTS` previo (defensivo/re-ejecutable, L-9F-03).
+
+```sql
+DROP FUNCTION IF EXISTS public.portal_cargar_gasto_interno(jsonb);
+
+CREATE FUNCTION public.portal_cargar_gasto_interno(p_payload jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $fn$
+DECLARE
+  c_action       CONSTANT text := 'cargar.gasto_interno';
+  -- control (inyectado server-side por el gateway; confiable)
+  v_actor        text;
+  v_rol          text;
+  v_nonce        text;
+  v_idem         text;
+  v_req_ts       bigint;
+  v_source       text;
+  -- negocio
+  v_fecha        date;
+  v_periodo      date;
+  v_periodo_raw  text;
+  v_clase        text;
+  v_clase_sug    text;
+  v_etiqueta     text;
+  v_monto        numeric(12,2);
+  v_id_zona      bigint;
+  v_id_cabana    bigint;
+  v_pagador      text;
+  v_id_socio     bigint;
+  v_medio        text;
+  v_comentario   text;
+  v_comprob      text;
+  v_payload_norm jsonb;
+  -- idempotencia / salida
+  v_id_gasto     bigint;
+  v_ex_actor     text;
+  v_ex_payload   jsonb;
+  v_ex_gasto     bigint;
+  v_sqlstate     text;
+  v_constraint   text;
+BEGIN
+  -- 1) Control inyectado por el gateway -------------------------------------
+  v_actor := NULLIF(btrim(p_payload->>'actor'), '');
+  v_rol   := NULLIF(btrim(p_payload->>'rol'), '');
+  v_nonce := NULLIF(btrim(p_payload->>'nonce'), '');
+  v_idem  := NULLIF(btrim(p_payload->>'idempotency_key'), '');
+  v_req_ts := CASE WHEN (p_payload->>'request_ts') ~ '^\d+$'
+                   THEN (p_payload->>'request_ts')::bigint ELSE NULL END;
+
+  -- actor/rol/nonce ausentes = falla de cableado del gateway, no del cliente
+  IF v_actor IS NULL OR v_rol IS NULL OR v_nonce IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+      'code', 'error_interno',
+      'message', 'faltan campos de control inyectados por el gateway',
+      'detail', jsonb_build_object('actor', v_actor IS NOT NULL,
+                                   'rol',   v_rol   IS NOT NULL,
+                                   'nonce', v_nonce IS NOT NULL)));
+  END IF;
+
+  IF v_rol NOT IN ('vicky', 'socio') THEN
+    RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+      'code', 'rol_no_permitido',
+      'message', 'rol fuera del allowlist de cargar.gasto_interno',
+      'detail', jsonb_build_object('rol', v_rol)));
+  END IF;
+
+  -- idempotency_key la provee el cliente -> payload_invalido si falta
+  IF v_idem IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+      'code', 'payload_invalido',
+      'message', 'idempotency_key requerida',
+      'detail', jsonb_build_object('campo', 'idempotency_key')));
+  END IF;
+
+  v_source := 'portal_a11_' || v_idem;  -- microcorreccion 3
+
+  -- 2) Negocio: extraccion + casts en sub-bloque (data_exception -> payload_invalido)
+  BEGIN
+    v_fecha := NULLIF(btrim(p_payload->>'fecha'), '')::date;
+    IF v_fecha IS NULL THEN
+      RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+        'code', 'payload_invalido', 'message', 'fecha requerida (YYYY-MM-DD)',
+        'detail', jsonb_build_object('campo', 'fecha')));
+    END IF;
+
+    -- periodo: default = primer dia del mes de fecha; si explicito, dia 1 (D-C-55 / decision 4)
+    v_periodo_raw := NULLIF(btrim(p_payload->>'periodo'), '');
+    IF v_periodo_raw IS NULL THEN
+      v_periodo := date_trunc('month', v_fecha)::date;
+    ELSE
+      v_periodo := v_periodo_raw::date;
+      IF EXTRACT(DAY FROM v_periodo) <> 1 THEN
+        RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+          'code', 'payload_invalido',
+          'message', 'periodo debe ser el primer dia del mes (dia 1)',
+          'detail', jsonb_build_object('campo', 'periodo',
+                                       'valor', to_char(v_periodo, 'YYYY-MM-DD'))));
+      END IF;
+    END IF;
+
+    v_clase      := NULLIF(btrim(p_payload->>'clase'), '');
+    v_clase_sug  := NULLIF(btrim(p_payload->>'clase_sugerida'), '');
+    v_etiqueta   := NULLIF(btrim(p_payload->>'etiqueta'), '');
+    v_monto      := NULLIF(btrim(p_payload->>'monto'), '')::numeric(12,2);
+    v_id_zona    := NULLIF(btrim(p_payload->>'id_zona'), '')::bigint;
+    v_id_cabana  := NULLIF(btrim(p_payload->>'id_cabana'), '')::bigint;
+    v_pagador    := NULLIF(btrim(p_payload->>'pagador_tipo'), '');
+    v_id_socio   := NULLIF(btrim(p_payload->>'id_socio_pagador'), '')::bigint;
+    v_medio      := NULLIF(btrim(p_payload->>'medio_pago'), '');
+    v_comentario := NULLIF(btrim(p_payload->>'comentario'), '');
+    v_comprob    := NULLIF(btrim(p_payload->>'comprobante_url'), '');
+  EXCEPTION
+    WHEN data_exception THEN
+      GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE;
+      RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+        'code', 'payload_invalido',
+        'message', 'formato invalido en algun campo (fecha/periodo/monto/ids)',
+        'detail', jsonb_build_object('sqlstate', v_sqlstate)));
+  END;
+
+  -- payload_norm canonico: SOLO campos de negocio (lo que define el gasto)
+  v_payload_norm := jsonb_build_object(
+    'fecha',            to_char(v_fecha, 'YYYY-MM-DD'),
+    'periodo',          to_char(v_periodo, 'YYYY-MM-DD'),
+    'clase',            v_clase,
+    'clase_sugerida',   v_clase_sug,
+    'etiqueta',         v_etiqueta,
+    'monto',            v_monto,
+    'id_zona',          v_id_zona,
+    'id_cabana',        v_id_cabana,
+    'pagador_tipo',     v_pagador,
+    'id_socio_pagador', v_id_socio,
+    'medio_pago',       v_medio,
+    'comentario',       v_comentario,
+    'comprobante_url',  v_comprob);
+
+  -- 3) Serializa primeros intentos concurrentes con la misma (action,key).
+  --    Sobrecarga de DOS enteros (integer,integer): usa el espacio de 64 bits con
+  --    una clave por dominio (action / idempotency_key); evita castear un hash de
+  --    32 bits a bigint. hashtext() devuelve integer -> calza con (integer,integer).
+  PERFORM pg_advisory_xact_lock(hashtext(c_action), hashtext(v_idem));
+
+  -- 3a) Anti-replay por nonce (P-C-9) -> conflicto / nonce_replay
+  IF EXISTS (SELECT 1 FROM public.portal_idempotencia WHERE nonce = v_nonce) THEN
+    RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+      'code', 'conflicto', 'message', 'nonce ya utilizado',
+      'detail', jsonb_build_object('reason', 'nonce_replay')));
+  END IF;
+
+  -- 3b) Idempotencia de negocio (action,key): payload_norm + actor (microcorr. 2)
+  SELECT actor, payload_norm, id_gasto
+    INTO v_ex_actor, v_ex_payload, v_ex_gasto
+    FROM public.portal_idempotencia
+   WHERE action = c_action AND idempotency_key = v_idem;
+  IF FOUND THEN
+    IF v_ex_payload IS DISTINCT FROM v_payload_norm THEN
+      RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+        'code', 'conflicto', 'message', 'idempotency_key reutilizada con distinto payload',
+        'detail', jsonb_build_object('reason', 'payload_mismatch')));
+    END IF;
+    IF v_ex_actor IS DISTINCT FROM v_actor THEN
+      RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+        'code', 'conflicto', 'message', 'idempotency_key reutilizada con distinto actor',
+        'detail', jsonb_build_object('reason', 'actor_mismatch')));
+    END IF;
+    RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
+      'id_gasto', v_ex_gasto, 'idempotente', true));
+  END IF;
+
+  -- 4) Alta nueva: INSERT gasto + INSERT traza en el MISMO sub-bloque.
+  --    gastos_internos no tiene UNIQUE de negocio -> no puede dar unique_violation;
+  --    por eso un unique_violation aqui viene siempre de portal_idempotencia, y el
+  --    savepoint revierte AMBOS inserts (no queda gasto huerfano).
+  BEGIN
+    INSERT INTO public.gastos_internos
+      (fecha, periodo, clase, clase_sugerida, etiqueta, monto,
+       id_zona, id_cabana, pagador_tipo, id_socio_pagador,
+       medio_pago, comentario, comprobante_url, creado_por)
+    VALUES
+      (v_fecha, v_periodo, v_clase, v_clase_sug, v_etiqueta, v_monto,
+       v_id_zona, v_id_cabana, v_pagador, v_id_socio,
+       v_medio, v_comentario, v_comprob, v_actor)
+    RETURNING id_gasto INTO v_id_gasto;
+
+    INSERT INTO public.portal_idempotencia
+      (action, actor, rol, source_event, nonce, idempotency_key,
+       payload_norm, id_gasto, request_ts)
+    VALUES
+      (c_action, v_actor, v_rol, v_source, v_nonce, v_idem,
+       v_payload_norm, v_id_gasto, v_req_ts);
+  EXCEPTION
+    WHEN check_violation OR foreign_key_violation OR not_null_violation THEN
+      -- viene del INSERT del gasto: las 18 constraints de gastos_internos
+      GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE,
+                              v_constraint = CONSTRAINT_NAME;
+      RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+        'code', 'payload_invalido',
+        'message', 'el gasto viola una regla de coherencia de gastos_internos',
+        'detail', jsonb_build_object('sqlstate', v_sqlstate, 'constraint', v_constraint)));
+    WHEN unique_violation THEN
+      -- viene de portal_idempotencia (carrera que el lock deberia evitar; backstop)
+      GET STACKED DIAGNOSTICS v_constraint = CONSTRAINT_NAME;
+      IF v_constraint ILIKE '%nonce%' THEN
+        RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+          'code', 'conflicto', 'message', 'nonce ya utilizado',
+          'detail', jsonb_build_object('reason', 'nonce_replay')));
+      END IF;
+      SELECT actor, payload_norm, id_gasto
+        INTO v_ex_actor, v_ex_payload, v_ex_gasto
+        FROM public.portal_idempotencia
+       WHERE action = c_action AND idempotency_key = v_idem;
+      IF v_ex_payload IS DISTINCT FROM v_payload_norm
+         OR v_ex_actor IS DISTINCT FROM v_actor THEN
+        RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+          'code', 'conflicto', 'message', 'idempotency_key en conflicto',
+          'detail', jsonb_build_object('reason', 'idem_conflict_post_insert')));
+      END IF;
+      RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
+        'id_gasto', v_ex_gasto, 'idempotente', true));
+  END;
+
+  RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
+    'id_gasto', v_id_gasto, 'idempotente', false));
+
+EXCEPTION
+  WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE;
+    RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object(
+      'code', 'error_interno', 'message', 'error interno no esperado',
+      'detail', jsonb_build_object('sqlstate', v_sqlstate)));
+END;
+$fn$;
+
+COMMENT ON FUNCTION public.portal_cargar_gasto_interno(jsonb) IS
+  'Carril C / Slice 3b (D-C-55): carga atomica de gasto interno con nonce anti-replay (P-C-9) + idempotency_key de cliente + comparacion payload_norm/actor. Consolidada en el canonico (PARTE D, v1.9.0).';
+```
+
+## BLOQUE D4 — Hardening — REVOKE/GRANT
+
+**Descripción:** Hardening D-C-34 con asimetría deliberada: `REVOKE` total a `PUBLIC`/`anon`/`authenticated`/`service_role` sobre las dos tablas, la secuencia y la función; luego `GRANT SELECT` a `service_role` **solo** en `portal_usuarios` (lector server-side de la Edge Function). `portal_idempotencia`, su secuencia y la función quedan sin acceso por Data API (las opera solo n8n vía owner). El estado final de ACL es el certificado por el Bloque H.
+
+```sql
+-- ── D4. Hardening — REVOKE total a los 4 roles (tablas + secuencia + función),
+-- luego GRANT SELECT a service_role SOLO en portal_usuarios (asimetría D-C-34:
+-- la Edge Function portal-api la lee vía service_role; portal_idempotencia la
+-- toca solo n8n vía postgres/owner, sin acceso por Data API). El estado final de
+-- ACL es el certificado por el Bloque H; el orden de las sentencias no lo altera.
+-- Tablas:
+REVOKE ALL     ON public.portal_usuarios     FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL     ON public.portal_idempotencia FROM PUBLIC, anon, authenticated, service_role;
+-- Secuencia (bigserial de portal_idempotencia):
+REVOKE ALL     ON SEQUENCE public.portal_idempotencia_id_registro_seq FROM PUBLIC, anon, authenticated, service_role;
+-- Función:
+REVOKE EXECUTE ON FUNCTION public.portal_cargar_gasto_interno(jsonb)  FROM PUBLIC, anon, authenticated, service_role;
+-- Único GRANT de runtime: service_role LEE portal_usuarios (no escribe).
+GRANT  SELECT  ON public.portal_usuarios TO service_role;
+```
+
+## BLOQUE D5 — Verificación estructural y de hardening
+
+**Descripción:** Auto-test (bloque `DO` con asserts; no modifica) de verificación **estricta** de estructura y hardening: existencia de los 4 objetos; FK de `portal_usuarios.user_id` validada **exactamente** contra `auth.users(id)` **`ON DELETE CASCADE`** y FK de `portal_idempotencia.id_gasto` contra `gastos_internos(id_gasto)` **`ON DELETE RESTRICT`** (por `conrelid`/`confrelid` y columnas, no por nombre); `CHECK` de rol en la relación correcta y restringido a `{jenny,vicky,socio}`; `UNIQUE`s por conjunto de columnas exacto (`nombre`; `nonce`; `action,idempotency_key`); firma de la función (`RETURNS jsonb`, `SECURITY INVOKER`, `plpgsql`); y hardening por **ACL real** (no por nombre) vía `aclexplode`, que cubre **todos** los privilegios de tabla —`SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER` y `MAINTAIN` en PG17— sin depender de la versión: `portal_usuarios` con la **única** concesión Data API `service_role:SELECT` (sin escrituras ni privilegios extra), `portal_idempotencia`/secuencia/función **sin** privilegio Data API (con `proacl` no nula para no caer en la trampa `PUBLIC ejecuta`), y RLS **off** + **0 policies**. **No depende de datos, usuarios reales ni del marcador de ambiente**; en un bootstrap nuevo las tablas nacen vacías (la PARTE D no siembra), estado esperado y no invariante, por lo que D5 **no** chequea conteos de filas.
+
+```sql
+-- ── D5. Verificación estructural y de hardening (asserts; no modifica) ──
+-- Verificación ESTRICTA: estructura (existencia + FKs validadas contra la tabla y
+-- columna EXACTAS por conrelid/confrelid, no por nombre + CHECK/UNIQUE en la
+-- relación correcta y por conjunto de columnas + firma de la función) y hardening
+-- por ACL real vía aclexplode, que enumera lo realmente concedido y cubre TODOS los
+-- privilegios de tabla —SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER y
+-- MAINTAIN en PG17— sin depender de la versión, más el estado de RLS/policies.
+-- NO depende de datos, usuarios reales ni del marcador de ambiente: es segura de
+-- correr contra cualquier entorno. En un bootstrap nuevo las tablas nacen vacías
+-- (la PARTE D no siembra); esa vaciedad es el estado esperado, NO un invariante, y
+-- por eso D5 NO chequea conteos de filas.
+DO $verif_portal$
+DECLARE
+  v_pu   oid := to_regclass('public.portal_usuarios');
+  v_pi   oid := to_regclass('public.portal_idempotencia');
+  v_seq  oid := to_regclass('public.portal_idempotencia_id_registro_seq');
+  v_fn   oid := to_regprocedure('public.portal_cargar_gasto_interno(jsonb)');
+  v_auth oid := to_regclass('auth.users');
+  v_gas  oid := to_regclass('public.gastos_internos');
+  r      record;
+  v_n    integer;
+  v_txt  text;
+BEGIN
+  -- ── existencia ──
+  IF v_pu   IS NULL THEN RAISE EXCEPTION 'D5: portal_usuarios ausente'; END IF;
+  IF v_pi   IS NULL THEN RAISE EXCEPTION 'D5: portal_idempotencia ausente'; END IF;
+  IF v_seq  IS NULL THEN RAISE EXCEPTION 'D5: secuencia portal_idempotencia_id_registro_seq ausente'; END IF;
+  IF v_fn   IS NULL THEN RAISE EXCEPTION 'D5: portal_cargar_gasto_interno(jsonb) ausente'; END IF;
+  IF v_auth IS NULL THEN RAISE EXCEPTION 'D5: auth.users ausente — se requiere proyecto Supabase'; END IF;
+  IF v_gas  IS NULL THEN RAISE EXCEPTION 'D5: gastos_internos ausente — la PARTE D corre DESPUES de la PARTE C'; END IF;
+
+  -- ── FK portal_usuarios.user_id -> auth.users(id) ON DELETE CASCADE, exacta, 1 columna ──
+  SELECT con.confrelid, con.confdeltype,
+         (SELECT a.attname FROM pg_attribute a WHERE a.attrelid=con.conrelid  AND a.attnum=con.conkey[1])  AS lcol,
+         (SELECT a.attname FROM pg_attribute a WHERE a.attrelid=con.confrelid AND a.attnum=con.confkey[1]) AS rcol,
+         cardinality(con.conkey) AS ncols
+    INTO r
+    FROM pg_constraint con
+   WHERE con.conrelid=v_pu AND con.contype='f';
+  IF NOT FOUND THEN RAISE EXCEPTION 'D5: portal_usuarios sin FK'; END IF;
+  IF r.confrelid IS DISTINCT FROM v_auth OR r.lcol<>'user_id' OR r.rcol<>'id'
+     OR r.ncols<>1 OR r.confdeltype<>'c' THEN
+    RAISE EXCEPTION 'D5: FK de portal_usuarios no es exactamente user_id -> auth.users(id) ON DELETE CASCADE [ref=%, lcol=%, rcol=%, ncols=%, del=%]',
+      r.confrelid::regclass, r.lcol, r.rcol, r.ncols, r.confdeltype;
+  END IF;
+
+  -- ── FK portal_idempotencia.id_gasto -> gastos_internos(id_gasto) ON DELETE RESTRICT ──
+  SELECT con.confrelid, con.confdeltype,
+         (SELECT a.attname FROM pg_attribute a WHERE a.attrelid=con.conrelid  AND a.attnum=con.conkey[1])  AS lcol,
+         (SELECT a.attname FROM pg_attribute a WHERE a.attrelid=con.confrelid AND a.attnum=con.confkey[1]) AS rcol,
+         cardinality(con.conkey) AS ncols
+    INTO r
+    FROM pg_constraint con
+   WHERE con.conrelid=v_pi AND con.contype='f' AND con.conname='fk_portal_idempotencia_gasto';
+  IF NOT FOUND THEN RAISE EXCEPTION 'D5: falta FK fk_portal_idempotencia_gasto'; END IF;
+  IF r.confrelid IS DISTINCT FROM v_gas OR r.lcol<>'id_gasto' OR r.rcol<>'id_gasto'
+     OR r.ncols<>1 OR r.confdeltype<>'r' THEN
+    RAISE EXCEPTION 'D5: FK id_gasto no es exactamente -> gastos_internos(id_gasto) ON DELETE RESTRICT [ref=%, lcol=%, rcol=%, del=%]',
+      r.confrelid::regclass, r.lcol, r.rcol, r.confdeltype;
+  END IF;
+
+  -- ── CHECK de rol en la relación correcta + dominio {jenny,vicky,socio} ──
+  SELECT pg_get_constraintdef(con.oid) INTO v_txt
+    FROM pg_constraint con
+   WHERE con.conrelid=v_pu AND con.contype='c' AND con.conname='chk_portal_usuarios_rol';
+  IF v_txt IS NULL THEN RAISE EXCEPTION 'D5: falta CHECK chk_portal_usuarios_rol en portal_usuarios'; END IF;
+  IF v_txt NOT ILIKE '%jenny%' OR v_txt NOT ILIKE '%vicky%' OR v_txt NOT ILIKE '%socio%' THEN
+    RAISE EXCEPTION 'D5: CHECK de rol no restringe a {jenny,vicky,socio}: %', v_txt;
+  END IF;
+
+  -- ── UNIQUEs en la relación correcta, por conjunto de columnas exacto ──
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint con
+                  WHERE con.conrelid=v_pu AND con.contype='u' AND con.conname='uq_portal_usuarios_nombre'
+                    AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text)
+                           FROM unnest(con.conkey) AS ck(attnum)
+                           JOIN pg_attribute a ON a.attrelid=con.conrelid AND a.attnum=ck.attnum) = ARRAY['nombre']) THEN
+    RAISE EXCEPTION 'D5: uq_portal_usuarios_nombre no es UNIQUE(nombre) en portal_usuarios';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint con
+                  WHERE con.conrelid=v_pi AND con.contype='u' AND con.conname='uq_portal_idempotencia_nonce'
+                    AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text)
+                           FROM unnest(con.conkey) AS ck(attnum)
+                           JOIN pg_attribute a ON a.attrelid=con.conrelid AND a.attnum=ck.attnum) = ARRAY['nonce']) THEN
+    RAISE EXCEPTION 'D5: uq_portal_idempotencia_nonce no es UNIQUE(nonce)';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint con
+                  WHERE con.conrelid=v_pi AND con.contype='u' AND con.conname='uq_portal_idempotencia_action_key'
+                    AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text)
+                           FROM unnest(con.conkey) AS ck(attnum)
+                           JOIN pg_attribute a ON a.attrelid=con.conrelid AND a.attnum=ck.attnum) = ARRAY['action','idempotency_key']) THEN
+    RAISE EXCEPTION 'D5: uq_portal_idempotencia_action_key no es UNIQUE(action,idempotency_key)';
+  END IF;
+
+  -- ── firma de la función: RETURNS jsonb + SECURITY INVOKER + plpgsql ──
+  SELECT p.prorettype, p.prosecdef, l.lanname INTO r
+    FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang WHERE p.oid=v_fn;
+  IF r.prorettype IS DISTINCT FROM 'jsonb'::regtype THEN RAISE EXCEPTION 'D5: la función no RETURNS jsonb'; END IF;
+  IF r.prosecdef THEN RAISE EXCEPTION 'D5: la función no es SECURITY INVOKER'; END IF;
+  IF r.lanname<>'plpgsql' THEN RAISE EXCEPTION 'D5: la función no es plpgsql'; END IF;
+
+  -- ── hardening por ACL real (aclexplode cubre TODOS los privilegios incl. MAINTAIN) ──
+  -- portal_usuarios: la ÚNICA concesión a un rol Data API/PUBLIC debe ser (service_role, SELECT)
+  SELECT count(*) INTO v_n
+    FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+   WHERE c.oid=v_pu
+     AND (a.grantee=0 OR pg_get_userbyid(a.grantee) IN ('anon','authenticated','service_role'))
+     AND NOT (a.grantee<>0 AND pg_get_userbyid(a.grantee)='service_role' AND a.privilege_type='SELECT');
+  IF v_n>0 THEN RAISE EXCEPTION 'D5: portal_usuarios con privilegios Data API distintos de service_role:SELECT (%)', v_n; END IF;
+  IF NOT has_table_privilege('service_role','public.portal_usuarios','SELECT') THEN
+    RAISE EXCEPTION 'D5: service_role no puede leer portal_usuarios'; END IF;
+
+  -- portal_idempotencia: cero privilegios Data API/PUBLIC
+  SELECT count(*) INTO v_n
+    FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+   WHERE c.oid=v_pi AND (a.grantee=0 OR pg_get_userbyid(a.grantee) IN ('anon','authenticated','service_role'));
+  IF v_n>0 THEN RAISE EXCEPTION 'D5: portal_idempotencia con privilegios Data API (%)', v_n; END IF;
+
+  -- secuencia: cero privilegios Data API/PUBLIC
+  SELECT count(*) INTO v_n
+    FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+   WHERE c.oid=v_seq AND (a.grantee=0 OR pg_get_userbyid(a.grantee) IN ('anon','authenticated','service_role'));
+  IF v_n>0 THEN RAISE EXCEPTION 'D5: secuencia con privilegios Data API (%)', v_n; END IF;
+
+  -- función: proacl NO nula (si fuera nula, PUBLIC ejecuta) + cero EXECUTE Data API/PUBLIC
+  IF (SELECT proacl FROM pg_proc WHERE oid=v_fn) IS NULL THEN
+    RAISE EXCEPTION 'D5: proacl de la función es NULL (PUBLIC ejecuta) — falta REVOKE';
+  END IF;
+  SELECT count(*) INTO v_n
+    FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
+   WHERE p.oid=v_fn AND a.privilege_type='EXECUTE'
+     AND (a.grantee=0 OR pg_get_userbyid(a.grantee) IN ('anon','authenticated','service_role'));
+  IF v_n>0 THEN RAISE EXCEPTION 'D5: función ejecutable por rol Data API (%)', v_n; END IF;
+
+  -- ── RLS/policies: estado canónico = RLS off + force off + 0 policies ──
+  IF EXISTS (SELECT 1 FROM pg_class WHERE oid IN (v_pu,v_pi) AND (relrowsecurity OR relforcerowsecurity)) THEN
+    RAISE EXCEPTION 'D5: RLS habilitada en una tabla del portal (esperado off)';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_policy WHERE polrelid IN (v_pu,v_pi)) THEN
+    RAISE EXCEPTION 'D5: hay policies sobre el portal (esperado 0)';
+  END IF;
+
+  RAISE NOTICE 'PARTE D OK: estructura exacta (FK user_id->auth.users(id) CASCADE; FK id_gasto->gastos_internos(id_gasto) RESTRICT; CHECK rol {jenny,vicky,socio}; UNIQUEs nonce y (action,idempotency_key); funcion RETURNS jsonb SECURITY INVOKER) + hardening D-C-34 por ACL real incl. MAINTAIN (portal_usuarios solo service_role:SELECT; portal_idempotencia/secuencia/funcion sin Data API; proacl no nula; RLS off, 0 policies). Sin chequear datos ni ambiente.';
+END
+$verif_portal$;
 ```
 
 ---

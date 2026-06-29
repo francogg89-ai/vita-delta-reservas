@@ -1,6 +1,6 @@
 -- ============================================================================
--- BOOTSTRAP ENTORNO NUEVO v1.8.1 — 01: PARTE B (SCHEMA BASE) · DDL EJECUTABLE
--- Fuente: 6B_SCHEMA_SQL.md v1.8.1, PARTE B, Bloques 1→23 (EXTRACCIÓN LITERAL).
+-- BOOTSTRAP ENTORNO NUEVO v1.9.0 — 01: PARTE B (SCHEMA BASE) · DDL EJECUTABLE
+-- Fuente: 6B_SCHEMA_SQL.md v1.9.0, PARTE B, Bloques 1→23 (EXTRACCIÓN LITERAL).
 --   Solo el DDL de cada bloque. NO incluye los fences de "Verificación post-
 --   ejecución", "Test funcional", "Monitoreo" ni "Rollback" del canónico (esos
 --   no se ejecutan en bootstrap). La verificación de cierre vive en

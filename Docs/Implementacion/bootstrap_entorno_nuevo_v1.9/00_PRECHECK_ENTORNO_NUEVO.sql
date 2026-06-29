@@ -1,6 +1,6 @@
 -- ============================================================================
--- BOOTSTRAP ENTORNO NUEVO v1.8.1 — 00: PRECHECKS READ-ONLY
--- Canónico de referencia: 6B_SCHEMA_SQL.md v1.8.1 (PARTE B Bloques 1→23 +
+-- BOOTSTRAP ENTORNO NUEVO v1.9.0 — 00: PRECHECKS READ-ONLY
+-- Canónico de referencia: 6B_SCHEMA_SQL.md v1.9.0 (PARTE B Bloques 1→23 +
 --   PARTE C Bloques C0→C14). El canónico es la fuente; esta carpeta lo referencia.
 -- ----------------------------------------------------------------------------
 -- USO: correr en el SQL Editor del PROYECTO NUEVO, cada bloque por separado,

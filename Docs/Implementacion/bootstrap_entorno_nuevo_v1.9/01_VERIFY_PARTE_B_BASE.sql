@@ -1,5 +1,5 @@
 -- ============================================================================
--- BOOTSTRAP ENTORNO NUEVO v1.8.1 — 01_VERIFY: CIERRE DE PARTE B (read-only)
+-- BOOTSTRAP ENTORNO NUEVO v1.9.0 — 01_VERIFY: CIERRE DE PARTE B (read-only)
 -- Criterios: checkpoint de F2 (reconstrucción DEV) + post-check de hardening del
 --   motor (Bloque 23). 100% read-only (solo catálogos). Devuelve UNA fila.
 -- ----------------------------------------------------------------------------

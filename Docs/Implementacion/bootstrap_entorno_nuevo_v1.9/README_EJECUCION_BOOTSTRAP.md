@@ -1,8 +1,8 @@
-# Bootstrap de Entorno Nuevo — v1.8.1 · README de ejecución
+# Bootstrap de Entorno Nuevo — v1.9.0 · README de ejecución
 
 Artefactos **ejecutables y repetibles** para levantar un entorno Vita Delta de cero
-(Parte B base + Parte C Carril B), extraídos **literalmente** del canónico
-`6B_SCHEMA_SQL.md v1.8.1`. Esta carpeta **referencia** al canónico como fuente; **no se
+(Parte B base + Parte C Carril B + Parte D portal), extraídos **literalmente** del canónico
+`6B_SCHEMA_SQL.md v1.9.0`. Esta carpeta **referencia** al canónico como fuente; **no se
 agrega ningún puntero al canónico** (decisión de esta etapa: el canónico queda intacto).
 
 > **Variante DEV.** C13.1 siembra `configuracion_general('ambiente') = 'dev'`. Para
@@ -21,16 +21,18 @@ Correr **en este orden**, cada archivo en el SQL Editor del **proyecto nuevo**, 
 | 2 | `01_BOOTSTRAP_PARTE_B_BASE.sql` | **escribe** (DDL Parte B, Bloques 1→23) | corre sin error |
 | 3 | `01_VERIFY_PARTE_B_BASE.sql` | read-only | veredicto = `PARTE_B_OK` |
 | 4 | `02_BOOTSTRAP_PARTE_C_CARRIL_B.sql` | **escribe** (DDL Parte C, C0→C14) | corre sin error + NOTICE de C14 |
-| 5 | `02_VERIFY_FINAL_ENTORNO.sql` | read-only | veredicto = `ENTORNO_COMPLETO_OK` |
+| 5 | `02_VERIFY_PARTE_C_CARRIL_B.sql` | read-only | veredicto = `PARTE_C_OK` |
+| 6 | `03_BOOTSTRAP_PARTE_D_PORTAL.sql` | **escribe** (DDL Parte D, D1→D5) | corre sin error + NOTICE de D5 |
+| 7 | `03_VERIFY_FINAL_ENTORNO.sql` | read-only | veredicto = `ENTORNO_COMPLETO_OK` |
 
 No saltees verificaciones: cada `VERIFY` es el gate para habilitar el paso siguiente.
 Si un `BOOTSTRAP` falla a mitad → **parar y diagnosticar**, no continuar (los bootstrap
 no son idempotentes: ver §6).
 
-Los dos `BOOTSTRAP` se pueden pegar **completos** o **por secciones**: cada bloque está
+Los tres `BOOTSTRAP` se pueden pegar **completos** o **por secciones**: cada bloque está
 delimitado con `-- ═══ BLOQUE N ═══`. En la Parte C, **C13 es un solo bloque con 6
 sub-statements** (C13.1→C13.6): correrlo **entero** (el `NOT NULL` de C13.4 depende del
-backfill de C13.3).
+backfill de C13.3). La **Parte D** (archivo 03) es **solo estructura** y sus tablas nacen **vacías**: no siembra seed de `portal_usuarios`, usuarios de auth, secretos ni marcador de ambiente.
 
 ---
 
@@ -106,9 +108,9 @@ hardening tablas/secuencias/funciones sin exposición.
 > C14 es un bloque `DO`: su veredicto vive en el panel de **NOTICE**, no como fila
 > (L-RDEV-04). La fila-veredicto formal es `02_VERIFY`.
 
-**Paso 5 — `02_VERIFY`** → dos queries:
+**Paso 5 — `02_VERIFY_PARTE_C_CARRIL_B.sql`** → dos queries:
 
-- **QUERY 1** → una fila, veredicto **`ENTORNO_COMPLETO_OK`**:
+- **QUERY 1** → una fila, veredicto **`PARTE_C_OK`**:
 
   ```
   tablas_carrilb=9 · funciones_carrilb=21 · triggers_inmutabilidad=10 ·
@@ -129,6 +131,45 @@ hardening tablas/secuencias/funciones sin exposición.
     a los roles API, heredado del default de `postgres`. **No incluye r/a/w/d**, **no se
     revoca** (paridad OPS/TEST; D-RDEV-04). Las 9 tablas Carril B **no** aparecen (REVOKE de
     C12). Una fila `AMPLIO (EXPOSICION)` ⇒ exposición real ⇒ **no cerrar**.
+
+**Paso 6 — `03_BOOTSTRAP_PARTE_D_PORTAL.sql`** → corre sin error y deja en el panel de
+**NOTICE** la línea de D5 (auto-test):
+
+```
+PARTE D OK: estructura exacta (FK user_id->auth.users(id) CASCADE; FK id_gasto->gastos_internos
+(id_gasto) RESTRICT; CHECK rol {jenny,vicky,socio}; UNIQUEs nonce y (action,idempotency_key);
+funcion RETURNS jsonb SECURITY INVOKER) + hardening D-C-34 por ACL real incl. MAINTAIN
+(portal_usuarios solo service_role:SELECT; portal_idempotencia/secuencia/funcion sin Data API;
+proacl no nula; RLS off, 0 policies). Sin chequear datos ni ambiente.
+```
+
+> D5 es un bloque `DO`: su veredicto vive en el panel de **NOTICE**, no como fila
+> (L-RDEV-04). Las tablas del portal nacen **vacías** (la Parte D no siembra). D5 NO
+> chequea conteos de filas: verifica estructura/hardening, así que es seguro incluso si se
+> reusa contra una base ya poblada.
+
+**Paso 7 — `03_VERIFY_FINAL_ENTORNO.sql`** → dos queries:
+
+- **QUERY 1** → una fila, veredicto **`ENTORNO_COMPLETO_OK`** (cada columna debe dar el valor
+  esperado):
+
+  ```
+  portal_objetos=4 · fk_usuarios_auth=OK · fk_idem_gasto=OK · check_rol=OK ·
+  uniques=OK · func_firma=OK · pu_acl=OK · pi_acl=OK · seq_acl=OK · fn_acl=OK ·
+  rls_policies=OK
+  ```
+
+  Falla (`ENTORNO_INCOMPLETO`) si **cualquier** columna da `FALLA`. Las verificaciones son
+  **estrictas**: las FK se validan contra la tabla y columna exactas, incluida la acción `ON DELETE` (`CASCADE` hacia `auth.users`, `RESTRICT` hacia `gastos_internos`), no por nombre; los
+  `UNIQUE`/`CHECK` contra la relación correcta y por conjunto de columnas; el hardening por
+  **ACL real** vía `aclexplode` (cubre `TRUNCATE`/`REFERENCES`/`TRIGGER` y `MAINTAIN`); y se
+  exige `proacl` no nula (trampa `PUBLIC ejecuta`) y RLS off + 0 policies. No depende de datos
+  ni del marcador de ambiente.
+
+- **QUERY 2** (ACL de los objetos del portal, informativo): esperá **una sola fila** —
+  `portal_usuarios` con `service_role = SELECT`. Cualquier otra fila (grant a `anon`/
+  `authenticated`/`PUBLIC`, o sobre `portal_idempotencia`/su secuencia) ⇒ **no cerrar**
+  (contradice la QUERY 1).
 
 ---
 
@@ -173,37 +214,50 @@ pertenencias y pool son estructurales y por nombre, idénticos en los tres entor
 
 ---
 
-## 7. Validación empírica de estos artefactos
+## 7. Validación de estos artefactos
 
-Antes de entregar, los 5 `.sql` se corrieron de punta a punta sobre un PostgreSQL 16 limpio
-(roles `anon`/`authenticated`/`service_role` creados; `pg_cron` simulado por un stub
-SQL-only, ya que la extensión real requiere `shared_preload_libraries`):
+- **Parte B y Parte C (archivos 01/02):** el **DDL/schema de Parte B y Parte C no tiene
+  cambios funcionales** respecto del kit `bootstrap_entorno_nuevo_v1.8.1`; lo que cambió para
+  v1.9.0 son **headers, nombres de verify y veredictos** (p. ej. `02_VERIFY_FINAL_ENTORNO.sql`
+  → `02_VERIFY_PARTE_C_CARRIL_B.sql`, veredicto `ENTORNO_COMPLETO_OK` → `PARTE_C_OK`) y la
+  versión en los encabezados. Ese DDL ya se corrió de punta a punta sobre un PostgreSQL 16
+  limpio (roles `anon`/`authenticated`/`service_role`; `pg_cron` por stub SQL-only):
+  `00_PRECHECK` → `BASE_VACIA_OK`/`BASE_NO_VACIA`; `01_BOOTSTRAP` → 0 errores y `01_VERIFY` →
+  `PARTE_B_OK`; `02_BOOTSTRAP` → 0 errores con NOTICE de C14 exacto (seam 5/5, matriz 378/456,
+  reparto Σ=100000.00); `02_VERIFY` → veredicto verde (ahora `PARTE_C_OK`).
+- **Parte D (archivos 03):** el DDL se validó con **`pglast`** (parser de PostgreSQL:
+  `03_BOOTSTRAP` y `03_VERIFY` parsean sin error). Su **estructura** es la **certificada por el
+  Bloque H** de la promoción real TEST→OPS del portal (huella `TOTAL_PORTAL =
+  dee953e867aed06a9c65836bac14e8f7`, idéntica en TEST y OPS; smokes 14/14 verde), con el único
+  delta de los **dos comentarios**. La verificación es **estricta**: `D5` (auto-test por NOTICE)
+  y su espejo read-only `03_VERIFY_FINAL_ENTORNO.sql` validan las FK contra la tabla/columna
+  exactas, `CHECK`/`UNIQUE` por relación y conjunto de columnas, la firma de la función, el
+  hardening por **ACL real** (incl. `TRUNCATE`/`REFERENCES`/`TRIGGER` y `MAINTAIN`) y el estado
+  de RLS/policies.
+- **Pendiente (no bloqueante):** una corrida end-to-end del kit **completo** (01→03) sobre un
+  proyecto **Supabase** nuevo —que valide la Parte D y sus chequeos contra el schema `auth`
+  real—. Esa ejecución la hace Franco sobre Supabase; el kit queda listo para esa corrida.
 
-- `00_PRECHECK` → `BASE_VACIA_OK` sobre base vacía; `BASE_NO_VACIA` sobre base poblada (el
-  gate bloquea en ambos sentidos).
-- `01_BOOTSTRAP` → 0 errores; `01_VERIFY` → `PARTE_B_OK` (2/4/20/6/13/13/2, seed
-  5/3/10/1/1/1, cron 2, motor expuesto **0**).
-- `02_BOOTSTRAP` → 0 errores; NOTICE de C14 exacto (seam 5/5, matriz 378/456, reparto
-  Σ=100000.00).
-- `02_VERIFY` → `ENTORNO_COMPLETO_OK`; 0 funciones base / 0 Carril B expuestas.
-
-**Diferencias esperadas TEST/PROD vs el banco local** (no son fallas):
-- En Supabase, `extensiones=2` incluye el `pg_cron` real (acá fue el stub).
-- En Supabase, **QUERY 2 de `02_VERIFY` muestra una fila `residual_aceptado (Dxtm)`**; en
-  el PG local plano da 0 filas (no existe el default de Supabase que concede `Dxtm` a los
-  roles API). En ambos casos: **0 exposición amplia**, que es lo que importa.
+**Diferencias esperadas Supabase vs banco local** (no son fallas):
+- En Supabase, `extensiones=2` incluye el `pg_cron` real (en el banco local fue el stub).
+- En Supabase, **QUERY 2 de `02_VERIFY` muestra una fila `residual_aceptado (Dxtm)`**; en el PG
+  local plano da 0 filas. En ambos casos: **0 exposición amplia**.
+- `03_VERIFY` necesita el schema `auth` y los roles del Data API de Supabase: está pensado para
+  correr **en el proyecto Supabase**.
 
 ---
 
 ## 8. Fuente y trazabilidad
 
-- **Fuente única:** `6B_SCHEMA_SQL.md v1.8.1` — PARTE B (Bloques 1→23) y PARTE C (C0→C14),
+- **Fuente única:** `6B_SCHEMA_SQL.md v1.9.0` — PARTE B (Bloques 1→23), PARTE C (C0→C14) y PARTE D (D1→D5),
   extracción **literal**. Ante cualquier discrepancia, **el canónico manda**.
-- **Canónico intacto:** esta etapa **no** modifica `6B_SCHEMA_SQL.md` ni le agrega puntero
-  (opción a). Si se quisiera discoverability, el puntero iría en un **satélite**
-  (`ESTADO_ACTUAL_VITA_DELTA.md` / README del repo) al **cierre formal** de etapa, no acá.
+- **Canónico actualizado (no intacto):** a diferencia del kit v1.8.1, este kit corresponde al
+  canónico **bumpeado a `6B_SCHEMA_SQL.md v1.9.0`**, que incorpora el Carril C / portal como
+  **PARTE D** (más la **sección 25** de diseño). Este kit queda **pineado** a esa versión.
+  Los satélites y la acuñación de IDs `D-PROMO-C-XX` / `L-PROMO-C-XX` quedan para el **cierre
+  final** de la promoción, fuera del alcance de este bloque.
 - **Base probada:** runsheets de la reconstrucción de DEV (`F1`/`F2`/`F3`/`F5`); este juego
   los formaliza, absorbiendo el hardening del motor (antes `F5_HARDENING`, fuera de banda)
   como **Bloque 23 in-band**, y el barrido de permisos (antes `F5_BARRIDO`) dentro de los
   `VERIFY`.
-- **Ubicación sugerida en el repo:** `Docs/Implementacion/Bootstrap_Entorno_Nuevo_v1.8.1/`.
+- **Ubicación sugerida en el repo:** `Docs/Implementacion/bootstrap_entorno_nuevo_v1.9.0/`.

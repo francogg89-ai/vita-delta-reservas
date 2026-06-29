@@ -1,11 +1,11 @@
 -- ============================================================================
--- BOOTSTRAP ENTORNO NUEVO v1.8.1 — 02: PARTE C (CARRIL B) · DDL EJECUTABLE
--- Fuente: 6B_SCHEMA_SQL.md v1.8.1, PARTE C, Bloques C0→C14 (EXTRACCIÓN LITERAL).
+-- BOOTSTRAP ENTORNO NUEVO v1.9.0 — 02: PARTE C (CARRIL B) · DDL EJECUTABLE
+-- Fuente: 6B_SCHEMA_SQL.md v1.9.0, PARTE C, Bloques C0→C14 (EXTRACCIÓN LITERAL).
 --   Carril B autocontenido (contabilidad operativa interna 9C→9H + helper 9B):
 --   tablas, funciones, triggers de inmutabilidad, hardening (C12) y seeds
 --   estructurales (C13). Cierra con C14, un bloque DO de asserts (auto-test):
 --   su veredicto sale por el panel de NOTICE, no como fila (L-RDEV-04). La
---   fila-veredicto final vive en 02_VERIFY_FINAL_ENTORNO.sql.
+--   fila-veredicto de la Parte C vive en 02_VERIFY_PARTE_C_CARRIL_B.sql.
 -- ----------------------------------------------------------------------------
 -- ESTADO DE ENTRADA: 01_VERIFY == PARTE_B_OK. Corre DESPUÉS de la Parte B.
 -- USO: SQL Editor del PROYECTO NUEVO (confirmar Project Ref por URL; nunca OPS).
