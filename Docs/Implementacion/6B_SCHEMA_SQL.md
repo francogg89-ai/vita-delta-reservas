@@ -57,7 +57,7 @@ La huella cubre, por objeto: columnas (nombre+tipo+nullability), constraints, í
 
 ### f) Validación
 
-DDL de la PARTE D validado con `pglast`; conteos verificados contra el DDL extraído (no de memoria); paridad anclada a la huella del Bloque H (`dee953…`); EOL del canónico verificado en LF. El **bootstrap kit** se regeneró pineado a v1.9.0 (`bootstrap_entorno_nuevo_v1.9.0/`, con una nueva PARTE D y verificación final), dejando intacta la carpeta `bootstrap_entorno_nuevo_v1.8.1/`. La verificación D5 (y su espejo read-only `03_VERIFY_FINAL_ENTORNO.sql`) es **estricta**: valida las FKs contra la tabla y columna exactas, `CHECK`/`UNIQUE` en la relación correcta y por conjunto de columnas, la firma de la función, el hardening por **ACL real** (cubriendo `TRUNCATE`/`REFERENCES`/`TRIGGER` y `MAINTAIN`) y el estado de RLS/policies.
+DDL de la PARTE D validado con `pglast`; conteos verificados contra el DDL extraído (no de memoria); paridad anclada a la huella del Bloque H (`dee953…`); EOL del canónico verificado en LF. El **bootstrap kit** se regeneró pineado a v1.9.0 (`bootstrap_entorno_nuevo_v1.9.0/`, con una nueva PARTE D y verificación final); el kit v1.8.1 se retiró del árbol tras consolidar v1.9.0 y queda en el historial de git. La verificación D5 (y su espejo read-only `03_VERIFY_FINAL_ENTORNO.sql`) es **estricta**: valida las FKs contra la tabla y columna exactas, `CHECK`/`UNIQUE` en la relación correcta y por conjunto de columnas, la firma de la función, el hardening por **ACL real** (cubriendo `TRUNCATE`/`REFERENCES`/`TRIGGER` y `MAINTAIN`) y el estado de RLS/policies.
 
 ## RESUMEN DE CAMBIOS v1.8.0 → v1.8.1
 
