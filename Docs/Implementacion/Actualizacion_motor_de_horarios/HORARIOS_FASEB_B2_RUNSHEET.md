@@ -4,7 +4,7 @@
 **Entorno:** TEST. **NO OPS.**
 **Artefacto SQL:** `HORARIOS_FASEB_B2_RESOLVER_HORARIO_TEST.sql`.
 **Ejecutor:** Franco. Claude no escribe en ninguna DB.
-**Pre-validación:** la función se corrió contra un PostgreSQL 16 local con los 10 casos de prueba → **10/10 verde** (resultados embebidos abajo como esperado).
+**Pre-validación:** la función se corrió contra un PostgreSQL 16 local con los 11 casos de prueba → **11/11 verde** (resultados embebidos abajo como esperado).
 
 ---
 
@@ -40,7 +40,25 @@ SELECT to_regprocedure('public.resolver_horario(bigint, date)') IS NULL AS resol
 -- 0.2 Tablas y config presentes (esperado: filas > 0 en config; overrides vacía)
 SELECT (SELECT count(*) FROM configuracion_general WHERE clave LIKE 'hora_%') AS claves_hora,
        (SELECT count(*) FROM overrides_operativos) AS overrides_filas;   -- esperado overrides_filas = 0
+
+-- 0.3 Schema/session sanity (esperado: current_schema = public; si no, FRENAR antes del Paso 1)
+SELECT current_setting('search_path') AS search_path, current_schema() AS current_schema;
+
+-- 0.4 Sanidad exacta de config horaria (esperado: los 6 valores de abajo)
+SELECT clave, valor
+FROM configuracion_general
+WHERE clave IN (
+  'hora_checkin_default','hora_checkin_domingo',
+  'hora_checkout_default','hora_checkout_domingo',
+  'hora_checkin_max_cliente','hora_checkout_min_cliente'
+)
+ORDER BY clave;
+-- Esperado: hora_checkin_default=13:00, hora_checkin_domingo=18:00, hora_checkout_default=10:00,
+--           hora_checkout_domingo=16:00, hora_checkin_max_cliente=22:00, hora_checkout_min_cliente=07:00.
+-- Si current_schema != public (0.3) o algún valor de 0.4 difiere => FRENAR (no ejecutar Paso 1).
 ```
+
+**Gate del Paso 0:** seguir al Paso 1 **solo si** `resolver_ausente=t`, `overrides_filas=0`, `current_schema=public`, y los 6 valores de 0.4 coinciden. Cualquier desvío → frenar.
 
 ## Paso 1 — Aplicar el SQL (sin writes de datos)
 
@@ -72,7 +90,7 @@ SELECT (resolver_horario(4, DATE '2026-07-05')->>'hora_checkin')  AS checkin_dom
 ```
 
 ### 2.C — Overrides (con fixtures; CONSUME `id_override`)
-**Consumo explícito:** estos casos hacen `INSERT` real a `overrides_operativos` → consumen `id_override` (BIGSERIAL, **no transaccional**: el `ROLLBACK` borra los datos pero la secuencia queda avanzada ~6 valores). Si te molesta el consumo, sabé que es inevitable para probar overrides reales; el `ROLLBACK` igual deja la tabla limpia (0 filas).
+**Consumo explícito:** estos casos hacen `INSERT` real a `overrides_operativos` → consumen `id_override` (BIGSERIAL, **no transaccional**: el `ROLLBACK` borra los datos pero la secuencia queda avanzada ~7 valores). Si te molesta el consumo, sabé que es inevitable para probar overrides reales; el `ROLLBACK` igual deja la tabla limpia (0 filas).
 
 ```sql
 BEGIN;
@@ -80,7 +98,8 @@ INSERT INTO overrides_operativos (fecha_desde,fecha_hasta,id_cabana,tipo_overrid
  (DATE '2026-08-10', DATE '2026-08-14', NULL, 'hora_checkin', '16:00', 'fixture global',  'smoke_faseb'),
  (DATE '2026-08-10', DATE '2026-08-10', 4,    'hora_checkin', '17:00', 'fixture cabana',  'smoke_faseb'),
  (DATE '2026-09-10', DATE '2026-09-10', 4,    'hora_checkin', '25:99', 'fixture cast',    'smoke_faseb'),
- (DATE '2026-09-20', DATE '2026-09-20', 4,    'hora_checkin', '23:30', 'fixture ventana', 'smoke_faseb');
+ (DATE '2026-09-20', DATE '2026-09-20', 4,    'hora_checkin', '23:30', 'fixture ventana', 'smoke_faseb'),
+ (DATE '2026-09-25', DATE '2026-09-25', 4,    'hora_checkin', '7:00',  'fixture formato', 'smoke_faseb');
 -- Empate: mismo created_at, gana mayor id_override (12:00)
 INSERT INTO overrides_operativos (fecha_desde,fecha_hasta,id_cabana,tipo_override,valor,motivo,creado_por,created_at) VALUES
  (DATE '2026-09-01', DATE '2026-09-01', 4, 'hora_checkout', '11:00', 'fixture empate viejo', 'smoke_faseb', TIMESTAMPTZ '2026-01-01 00:00:00+00'),
@@ -98,6 +117,8 @@ SELECT resolver_horario(4, DATE '2026-09-10');
 SELECT resolver_horario(4, DATE '2026-09-20');
 -- Caso 9 RANGO INCLUSIVO -> D+4 (08-14) aplica 16:00 ; D+6 (08-16) base/patron
 SELECT resolver_horario(5, DATE '2026-08-14') AS dentro, resolver_horario(5, DATE '2026-08-16') AS fuera;
+-- Caso 11 FORMATO ESTRICTO -> '7:00' (PG lo parsearia como 07:00, en ventana) -> ok:false formato_invalido
+SELECT resolver_horario(4, DATE '2026-09-25');
 ROLLBACK;  -- limpia los fixtures (id_override queda avanzado; es lo unico que persiste)
 ```
 
@@ -108,12 +129,15 @@ ROLLBACK;  -- limpia los fixtures (id_override queda avanzado; es lo unico que p
 - Caso 7: `{"ok":false,"causa":"cast_invalido","error":"override_hora_invalido","valor":"25:99","id_override":<n>,"ventana_min":"07:00:00","ventana_max":"22:00:00","tipo_override":"hora_checkin"}`
 - Caso 8: `{"ok":false,"causa":"fuera_de_ventana",...,"valor":"23:30",...}`
 - Caso 9: `dentro` → `16:00:00 override_global` ; `fuera` → `18:00:00/16:00:00 patron_domingo` (08-16 es domingo)
+- Caso 11: `{"ok":false,"causa":"formato_invalido","error":"override_hora_invalido","valor":"7:00","id_override":<n>,"ventana_min":"07:00:00","ventana_max":"22:00:00","tipo_override":"hora_checkin"}`
+
+Casos 7/8/11 ejercen las **tres causas HARD**: `cast_invalido` (`25:99` pasa la regex pero el cast falla), `fuera_de_ventana` (`23:30` castea pero excede), `formato_invalido` (`7:00` ni siquiera matchea `^\d{2}:\d{2}(:\d{2})?$`).
 
 ## Evidencia para aprobar
-1. 0.1/0.2 → resolver ausente, overrides en 0.
+1. 0.1/0.2/0.3/0.4 → resolver ausente, overrides en 0, `current_schema=public`, y los 6 valores de config correctos.
 2. 2.A → `definer=f`, `volat=s`, `acl_cerrado=t`.
 3. 2.B → casos 1, 2, 10 con el JSON esperado (read-only).
-4. 2.C → casos 3–9 con el JSON esperado (con fixtures; tabla vuelve a 0 tras ROLLBACK).
+4. 2.C → casos 3–9 y 11 con el JSON esperado (con fixtures; tabla vuelve a 0 tras ROLLBACK).
 
 ## Reversión
 

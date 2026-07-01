@@ -7,6 +7,7 @@
 -- fecha/cabana (base -> patron domingo -> override global -> override cabana).
 -- NO integra con crear_prereserva ni obtener_disponibilidad_rango.
 -- NO toca EXCLUDE, modelo [fecha_in, fecha_out), A07/A08, gateway, frontend.
+-- HARD de override en 3 etapas: formato estricto HH:MM[:SS] -> cast TIME -> ventana 07:00-22:00.
 -- Ejecutar el script completo (sin seleccion parcial).
 -- =====================================================================
 
@@ -69,9 +70,17 @@ BEGIN
     ORDER BY (id_cabana IS NOT NULL) DESC, created_at DESC, id_override DESC
     LIMIT 1;
 
-    -- Paso C: aplicar override (con HARD) o caer a base/patron.
+    -- Paso C: aplicar override (con HARD en 3 etapas) o caer a base/patron.
     IF v_ovr_valor IS NOT NULL THEN
-      -- HARD 1: cast a TIME. Acepta HH:MM y HH:MM:SS; basura => bloquea (no fallback).
+      -- HARD 1: formato ESTRICTO HH:MM o HH:MM:SS. PostgreSQL parsea formatos mas laxos
+      -- (ej. '7:00' -> 07:00), pero la convencion cerrada solo acepta dos digitos por campo.
+      IF v_ovr_valor !~ '^\d{2}:\d{2}(:\d{2})?$' THEN
+        RETURN jsonb_build_object(
+          'ok', false, 'error', 'override_hora_invalido', 'causa', 'formato_invalido',
+          'tipo_override', v_tipo, 'id_override', v_ovr_id, 'valor', v_ovr_valor,
+          'ventana_min', v_ventana_min, 'ventana_max', v_ventana_max);
+      END IF;
+      -- HARD 2: cast a TIME. Ya paso el formato; rangos invalidos (ej. '25:99') caen aca.
       BEGIN
         v_hora := v_ovr_valor::TIME;
       EXCEPTION WHEN data_exception THEN
@@ -80,7 +89,7 @@ BEGIN
           'tipo_override', v_tipo, 'id_override', v_ovr_id, 'valor', v_ovr_valor,
           'ventana_min', v_ventana_min, 'ventana_max', v_ventana_max);
       END;
-      -- HARD 2: dentro de la ventana absoluta (inclusiva).
+      -- HARD 3: dentro de la ventana absoluta (inclusiva).
       IF v_hora < v_ventana_min OR v_hora > v_ventana_max THEN
         RETURN jsonb_build_object(
           'ok', false, 'error', 'override_hora_invalido', 'causa', 'fuera_de_ventana',
@@ -108,4 +117,4 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.resolver_horario(bigint, date) FROM PUBLIC, anon, authenticated, service_role;
 
 COMMENT ON FUNCTION public.resolver_horario(bigint, date) IS
-  'Resuelve la base de check-in/check-out para (id_cabana, fecha): base -> patron domingo -> override global -> override por cabana (overrides_operativos, fecha_hasta inclusiva). Funcion PURA (sin writes). Devuelve jsonb {ok:true, hora_checkin, hora_checkout, origen_checkin, origen_checkout} o {ok:false, error:override_hora_invalido, causa:cast_invalido|fuera_de_ventana, ...}. Override de hora invalido => HARD (cast + ventana 07:00-22:00). Fase B - motor de horarios.';
+  'Resuelve la base de check-in/check-out para (id_cabana, fecha): base -> patron domingo -> override global -> override por cabana (overrides_operativos, fecha_hasta inclusiva). Funcion PURA (sin writes). Devuelve jsonb {ok:true, hora_checkin, hora_checkout, origen_checkin, origen_checkout} o {ok:false, error:override_hora_invalido, causa:formato_invalido|cast_invalido|fuera_de_ventana, ...}. Override de hora => HARD en 3 etapas: formato estricto HH:MM[:SS], cast a TIME, ventana 07:00-22:00. Fase B - motor de horarios.';
