@@ -1,0 +1,254 @@
+{
+  "name": "portal-a28-cuenta-corriente-detalle__OPS",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a28-cuenta-corriente-detalle__OPS",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "695b0080-a494-4da5-8dec-5026a55c0ac3",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a28-cuenta-corriente-detalle__OPS — validar_firma_ts_rol.\n// Recomputa HMAC-SHA256 sobre los bytes EXACTOS (D-C-29). Revalida ts (300s), rol\n// (allowlist, D-C-39), action binding (D-C-41) y -A25- el payload de periodo (2da defensa).\nconst crypto = require('crypto');\n\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado en n8n Variables; abortando (assert duro).');\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\nfunction rej(motivo, b) {\n  return [{ json: { ok_firma: false, motivo,\n    ambiente_esperado: (b && b.ambiente_esperado) ?? null,\n    rol: (b && b.rol) ?? null, action: (b && b.action) ?? null,\n    ts: (b && b.ts) ?? null, payload_norm: null } }];\n}\n\n// 1) Raw body como Buffer EXACTO. Prioridad: binario 'data'. Fallback: wh.rawBody (L-C-05).\nlet buf = null;\ntry {\n  if (item.binary && item.binary.data) {\n    buf = await this.helpers.getBinaryDataBuffer(0, 'data');\n  }\n} catch (e) {\n  buf = null;\n}\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) return rej('raw_body_ausente', null);\n\n// 2) Firma del header.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\n\n// 3) HMAC recomputado sobre los MISMOS bytes.\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\n\n// 4) Comparacion timing-safe.\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(sigHeader);\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) {\n  firmaOk = false;\n}\nif (!firmaOk) return rej('firma_invalida', null);\n\n// 5) Parseo (firma ya validada sobre bytes crudos).\nlet body;\ntry {\n  body = JSON.parse(buf.toString('utf8'));\n} catch (e) {\n  return rej('payload_invalido', null);\n}\n\n// 6) Ventana de ts (D-C-29): |now - ts| <= 300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) {\n  return rej('ts_fuera_de_ventana', { ...body, ts: body.ts });\n}\nbody.ts = ts;\n\n// 7) Allowlist de rol (D-C-39). A28 = socio unicamente (cuenta corriente de socios).\nconst ROLES_OK = ['socio'];\nif (!ROLES_OK.includes(body.rol)) return rej('rol_no_permitido', body);\n\n// 8) Action binding (D-C-41): EXPECTED_ACTION = cuenta_corriente.detalle (A28).\nconst EXPECTED_ACTION = 'cuenta_corriente.detalle';\nif (body.action !== EXPECTED_ACTION) return rej('accion_desconocida', body);\n\n// 9) Payload A28: { mes } (obligatorio). Reject-unknown + YMD + floor 2026-07-01 (D-NEG-02).\n//    El mes es el parametro del drill-down; el SQL lo trunca a primer dia. mes<floor ->\n//    payload_invalido. Reenvia solo { mes } normalizado (2da defensa; el gateway ya valido).\n//    El pct 0.25 NO viaja: lo hardcodea el nodo Postgres.\nconst FLOOR = '2026-07-01';\nconst PERMITIDAS = ['mes'];\n\nlet pl = {};\nif (body.payload === undefined || body.payload === null) {\n  pl = {};\n} else if (typeof body.payload === 'object' && !Array.isArray(body.payload)) {\n  pl = body.payload;\n} else {\n  return rej('payload_invalido', body);\n}\nfor (const k of Object.keys(pl)) {\n  if (!PERMITIDAS.includes(k)) return rej('payload_invalido', body);\n}\n\nfunction isYMD(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const Y = +s.slice(0, 4), M = +s.slice(5, 7), D = +s.slice(8, 10);\n  if (M < 1 || M > 12 || D < 1 || D > 31) return false;\n  const dt = new Date(Date.UTC(Y, M - 1, D));\n  return dt.getUTCFullYear() === Y && dt.getUTCMonth() === M - 1 && dt.getUTCDate() === D;\n}\n\nif (pl.mes === undefined || pl.mes === null) return rej('payload_invalido', body);\nif (!isYMD(pl.mes)) return rej('payload_invalido', body);\nif (pl.mes < FLOOR) return rej('payload_invalido', body);\n\nconst payload_norm = { mes: pl.mes };\n\nreturn [{ json: { ok_firma: true, motivo: null,\n  ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null,\n  action: body.action ?? null, ts, payload_norm } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "60ca75db-0905-486a-92a6-ddcaf0ee869b",
+      "name": "validar_firma_ts_rol"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "id": "05cc0d07-2659-4679-ab55-37b9ea71dd25",
+      "name": "leer_ambiente",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a28-cuenta-corriente-detalle — verificar_acceso. Compara ambiente y arma el envelope de rechazo\n// (D-C-18/35). En exito marca {ok:true}; el envelope final de exito lo arma el render.\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\n\nfunction envErr(code, message, detail) {\n  return [{ json: { ok: false, error: { code, message, detail: detail ?? null } } }];\n}\n\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'payload invalido (mes mal formado, anterior al piso contable, o clave no permitida)',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\n\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\n\nreturn [{ json: { ok: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "e160a4c3-8ea8-4402-aa24-e9abdbb7c9b2",
+      "name": "verificar_acceso"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1cd8471-2010-47a4-9e87-f17d55a6bf5a",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "a665a083-1f19-44f8-9c72-b7ec640c6d2d",
+      "name": "IF acceso"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- portal-a28: detalle (drill-down) del mes. pct hardcodeado 0.25 (interino; destino\n-- configuracion_general). El mes viene normalizado en payload_norm ($1::jsonb->>'mes').\nSELECT cuenta_corriente_detalle(($1::jsonb ->> 'mes')::date, 0.25) AS detalle;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($('validar_firma_ts_rol').first().json.payload_norm) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -150
+      ],
+      "id": "fb9967a3-bd51-49e7-9893-bea41f42b103",
+      "name": "PG: leer detalle",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== portal-a28-cuenta-corriente-detalle — render JSON (drill-down L2) =====\n// Passthrough del jsonb de cuenta_corriente_detalle (cascada, matriz, matriz_cabanas,\n// incidencias, gastos_sin_incidencia). Read-only. El wrapper hardcodea pct=0.25, asi que el\n// jsonb no trae 'error'; si lo trajera, se surfacea como payload_invalido.\nfunction safeAll(nodeName) {\n  try {\n    const items = $(nodeName).all();\n    const failed = items.some(it => it && it.json && (it.json.error || it.error));\n    if (failed) return { ok: false, rows: [] };\n    return { ok: true, rows: items.map(it => it.json) };\n  } catch (e) { return { ok: false, rows: [] }; }\n}\n\nconst r = safeAll('PG: leer detalle');\nif (!r.ok || r.rows.length === 0) {\n  return [{ json: { ok: false, error: { code: 'error_interno', message: 'no se pudo cargar el detalle', detail: null } } }];\n}\n\nconst detalle = r.rows[0].detalle;\nif (detalle && detalle.error) {\n  return [{ json: { ok: false, error: { code: 'payload_invalido', message: String(detalle.error), detail: null } } }];\n}\n\nreturn [{ json: { ok: true, data: detalle } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -150
+      ],
+      "id": "5660c980-b910-4824-b35b-2dee08e77f13",
+      "name": "Code: render envelope"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        0
+      ],
+      "id": "6f257518-791a-42de-8bdd-15158090cd3a",
+      "name": "Respond"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF acceso": {
+      "main": [
+        [
+          {
+            "node": "PG: leer detalle",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer detalle": {
+      "main": [
+        [
+          {
+            "node": "Code: render envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: render envelope": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
