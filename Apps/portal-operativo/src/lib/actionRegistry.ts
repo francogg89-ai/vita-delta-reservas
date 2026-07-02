@@ -124,6 +124,14 @@ export const ACTION_REGISTRY: Record<string, ActionMeta> = {
     orden: 10,
     ruta: '/socios/cuenta-corriente',
   },
+  // A28 (L2) -- drill-down por mes (cascada + matriz + incidencias). Socio-only via A02/CATALOG.
+  'cuenta_corriente.detalle': {
+    action: 'cuenta_corriente.detalle',
+    label: 'Detalle mensual',
+    grupo: 'socios',
+    orden: 20,
+    ruta: '/socios/cuenta-corriente-detalle',
+  },
 };
 
 export interface GrupoMenu {

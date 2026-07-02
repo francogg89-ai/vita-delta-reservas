@@ -1,0 +1,884 @@
+{
+  "name": "portal-a07-crear-reserva__TEST",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a07-crear-reserva__TEST",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "1e210ee9-bc04-4867-a96f-fc646f279e72",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "A07.2 v2 wrapper (ESCRITURA). Molde base: portal-a05-detalle__TEMPLATE.json (sha256=c9a8703ae3c330dca5a8100a4541891e7d3bc08b6f388dce6d555c095df36519) en francogg89-ai/vita-delta-reservas @ main : Workflows/n8n/Supabase/. active:false, HMAC placeholder (Modo B). No gateway."
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a07-crear-reserva__TEST — validar_firma_ts_rol (ESCRITURA / A07) v2.\n// Clonado del molde a05 (HMAC sobre buffer crudo, timing-safe, ventana ts, raw body\n// binario con fallback, assert por prefijo __PEGAR_). A07:\n//   - EXPECTED_ACTION = 'reserva.crear_manual'.\n//   - actor (sobre firmado) contra enum de personas.\n//   - payload de negocio REJECT-UNKNOWN + validacion ESTRICTA (fecha real, hora en rango,\n//     contacto con digitos reales / email valido). null/undefined = ausente.\nconst crypto = require('crypto');\n\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado (assert por prefijo, L-C-10).');\n}\n\nconst ENUM_PAGO  = ['transferencia_bancaria','transferencia_mp','mp_link','cripto','efectivo'];\nconst ENUM_ACTOR = ['vicky','franco','rodrigo','remo'];\nconst ROLES_OK   = ['vicky','socio'];\nconst EXPECTED_ACTION = 'reserva.crear_manual';\nconst MAXLEN = 1000;\nconst EMAIL_RE = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\nfunction rej(motivo, body) {\n  body = body || {};\n  return [{ json: { ok_firma:false, motivo, ambiente_esperado: body.ambiente_esperado ?? null,\n    rol: body.rol ?? null, action: body.action ?? null, ts: (typeof body.ts!=='undefined'?body.ts:null),\n    actor: body.actor ?? null, payload: null } }];\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\n// 1) Raw body Buffer exacto (binario 'data' prioridad; fallback rawBody, L-C-05).\nlet buf = null;\ntry { if (item.binary && item.binary.data) buf = await this.helpers.getBinaryDataBuffer(0, 'data'); } catch (e) { buf = null; }\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) return rej('raw_body_ausente', {});\n\n// 2-4) Firma HMAC recomputada sobre los mismos bytes, comparacion timing-safe.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\nlet firmaOk = false;\ntry { const a = Buffer.from(sigHeader); const b = Buffer.from(expected); firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b); } catch (e) { firmaOk = false; }\nif (!firmaOk) return rej('firma_invalida', {});\n\n// 5) Parseo (firma ya validada).\nlet body;\ntry { body = JSON.parse(buf.toString('utf8')); } catch (e) { return rej('payload_invalido', {}); }\n\n// 6) Ventana ts +-300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) return rej('ts_fuera_de_ventana', body);\n\n// 7) Rol allowlist (D-C-39).\nif (!ROLES_OK.includes(body.rol)) return rej('rol_no_permitido', body);\n// 8) Action binding (D-C-41).\nif (body.action !== EXPECTED_ACTION) return rej('accion_desconocida', body);\n// 9) actor (sobre firmado; persona, no rol).\nif (typeof body.actor !== 'string' || !ENUM_ACTOR.includes(body.actor)) return rej('payload_invalido', body);\n\n// 10) Payload de negocio: REJECT-UNKNOWN + tipos estrictos.\nconst p = body.payload;\nif (!p || typeof p !== 'object' || Array.isArray(p)) return rej('payload_invalido', body);\n\nconst PERMITIDAS = ['id_cabana','fecha_in','fecha_out','personas','monto_total','monto_sena',\n  'canal_pago_esperado','medio_pago','huesped','mascotas','detalle_mascotas','ninos','notas',\n  'notas_reserva','hora_checkin_solicitada','hora_checkout_solicitada'];\nfor (const k of Object.keys(p)) { if (!PERMITIDAS.includes(k)) return rej('payload_invalido', body); }\n\nconst isStr = (v) => typeof v === 'string';\nconst okLen = (v) => v.length <= MAXLEN;\n// Fecha YYYY-MM-DD REAL: round-trip UTC (2027-02-30 -> rollover -> rechazado).\nconst isYMD = (s) => {\n  if (!isStr(s) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const Y = +s.slice(0,4), M = +s.slice(5,7), D = +s.slice(8,10);\n  if (M < 1 || M > 12 || D < 1 || D > 31) return false;\n  const dt = new Date(Date.UTC(Y, M - 1, D));\n  return dt.getUTCFullYear() === Y && dt.getUTCMonth() === M - 1 && dt.getUTCDate() === D;\n};\n// Hora HH:MM[:SS] en rango 00:00:00-23:59:59 (99:99 rechazado).\nconst isHMS = (s) => {\n  if (!isStr(s) || !/^\\d{2}:\\d{2}(:\\d{2})?$/.test(s)) return false;\n  const h = +s.slice(0,2), m = +s.slice(3,5), sec = s.length > 5 ? +s.slice(6,8) : 0;\n  return h >= 0 && h <= 23 && m >= 0 && m <= 59 && sec >= 0 && sec <= 59;\n};\n\nif (typeof p.id_cabana !== 'number' || !Number.isSafeInteger(p.id_cabana) || p.id_cabana <= 0) return rej('payload_invalido', body);\nif (!isYMD(p.fecha_in) || !isYMD(p.fecha_out)) return rej('payload_invalido', body);\nif (!(p.fecha_out > p.fecha_in)) return rej('payload_invalido', body);\nif (typeof p.personas !== 'number' || !Number.isSafeInteger(p.personas) || p.personas < 1) return rej('payload_invalido', body);\nif (typeof p.monto_total !== 'number' || !Number.isFinite(p.monto_total) || p.monto_total <= 0) return rej('payload_invalido', body);\nif (typeof p.monto_sena !== 'number' || !Number.isFinite(p.monto_sena) || p.monto_sena < 0 || p.monto_sena > p.monto_total) return rej('payload_invalido', body);\nif (!ENUM_PAGO.includes(p.canal_pago_esperado)) return rej('payload_invalido', body);\nif (!ENUM_PAGO.includes(p.medio_pago)) return rej('payload_invalido', body);\n\n// huesped REJECT-UNKNOWN + contacto estricto.\nconst h = p.huesped;\nif (!h || typeof h !== 'object' || Array.isArray(h)) return rej('payload_invalido', body);\nconst H_PERM = ['nombre','telefono','email'];\nfor (const k of Object.keys(h)) { if (!H_PERM.includes(k)) return rej('payload_invalido', body); }\nif (!isStr(h.nombre) || h.nombre.trim() === '' || !okLen(h.nombre)) return rej('payload_invalido', body);\n\nlet telVal = null, emaVal = null;\nif (h.telefono !== undefined && h.telefono !== null) {\n  if (!isStr(h.telefono) || !okLen(h.telefono)) return rej('payload_invalido', body);\n  const t = h.telefono.trim();\n  if (t !== '') {\n    if (t.replace(/\\D/g, '').length < 6) return rej('payload_invalido', body); // 'abc' -> 0 digitos -> rechazado\n    telVal = t;\n  }\n}\nif (h.email !== undefined && h.email !== null) {\n  if (!isStr(h.email) || !okLen(h.email)) return rej('payload_invalido', body);\n  const e = h.email.trim();\n  if (e !== '') {\n    if (!EMAIL_RE.test(e)) return rej('payload_invalido', body);\n    emaVal = e;\n  }\n}\nif (telVal === null && emaVal === null) return rej('payload_invalido', body);\n\n// opcionales cosmeticos (null/undefined = ausente; no entran al idem).\nfor (const k of ['detalle_mascotas','ninos','notas','notas_reserva']) {\n  if (p[k] != null && (!isStr(p[k]) || !okLen(p[k]))) return rej('payload_invalido', body);\n}\nif (p.mascotas != null && typeof p.mascotas !== 'boolean') return rej('payload_invalido', body);\nif (p.hora_checkin_solicitada != null && !isHMS(p.hora_checkin_solicitada)) return rej('payload_invalido', body);\nif (p.hora_checkout_solicitada != null && !isHMS(p.hora_checkout_solicitada)) return rej('payload_invalido', body);\n\nconst payloadWL = {\n  id_cabana: p.id_cabana, fecha_in: p.fecha_in, fecha_out: p.fecha_out, personas: p.personas,\n  monto_total: p.monto_total, monto_sena: p.monto_sena,\n  canal_pago_esperado: p.canal_pago_esperado, medio_pago: p.medio_pago,\n  mascotas: (p.mascotas === true),\n  detalle_mascotas: (p.detalle_mascotas != null ? p.detalle_mascotas : null),\n  ninos: (p.ninos != null ? p.ninos : null),\n  notas: (p.notas != null ? p.notas : null),\n  notas_reserva: (p.notas_reserva != null ? p.notas_reserva : null),\n  hora_checkin_solicitada: (p.hora_checkin_solicitada != null ? p.hora_checkin_solicitada : null),\n  hora_checkout_solicitada: (p.hora_checkout_solicitada != null ? p.hora_checkout_solicitada : null),\n  huesped: { nombre: h.nombre.trim(), telefono: telVal, email: emaVal }\n};\n\nreturn [{ json: { ok_firma:true, motivo:null, ambiente_esperado: body.ambiente_esperado ?? null,\n  rol: body.rol, action: body.action, ts, actor: body.actor, payload: payloadWL } }];\n"
+      },
+      "id": "faedf63e-ee11-4af7-a8a8-7c9d4268d43c",
+      "name": "validar_firma_ts_rol",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "id": "e40ec2f3-0e92-449a-a11d-1878a1724867",
+      "name": "leer_ambiente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a07-crear-reserva__TEST — verificar_acceso (ambiente + envelope de rechazo).\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\nfunction envErr(code, message, detail) { return [{ json: { ok:false, error: { code, message, detail: detail ?? null } } }]; }\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'payload invalido (campos de negocio, huesped o actor)',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\nreturn [{ json: { ok:true } }];\n"
+      },
+      "id": "f5c998d0-134c-4a30-84f1-566000255a5c",
+      "name": "verificar_acceso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9489ce2c-0e20-416e-87a2-016c9384a7ea",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f3b20b5d-096f-431a-90d1-02d221220a46",
+      "name": "IF acceso",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a07-crear-reserva__TEST — Code: derivar.\n// Deriva idem/sev (PII-free) y arma payloads SQL. SHA-256 require('crypto') (A07.1).\nconst crypto = require('crypto');\nconst sha256hex = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');\n\nconst V = $('validar_firma_ts_rol').first().json;\nconst p = V.payload;\nconst actor = V.actor;\n\nconst tel = (p.huesped.telefono && String(p.huesped.telefono).trim() !== '') ? String(p.huesped.telefono).replace(/\\D/g,'') : null;\nconst contacto_norm = tel ? tel : ('email_' + String(p.huesped.email).trim().toLowerCase());\nconst contact_hash = sha256hex(contacto_norm);\n\nconst ORDEN = ['id_cabana','fecha_in','fecha_out','personas','monto_total','monto_sena',\n  'canal_pago_esperado','medio_pago','hora_checkin_solicitada','hora_checkout_solicitada','mascotas','ninos'];\nconst negocio = {\n  id_cabana: p.id_cabana, fecha_in: p.fecha_in, fecha_out: p.fecha_out, personas: p.personas,\n  monto_total: Number(p.monto_total).toFixed(2), monto_sena: Number(p.monto_sena).toFixed(2),\n  canal_pago_esperado: p.canal_pago_esperado, medio_pago: p.medio_pago,\n  hora_checkin_solicitada: p.hora_checkin_solicitada, hora_checkout_solicitada: p.hora_checkout_solicitada,\n  mascotas: p.mascotas, ninos: p.ninos\n};\nconst canon = JSON.stringify(ORDEN.map((k) => [k, negocio[k]]));\nconst payload_hash12 = sha256hex(canon).slice(0, 12);\n\nconst idem = `portal_test_a07_${p.id_cabana}_${p.fecha_in}_${p.fecha_out}_${contact_hash}_${payload_hash12}`;\nconst sev = idem;\n\nconst huesped = { nombre: p.huesped.nombre };\nif (p.huesped.telefono) huesped.telefono = p.huesped.telefono;\nif (p.huesped.email) huesped.email = p.huesped.email;\nconst payload1Obj = {\n  id_cabana: p.id_cabana, fecha_in: p.fecha_in, fecha_out: p.fecha_out, personas: p.personas,\n  canal_origen: 'manual', canal_pago_esperado: p.canal_pago_esperado,\n  monto_total: p.monto_total, monto_sena: p.monto_sena,\n  source_event: sev, idempotency_key: idem, huesped: huesped,\n  mascotas: p.mascotas\n};\nif (p.detalle_mascotas !== null) payload1Obj.detalle_mascotas = p.detalle_mascotas;\nif (p.ninos !== null) payload1Obj.ninos = p.ninos;\nif (p.notas !== null) payload1Obj.notas = p.notas;\nif (p.notas_reserva !== null) payload1Obj.notas_reserva = p.notas_reserva;\nif (p.hora_checkin_solicitada !== null) payload1Obj.hora_checkin_solicitada = p.hora_checkin_solicitada;\nif (p.hora_checkout_solicitada !== null) payload1Obj.hora_checkout_solicitada = p.hora_checkout_solicitada;\n\n// payload2_base (sin id_pre_reserva; router1 lo agrega). Seña confirmada (D-C-56).\nconst payload2_base = {\n  tipo: 'sena', medio_pago: p.medio_pago,\n  monto_esperado: p.monto_sena, monto_recibido: p.monto_sena,\n  estado_inicial: 'confirmado', validado_por: actor, source_event: sev\n};\n// payload3_base (sin id_pre_reserva; router2 lo agrega).\nconst payload3_base = {\n  source_event: sev, created_by: actor, encargado_semana: null, permitir_pago_en_revision: false\n};\n\nreturn [{ json: {\n  idem, sev, contact_hash, payload_hash12, actor,\n  payload1: JSON.stringify(payload1Obj),\n  payload2_base, payload3_base\n} }];\n"
+      },
+      "id": "ab479da1-3658-491f-8a55-e99e7f5df495",
+      "name": "Code: derivar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH hit AS (\n  SELECT r.id_reserva, r.id_pre_reserva, r.id_huesped\n  FROM reservas r\n  JOIN pre_reservas pr ON pr.id_pre_reserva = r.id_pre_reserva\n  WHERE pr.idempotency_key = $1\n)\nSELECT (SELECT count(*) FROM hit)::int                               AS n,\n       (SELECT id_reserva     FROM hit ORDER BY id_reserva LIMIT 1)  AS id_reserva,\n       (SELECT id_pre_reserva FROM hit ORDER BY id_reserva LIMIT 1)  AS id_pre_reserva,\n       (SELECT id_huesped     FROM hit ORDER BY id_reserva LIMIT 1)  AS id_huesped;",
+        "options": {
+          "queryReplacement": "={{ $('Code: derivar').first().json.idem }}"
+        }
+      },
+      "id": "8a09fe8b-498b-4b8a-b27e-44d8b41570d1",
+      "name": "PG-0 precheck_reserva",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1440,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// router0_precheck — lee PG-0. 0 -> seguir; 1 -> idempotent_match; >1 -> incierto.\nconst r = $json; const D = $('Code: derivar').first().json;\nconst incierto = (paso, ids) => [{ json: { continuar:false, envelope: { ok:false, error: {\n  code:'estado_incierto', message:'estado inconsistente; verificar antes de reintentar',\n  detail: { paso, ids_creados: ids||{}, source_event: D.sev, idempotency_key: D.idem } } } } }];\nif (r.n > 1) return incierto('prereserva', {});\nif (r.n === 1) return [{ json: { continuar:false, envelope: { ok:true, data: {\n  id_reserva: r.id_reserva, id_pre_reserva: r.id_pre_reserva, id_huesped: r.id_huesped, idempotent_match: true } } } }];\nreturn [{ json: { continuar:true } }];\n"
+      },
+      "id": "ed1269a5-c9b9-46a5-b1f2-ba35b6f79e60",
+      "name": "router0_precheck",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "48d69073-7a3b-431a-b6f9-014217a40878",
+              "leftValue": "={{ $json.continuar }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "859cf10f-c72b-40a3-a406-13aefaa765d2",
+      "name": "IF0 seguir",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT crear_prereserva($1::jsonb) AS resultado;",
+        "options": {
+          "queryReplacement": "={{ $('Code: derivar').first().json.payload1 }}"
+        }
+      },
+      "id": "59fee3d7-d0c9-4bea-9ea9-901a59f83c76",
+      "name": "PG-1 crear_prereserva",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2160,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// router1_crear — lee PG-1. Mapea error o arma pg2_args (con payload2 que INCLUYE id_pre_reserva).\nconst res = $json.resultado; const D = $('Code: derivar').first().json;\nfunction mapErr(e) {\n  const conflicto = ['no_disponible'];\n  const payloadInv = ['cabana_no_existe','cabana_inactiva','excede_capacidad','fechas_invalidas',\n    'precio_requerido','huesped_nombre_requerido','huesped_contacto_requerido','hora_fuera_de_rango','payload_invalido','fecha_in_pasada','override_hora_invalido'];\n  if (conflicto.includes(e)) return { ok:false, error: { code:'conflicto', message:'sin disponibilidad en el rango', detail:null } };\n  if (payloadInv.includes(e)) return { ok:false, error: { code:'payload_invalido', message:'datos de reserva rechazados: '+e, detail:null } };\n  if (e === 'unique_violation_inesperado') return { ok:false, error: { code:'estado_incierto', message:'estado incierto al crear; verificar antes de reintentar', detail:{ paso:'prereserva', ids_creados:{}, source_event:D.sev, idempotency_key:D.idem } } };\n  return { ok:false, error: { code:'error_interno', message:'no se pudo crear la prereserva', detail:null } };\n}\nif (!res || res.ok !== true) return [{ json: { continuar:false, envelope: mapErr(res ? res.error : null) } }];\nconst id_pre = res.id_pre_reserva;\n// payload2 = base + id_pre_reserva (clave EXACTA del payload de registrar_pago, 6B L4580).\nconst payload2 = Object.assign({}, D.payload2_base, { id_pre_reserva: id_pre });\nconst pg2_args = JSON.stringify({ idem: D.idem, id_pre, sev: D.sev, payload2 });\nreturn [{ json: { continuar:true, id_pre, pg2_args } }];\n"
+      },
+      "id": "67f2807f-015a-4777-a5fb-4958214e4234",
+      "name": "router1_crear",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4d1c734a-13be-4aa8-9e00-c2751ac34250",
+              "leftValue": "={{ $json.continuar }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1401a97c-33bf-477d-a765-fdfc0dd9a540",
+      "name": "IF1 seguir",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH args AS (\n  SELECT ($1::jsonb)->>'idem'             AS idem,\n         (($1::jsonb)->>'id_pre')::bigint AS id_pre,\n         ($1::jsonb)->>'sev'              AS sev,\n         ($1::jsonb)->'payload2'          AS payload2\n),\nlk AS MATERIALIZED (\n  SELECT pg_advisory_xact_lock(hashtextextended((SELECT idem FROM args), 0::bigint))\n),\nex AS (\n  SELECT count(p.id_pago)::int                                              AS n,\n         count(p.id_pago) FILTER (WHERE p.estado='confirmado')::int         AS n_conf,\n         (array_agg(p.id_pago ORDER BY p.id_pago)\n            FILTER (WHERE p.estado='confirmado'))[1]                        AS id_pago_conf\n  FROM lk\n  CROSS JOIN args a\n  LEFT JOIN pagos p\n    ON p.id_prereserva = a.id_pre AND p.tipo='sena' AND p.source_event = a.sev\n)\nSELECT ex.n, ex.n_conf, ex.id_pago_conf,\n       CASE WHEN ex.n = 0 THEN registrar_pago((SELECT payload2 FROM args)) ELSE NULL END AS resultado_registro\nFROM ex;",
+        "options": {
+          "queryReplacement": "={{ $('router1_crear').first().json.pg2_args }}"
+        }
+      },
+      "id": "37172e96-b0c2-4f1f-9dca-4aa77ecac2d2",
+      "name": "PG-2 lock_precheck_pago",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2880,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// router2_pago — lee PG-2 (lock+precheck seña+registro condicional). Ajuste 2:\n// seguir SOLO si registrado ok===true && estado==='confirmado' && sin warning, o si ya habia\n// exactamente 1 seña confirmada. Caso contrario -> estado_incierto.\nconst r = $json; const D = $('Code: derivar').first().json;\nconst id_pre = $('router1_crear').first().json.id_pre;\nconst incierto = () => [{ json: { continuar:false, envelope: { ok:false, error: {\n  code:'estado_incierto', message:'estado de pago incierto; verificar antes de reintentar',\n  detail: { paso:'pago', ids_creados: { id_pre_reserva: id_pre }, source_event: D.sev, idempotency_key: D.idem } } } } }];\nlet proceed = false;\nif (r.n === 0) {\n  const rr = r.resultado_registro;\n  proceed = !!(rr && rr.ok === true && rr.estado === 'confirmado' && !rr.warning);\n} else if (r.n === 1 && r.n_conf === 1) {\n  proceed = true;\n} else {\n  proceed = false; // n=1 & n_conf=0 ; n>1\n}\nif (!proceed) return incierto();\nconst payload3 = JSON.stringify(Object.assign({ id_pre_reserva: id_pre }, D.payload3_base));\nreturn [{ json: { continuar:true, payload3 } }];\n"
+      },
+      "id": "c9350c75-3f2b-430d-80fc-1d29486cfebd",
+      "name": "router2_pago",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fdf852f4-0907-426e-b5ee-b4d780ee5f8e",
+              "leftValue": "={{ $json.continuar }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8e2a74ed-3b5d-4838-acfd-209513438be6",
+      "name": "IF2 seguir",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT confirmar_reserva($1::jsonb) AS resultado;",
+        "options": {
+          "queryReplacement": "={{ $('router2_pago').first().json.payload3 }}"
+        }
+      },
+      "id": "1f830f4a-eec5-4619-810a-e899745260fd",
+      "name": "PG-3 confirmar_reserva",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3600,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// router3_confirmar — lee PG-3. Exito {ok:true,data}; conflicto; ajuste 3:\n// estado_invalido + estado_actual='convertida' -> recheck (PG-4); resto -> estado_incierto.\nconst res = $json.resultado; const D = $('Code: derivar').first().json;\nconst id_pre = $('router1_crear').first().json.id_pre;\nif (res && res.ok === true) return [{ json: { recheck:false, envelope: { ok:true, data: {\n  id_reserva: res.id_reserva, id_pre_reserva: res.id_pre_reserva, id_huesped: res.id_huesped, idempotent_match: false } } } }];\nconst e = res ? res.error : null;\nif (e === 'estado_invalido' && res && res.estado_actual === 'convertida') return [{ json: { recheck:true } }];\nif (e === 'conflicto_al_confirmar' || e === 'no_disponible') return [{ json: { recheck:false, envelope: {\n  ok:false, error: { code:'conflicto', message:'conflicto de disponibilidad al confirmar', detail:null } } } }];\nreturn [{ json: { recheck:false, envelope: { ok:false, error: {\n  code:'estado_incierto', message:'estado incierto al confirmar; verificar antes de reintentar',\n  detail: { paso:'confirmacion', ids_creados: { id_pre_reserva: id_pre }, source_event: D.sev, idempotency_key: D.idem } } } } }];\n"
+      },
+      "id": "74ec48c5-a2ed-4daf-ad44-ce2c0cabcf2b",
+      "name": "router3_confirmar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1a0687e9-904e-423d-9a7f-593383e1e036",
+              "leftValue": "={{ $json.recheck }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7daccfb7-e672-4315-9309-dc1dd0147e49",
+      "name": "IF3 recheck",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4080,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH hit AS (\n  SELECT r.id_reserva, r.id_pre_reserva, r.id_huesped\n  FROM reservas r\n  JOIN pre_reservas pr ON pr.id_pre_reserva = r.id_pre_reserva\n  WHERE pr.idempotency_key = $1\n)\nSELECT (SELECT count(*) FROM hit)::int                               AS n,\n       (SELECT id_reserva     FROM hit ORDER BY id_reserva LIMIT 1)  AS id_reserva,\n       (SELECT id_pre_reserva FROM hit ORDER BY id_reserva LIMIT 1)  AS id_pre_reserva,\n       (SELECT id_huesped     FROM hit ORDER BY id_reserva LIMIT 1)  AS id_huesped;",
+        "options": {
+          "queryReplacement": "={{ $('Code: derivar').first().json.idem }}"
+        }
+      },
+      "id": "7cb3cc9f-ae72-4748-abff-75084db278f4",
+      "name": "PG-4 recheck_reserva_post_confirmar",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4320,
+        170
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// router4_recheck — lee PG-4. Ajuste 3: 1 reserva -> ok idempotent_match; 0 o >1 -> incierto.\nconst r = $json; const D = $('Code: derivar').first().json;\nif (r.n === 1) return [{ json: { envelope: { ok:true, data: {\n  id_reserva: r.id_reserva, id_pre_reserva: r.id_pre_reserva, id_huesped: r.id_huesped, idempotent_match: true } } } }];\nreturn [{ json: { envelope: { ok:false, error: {\n  code:'estado_incierto', message:'recheck post-confirmacion inconsistente; verificar manualmente',\n  detail: { paso:'confirmacion', ids_creados: {}, source_event: D.sev, idempotency_key: D.idem } } } } }];\n"
+      },
+      "id": "c05fdcb9-77b7-4cd9-9ed1-dc2042efc6ed",
+      "name": "router4_recheck",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4560,
+        170
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a07-crear-reserva__TEST — Code: render. Punto unico de salida.\n// Extrae el envelope de los routers; o pasa el rechazo de verificar_acceso ($json {ok:false,error}).\n// El gateway re-enmascarara/re-sanitizara codigos de infra/estado_incierto (D-C-55).\nconst e = ($json && $json.envelope) ? $json.envelope : $json;\nreturn [{ json: e }];\n"
+      },
+      "id": "78cff73a-bd79-4bd2-ad6a-fe8b494463d7",
+      "name": "Code: render",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4320,
+        -170
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "662f73b7-46c4-4738-a16a-2b408099628f",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        4800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7f0a7c99-ee2b-4d0d-a2a2-f978fef16ca8",
+              "leftValue": "={{ ($json.envelope?.ok === true) && ($json.envelope?.data?.idempotent_match === false) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2f2ff47-6a4f-4728-b3bd-4a5f80dd736c",
+      "name": "IF aviso 8C-bis (alta nueva)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4080,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_ID_8CBIS_TEST",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/REEMPLAZAR_ID_8CBIS_TEST"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_reserva": "={{ $json.envelope.data.id_reserva }}",
+            "id_pre_reserva": "={{ $json.envelope.data.id_pre_reserva }}",
+            "entorno": "={{ $('leer_ambiente').first().json.valor }}",
+            "source": "a07_portal",
+            "operador": "={{ $('Code: derivar').first().json.actor }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "id_reserva",
+              "displayName": "id_reserva",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "id_pre_reserva",
+              "displayName": "id_pre_reserva",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "entorno",
+              "displayName": "entorno",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "operador",
+              "displayName": "operador",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "91782038-8c25-4a7a-9b45-3c6e318bfe0c",
+      "name": "Call 'vita_w8cbis_alerta__TEST' (aviso)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        4400,
+        360
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF acceso": {
+      "main": [
+        [
+          {
+            "node": "Code: derivar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: derivar": {
+      "main": [
+        [
+          {
+            "node": "PG-0 precheck_reserva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG-0 precheck_reserva": {
+      "main": [
+        [
+          {
+            "node": "router0_precheck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "router0_precheck": {
+      "main": [
+        [
+          {
+            "node": "IF0 seguir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF0 seguir": {
+      "main": [
+        [
+          {
+            "node": "PG-1 crear_prereserva",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG-1 crear_prereserva": {
+      "main": [
+        [
+          {
+            "node": "router1_crear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "router1_crear": {
+      "main": [
+        [
+          {
+            "node": "IF1 seguir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF1 seguir": {
+      "main": [
+        [
+          {
+            "node": "PG-2 lock_precheck_pago",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG-2 lock_precheck_pago": {
+      "main": [
+        [
+          {
+            "node": "router2_pago",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "router2_pago": {
+      "main": [
+        [
+          {
+            "node": "IF2 seguir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF2 seguir": {
+      "main": [
+        [
+          {
+            "node": "PG-3 confirmar_reserva",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG-3 confirmar_reserva": {
+      "main": [
+        [
+          {
+            "node": "router3_confirmar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "router3_confirmar": {
+      "main": [
+        [
+          {
+            "node": "IF3 recheck",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF aviso 8C-bis (alta nueva)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF3 recheck": {
+      "main": [
+        [
+          {
+            "node": "PG-4 recheck_reserva_post_confirmar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG-4 recheck_reserva_post_confirmar": {
+      "main": [
+        [
+          {
+            "node": "router4_recheck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "router4_recheck": {
+      "main": [
+        [
+          {
+            "node": "Code: render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: render": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF aviso 8C-bis (alta nueva)": {
+      "main": [
+        [
+          {
+            "node": "Call 'vita_w8cbis_alerta__TEST' (aviso)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}

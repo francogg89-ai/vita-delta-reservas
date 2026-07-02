@@ -112,6 +112,57 @@ export interface CuentaCorrienteData {
   filas: CuentaCorrienteFila[];
 }
 
+// A28 (cuenta_corriente.detalle) -- drill-down por mes. Espejo del jsonb de
+// cuenta_corriente_detalle. Montos NUMERICOS crudos; null solo por robustez.
+export interface CascadaPaso {
+  paso: number;
+  concepto: string;
+  id_socio: number | null;
+  socio: string | null;
+  monto: number | null;
+}
+export interface MatrizSocioDetalle {
+  id_socio: number;
+  socio: string;
+  valor_socio: number | null;
+  valor_pool: number | null;
+  participacion: number | null;
+}
+export interface MatrizCabanaDetalle {
+  id_cabana: number;
+  cabana: string;
+  valor_relativo: number | null;
+  id_socio: number;
+  beneficiario: string;
+  participa: boolean;
+}
+export interface IncidenciaGastoFila {
+  id_gasto: number;
+  clase: string;
+  etiqueta: string;
+  monto: number | null;
+  destino: string;
+  id_socio: number | null;
+  socio: string | null;
+  monto_incidido: number | null;
+  regla: string;
+}
+export interface GastoSinIncidenciaFila {
+  id_gasto: number;
+  clase: string;
+  etiqueta: string;
+  monto: number | null;
+  motivo: string;
+}
+export interface CuentaCorrienteDetalleData {
+  mes: string;
+  cascada: CascadaPaso[];
+  matriz: MatrizSocioDetalle[];
+  matriz_cabanas: MatrizCabanaDetalle[];
+  incidencias: IncidenciaGastoFila[];
+  gastos_sin_incidencia: GastoSinIncidenciaFila[];
+}
+
 // ----- A24 historico.reservas → data:{ filas, limit, offset, total } -----
 // Paginado server-side; `total` = universo filtrado (COUNT(*) OVER()). saldo_real recomputado
 // (mismo criterio que A12, puede ser negativo por sobrepago: en reporte se muestra crudo).

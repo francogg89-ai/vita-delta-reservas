@@ -24,7 +24,7 @@
 # ====== CONFIG (editar) ======
 $BaseUrl = "https://federicosecchi.app.n8n.cloud"
 $Webhook = "portal-a27-cuenta-corriente"
-$Secret  = "d3cb37c88b688c6e104f133d08990312134ee5df6775e2dff267e0deac16c3f4"
+$Secret  = "secreto no subir"
 # =============================
 
 $WebhookUrl = "$($BaseUrl.TrimEnd('/'))/webhook/$Webhook"
