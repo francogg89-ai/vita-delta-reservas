@@ -1119,6 +1119,23 @@ Decisiones del **levantamiento de entorno** de la reconstrucción de DEV desde c
 - **D-RDEV-05** — Las **13 funciones del motor** se endurecen por **REVOKE EXECUTE** (espejo de 7E / 8A Opción B), gateado por `ambiente='dev'`. No es rediseño de schema.
 - **D-RDEV-06** — El **DEV viejo se conserva congelado** (no se borra) tras cerrar el nuevo. Su eliminación es decisión separada y posterior.
 
+## Frente Cuenta Corriente de socios (lecturas L1/L2) — cerrada 2026-07-02
+
+Exposición read-only de la cuenta corriente de socios en el Portal Operativo, **componiendo el motor del Carril B** (no es contabilidad nueva). Namespace propio `D-CC-XX`.
+
+- **D-CC-01** — **La cuenta corriente acumula en vivo desde el piso 2026-07-01 y NO se reinicia mensualmente.** El saldo al día es la suma mes a mes de `saldo_socios_periodo` desde el piso hasta hoy (AR) + los movimientos ventaneados; el reparto anual (jun-2027) es la suma de los 12 meses. El pool estacional se respeta: cada mes reparte con su propia matriz.
+- **D-CC-02** — **Visibilidad socio-only, transparencia total entre los tres socios.** La función devuelve las filas de los tres sin importar cuál socio llame (sin `injectActor`).
+- **D-CC-03** — **El % operativo (0.25) viaja hardcodeado en el wrapper** (interino; destino `configuracion_general`), NO en el request. Toma 0 en meses de pérdida (`GREATEST(base,0)*pct`, nativo del motor): nunca absorbe pérdidas.
+- **D-CC-04** — **L1 usa expresión timezone inline** (`now() AT TIME ZONE 'America/Argentina/Buenos_Aires'`), NO `fecha_hoy_ar()`, para no acoplar el frente a la promoción del motor de horarios (helper TEST-only).
+- **D-CC-05** — **En L1 los movimientos se ventanean por fecha** (`fecha ∈ [piso, hasta]`): semántica as-of correcta y borde pre-piso limpio.
+- **D-CC-06** — **L2 se expone como un jsonb compuesto** — una función (`cuenta_corriente_detalle`) que compone las funciones del motor (cascada + matriz + incidencias) —, NO tres endpoints separados.
+- **D-CC-07** — **A27 `cuenta_corriente.al_dia` es la primera acción socio-only del sistema** (`roles:['socio']`). Ni vicky ni jenny la ven; A02 la deriva del CATALOG sin cambios.
+- **D-CC-08** — **L1 usa payload vacío** (`payloadVacio`); **L2 usa payload `{mes}`** validado por el validador nuevo `payloadCuentaCorrienteDetalle` (obligatorio, YMD, `≥` piso 2026-07-01).
+- **D-CC-09** — **La columna del frontend se mantiene "Movimientos" (no "Retiros").** El backend suma **todos** los tipos de `movimientos_socio` (retiro/adelanto/ajuste/retribución/…), no solo retiros.
+- **D-CC-10** — **El frontend tiene un grupo propio "Socios"** (separado de "Económico", que ve vicky), con `cuenta-corriente` (orden 10) y `cuenta-corriente-detalle` (orden 20).
+- **D-CC-11** — **L3 (histórico mes a mes) queda diferido:** lee las fotos congeladas, que no existen hasta el frente de escritura (congelado). Recomendación asentada: hacer el congelado antes que L3.
+- **D-CC-12** — **Promoción a OPS por paquete coordinado + canónico v1.10.0 aditivo.** Funciones `CREATE OR REPLACE` en OPS (idénticas a TEST), 2 workflows con webhook `__OPS` (paridad lógica, no byte), gateway sobre el OPS A26; orden funciones → workflows → gateway. El canónico se bumpea **una sola vez** al cierre (v1.9.0 → v1.10.0, las 2 funciones + `REVOKE` en la PARTE C), **después** de OPS verde. El frontend viaja en `main`.
+
 ## Prototipos legacy
 
 - `index.html` — presentación visual estática del estado del sistema. No es frontend operativo ni web pública de reservas.

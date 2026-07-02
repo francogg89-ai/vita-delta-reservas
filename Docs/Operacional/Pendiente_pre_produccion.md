@@ -217,6 +217,17 @@ Pendientes **nuevos** (no bloqueantes) derivados de este cierre:
 
 ---
 
+## ✅ CERRADO (2026-07-02) — Frente Cuenta Corriente de socios (lecturas L1/L2) + canónico v1.10.0
+
+Se expusieron como **lecturas read-only socio-only** en el Portal Operativo las dos vistas de cuenta corriente que **componen el motor del Carril B**: **L1 `cuenta_corriente.al_dia` (A27)** —saldo acumulado en vivo por socio desde el piso 2026-07-01— y **L2 `cuenta_corriente.detalle` (A28)** —drill-down de un mes (cascada + matriz + incidencias), jsonb compuesto—. Ambas `STABLE`/`SECURITY INVOKER` revocadas; `pct` 0.25 hardcodeado en el wrapper; A27 = primera acción `roles:['socio']`. **Promovido a OPS** (funciones `CREATE OR REPLACE` + 2 workflows `__OPS` + gateway sobre OPS A26; verificado en vivo) y **canónico bumpeado a v1.10.0** (2 funciones + `REVOKE` en la PARTE C). Validación: L1 recon ×3 + A27 11/11; L2 directo 6/6 + A28 15/15; frontend `tsc`+`build` EXIT 0; smokes directos read-only verdes en TEST y OPS. **D-CC-01…12 / L-CC-01…08.** Cierre `CIERRE_CARRIL_CUENTA_CORRIENTE_L1_L2.md`.
+
+## Pendiente — Frente Cuenta Corriente (post-cierre L1/L2)
+
+- **P-CC-1** — **L3 (histórico mes a mes).** Lectura de las **fotos congeladas** de la cuenta corriente; **diferido** porque las fotos no existen hasta el frente de escritura (congelado). Recomendación (D-CC-11): hacer el congelado **antes** que L3.
+- **P-CC-2** — **Frente de escritura: congelado + retiros/reembolsos.** Snapshot de fin de mes de la cuenta corriente (respetando "IA propone, humanos aprueban") + registro/exposición de retiros y reembolsos. Es el frente siguiente; habilita L3.
+- **P-CC-3** — **`pct` operativo (0.25) → `configuracion_general`.** Hoy hardcodeado en los wrappers A27/A28 (D-CC-03); mover a una clave editable (una línea por wrapper) cuando se decida. No bloqueante.
+- **P-CC-4** — **Regenerar el bootstrap kit a v1.10.0.** El canónico está en v1.10.0 pero el kit sigue pineado a `bootstrap_entorno_nuevo_v1.9.0/` (le faltan las 2 funciones de cuenta corriente). **Bajo riesgo** diferirlo (son lecturas; un entorno nuevo bootstrappea el schema base igual), pero conviene antes del próximo bootstrap para no dejar el kit desincronizado del canónico.
+
 ## Carril C — Backend/API (pendientes de diseño → construcción)
 
 - **P-C-1** — Brief del portal: reconciliar roles/permisos contra el catálogo si aparece `Prompt_Portal_Operativo_Interno.md`. No bloqueante (D-C-01).

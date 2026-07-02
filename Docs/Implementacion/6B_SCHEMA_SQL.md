@@ -1,9 +1,9 @@
 # 6B_SCHEMA_SQL.md
 # Schema PostgreSQL — Vita Delta Reservas
 
-**Versión:** 1.9.0
-**Fecha:** Junio 2026
-**Estado:** Canónico vigente: **`6B_SCHEMA_SQL.md v1.9.0`**. v1.8.0 consolidó el **Carril B** (contabilidad operativa interna, sub-etapas 9C→9H + helper 9B) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026; **v1.8.1 canoniza el hardening de las funciones base del motor** (Bloque 23, `REVOKE EXECUTE`), que se venía aplicando fuera de banda por entorno; **v1.9.0 consolida el Carril C — Portal Operativo Interno** (las tablas `portal_usuarios` y `portal_idempotencia` y la función `portal_cargar_gasto_interno(jsonb)`) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026 (bloques A→H). La base (Partes A y B) refleja el estado alineado DEV/TEST/OPS de v1.7.3; el Carril B (sección 24 y PARTE C) refleja el estado final TEST=OPS verificado por huella estructural (K1, `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17`); el Carril C (sección 25 y PARTE D) parte de la estructura certificada por la huella del Bloque H (`TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`), con un único delta intencional respecto de esa huella: dos comentarios SQL actualizados al estatus canónico (ver changelog v1.8.1 → v1.9.0). El canónico es autocontenido y apto para bootstrappear un entorno nuevo de cero. **DEV fue reconstruido desde cero desde v1.8.0** (jun-2026, proyecto nuevo `wsrdzjmvnzxidjlovlja`, cerrado como OPS); el hallazgo que motivó v1.8.1 surgió en esa reconstrucción (ver changelog).
+**Versión:** 1.10.0
+**Fecha:** Julio 2026
+**Estado:** Canónico vigente: **`6B_SCHEMA_SQL.md v1.10.0`**. v1.8.0 consolidó el **Carril B** (contabilidad operativa interna, sub-etapas 9C→9H + helper 9B) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026; **v1.8.1 canoniza el hardening de las funciones base del motor** (Bloque 23, `REVOKE EXECUTE`), que se venía aplicando fuera de banda por entorno; **v1.9.0 consolida el Carril C — Portal Operativo Interno** (las tablas `portal_usuarios` y `portal_idempotencia` y la función `portal_cargar_gasto_interno(jsonb)`) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026 (bloques A→H); **v1.10.0 consolida las 2 funciones de lectura de la cuenta corriente de socios** (`cuenta_corriente_viva`, `cuenta_corriente_detalle`) en la PARTE C, capa de lectura socio-only expuesta por el portal (acciones `cuenta_corriente.al_dia` y `cuenta_corriente.detalle`), tras la promoción coordinada TEST→OPS de julio 2026. La base (Partes A y B) refleja el estado alineado DEV/TEST/OPS de v1.7.3; el Carril B (sección 24 y PARTE C) refleja el estado final TEST=OPS verificado por huella estructural (K1, `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17`); el Carril C (sección 25 y PARTE D) parte de la estructura certificada por la huella del Bloque H (`TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`), con un único delta intencional respecto de esa huella: dos comentarios SQL actualizados al estatus canónico (ver changelog v1.8.1 → v1.9.0). El canónico es autocontenido y apto para bootstrappear un entorno nuevo de cero. **DEV fue reconstruido desde cero desde v1.8.0** (jun-2026, proyecto nuevo `wsrdzjmvnzxidjlovlja`, cerrado como OPS); el hallazgo que motivó v1.8.1 surgió en esa reconstrucción (ver changelog).
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1
@@ -15,6 +15,10 @@
 > **NOTA — Carril C / Portal Operativo Interno, consolidado en el canónico v1.9.0:** El Carril C (Portal Operativo Interno: gateway `portal-api` + identidad→rol del personal) fue **promovido a OPS** en una operación coordinada bloque por bloque (junio 2026, bloques A→H) y ahora **forma parte de este canónico** en su capa de base de datos: la tabla `portal_usuarios` (mapeo identidad `auth.users`→rol), la tabla `portal_idempotencia` (anti-replay de nonce + idempotencia de negocio) y la función `portal_cargar_gasto_interno(jsonb)` (carga atómica de gasto). El **diseño conceptual** está en la **sección 25** y el **DDL ejecutable autocontenido** en la **PARTE D**. La paridad estructural TEST↔OPS quedó verificada por huella estructural (Bloque H, `TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`, 3 objetos); la PARTE D parte de esa estructura certificada y su único delta intencional son dos comentarios SQL actualizados al estatus canónico (ver changelog v1.8.1 → v1.9.0). Esta capa es **solo estructura**: el seed de `portal_usuarios`, los usuarios de Auth y los secretos del gateway viven **fuera** del canónico. Cierre de referencia de la promoción: `PROMO_C_BLOQUE_H_CIERRE.md`.
 
 ---
+
+## RESUMEN DE CAMBIOS v1.9.0 → v1.10.0
+
+Bump menor **aditivo** que consolida la **capa de lectura de la cuenta corriente de socios** (frente Cuenta Corriente, lecturas L1 + L2) dentro del canónico, tras la **promoción coordinada TEST→OPS de julio 2026**. Se agregan a la **PARTE C** dos funciones de lectura `SECURITY INVOKER`/`STABLE`, revocadas de `PUBLIC/anon/authenticated/service_role`, que **componen el motor del Carril B** (no lo modifican): `cuenta_corriente_viva(p_hasta_fecha date, p_pct_operativo numeric)` — saldo acumulado en vivo por socio desde el piso contable 2026-07-01 — y `cuenta_corriente_detalle(p_mes date, p_pct_operativo numeric)` — drill-down de un mes (jsonb con cascada, matriz e incidencias por gasto). Ambas se exponen en el portal como acciones **socio-only** (`cuenta_corriente.al_dia`, `cuenta_corriente.detalle`) vía wrappers n8n firmados y el gateway `portal-api`; esa capa (workflows, gateway, frontend) vive fuera del canónico. Ninguna tabla ni función existente cambia. El conteo de funciones de la PARTE C pasa de 21 a 23. Validación: DDL de las 2 funciones verificado con `pglast` y ejecución real en PostgreSQL; paridad TEST=OPS confirmada por smokes directos read-only contra ambos entornos. Cierre de referencia del frente: `CIERRE_CARRIL_CUENTA_CORRIENTE_L1_L2.md` (decisiones `D-CC-*`, lecciones `L-CC-*`).
 
 ## RESUMEN DE CAMBIOS v1.8.1 → v1.9.0
 
@@ -6283,6 +6287,174 @@ AS $function$
 $function$
 ;
 
+-- cuenta_corriente_viva -- saldo de cuenta corriente ACUMULADO EN VIVO por socio desde el piso
+-- contable 2026-07-01 (frente Cuenta Corriente / L1; lectura socio-only, action cuenta_corriente.al_dia).
+CREATE OR REPLACE FUNCTION public.cuenta_corriente_viva(
+  p_hasta_fecha   date    DEFAULT NULL,   -- NULL = hoy AR (America/Argentina/Buenos_Aires)
+  p_pct_operativo numeric DEFAULT NULL    -- requerido; guard [0,1]
+)
+RETURNS TABLE(
+  id_socio                  bigint,
+  socio                     text,
+  liquidacion_meses_previos numeric,
+  liquidacion_mes_en_curso  numeric,
+  reembolsos_acumulados     numeric,
+  movimientos               numeric,
+  saldo_al_dia              numeric
+)
+LANGUAGE sql
+STABLE
+AS $function$
+  WITH params AS (
+    SELECT
+      DATE '2026-07-01' AS piso_contable,                              -- D-NEG-02
+      COALESCE(p_hasta_fecha,
+               (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date) AS hasta_efectiva,
+      date_trunc('month',
+        COALESCE(p_hasta_fecha,
+                 (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date)
+      )::date AS mes_actual,
+      (p_pct_operativo IS NULL
+       OR p_pct_operativo < 0
+       OR p_pct_operativo > 1) AS pct_invalido
+  ),
+  meses AS (
+    SELECT gs::date AS mes, pr.mes_actual
+    FROM params pr
+    CROSS JOIN LATERAL generate_series(
+      pr.piso_contable::timestamp, pr.mes_actual::timestamp, INTERVAL '1 month'
+    ) AS gs
+    WHERE NOT pr.pct_invalido
+  ),
+  por_mes AS (
+    SELECT m.mes,
+           (m.mes = m.mes_actual) AS es_en_curso,
+           s.id_socio,
+           s.saldo_final,
+           s.desembolsado_periodo
+    FROM meses m
+    CROSS JOIN LATERAL saldo_socios_periodo(m.mes, p_pct_operativo) s
+    WHERE s.id_socio IS NOT NULL
+  ),
+  agg AS (
+    SELECT id_socio,
+           COALESCE(SUM(saldo_final) FILTER (WHERE NOT es_en_curso), 0) AS liq_previos,
+           COALESCE(SUM(saldo_final) FILTER (WHERE es_en_curso), 0)     AS liq_en_curso,
+           COALESCE(SUM(desembolsado_periodo), 0)                       AS reembolsos
+    FROM por_mes
+    GROUP BY id_socio
+  ),
+  mov AS (
+    -- ventana as-of: solo movimientos dentro del rango contable [piso, hasta_efectiva].
+    -- Coincide con "todos" en el caso de produccion (hasta = hoy) y da vacio limpio si hasta < piso.
+    SELECT m.id_socio, COALESCE(SUM(m.monto), 0) AS movimientos
+    FROM movimientos_socio m
+    CROSS JOIN params pr
+    WHERE NOT pr.pct_invalido
+      AND m.fecha >= pr.piso_contable
+      AND m.fecha <= pr.hasta_efectiva
+    GROUP BY m.id_socio
+  ),
+  universo AS (
+    SELECT id_socio FROM agg
+    UNION
+    SELECT id_socio FROM mov
+  )
+  -- Guard pct invalido: fila marcadora unica (id_socio NULL)
+  SELECT NULL::bigint,
+         'PARAMETRO_INVALIDO_PCT_OPERATIVO'::text,
+         NULL::numeric, NULL::numeric, NULL::numeric, NULL::numeric, NULL::numeric
+  FROM params pr
+  WHERE pr.pct_invalido
+
+  UNION ALL
+
+  SELECT u.id_socio,
+         s.nombre,
+         COALESCE(a.liq_previos, 0),
+         COALESCE(a.liq_en_curso, 0),
+         COALESCE(a.reembolsos, 0),
+         COALESCE(mv.movimientos, 0),
+         COALESCE(a.liq_previos, 0)
+           + COALESCE(a.liq_en_curso, 0)
+           + COALESCE(a.reembolsos, 0)
+           + COALESCE(mv.movimientos, 0)
+  FROM universo u
+  JOIN socios s    ON s.id_socio = u.id_socio
+  LEFT JOIN agg a  ON a.id_socio = u.id_socio
+  LEFT JOIN mov mv ON mv.id_socio = u.id_socio
+  CROSS JOIN params pr
+  WHERE NOT pr.pct_invalido
+
+  ORDER BY 1 NULLS FIRST;   -- posicional: evita colision con el parametro OUT id_socio en el UNION
+$function$
+;
+
+-- cuenta_corriente_detalle -- drill-down de un mes: jsonb con cascada, matriz, incidencias por gasto
+-- (frente Cuenta Corriente / L2; lectura socio-only, action cuenta_corriente.detalle).
+CREATE OR REPLACE FUNCTION public.cuenta_corriente_detalle(
+  p_mes           date    DEFAULT NULL,
+  p_pct_operativo numeric DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+AS $function$
+  WITH params AS (
+    SELECT date_trunc('month',
+             COALESCE(p_mes, (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date)
+           )::date AS mes,
+           (p_pct_operativo IS NULL
+            OR p_pct_operativo < 0
+            OR p_pct_operativo > 1) AS pct_invalido
+  )
+  SELECT CASE WHEN pr.pct_invalido THEN
+      jsonb_build_object('mes', pr.mes, 'error', 'PARAMETRO_INVALIDO_PCT_OPERATIVO')
+    ELSE
+      jsonb_build_object(
+        'mes', pr.mes,
+        'cascada', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'paso', c.paso, 'concepto', c.concepto,
+                   'id_socio', c.id_socio, 'socio', c.socio, 'monto', c.monto)
+                 ORDER BY c.paso, c.id_socio NULLS FIRST)
+          FROM cascada_periodo(pr.mes, p_pct_operativo) c), '[]'::jsonb),
+        'matriz', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_socio', m.id_socio, 'socio', s.nombre,
+                   'valor_socio', m.valor_socio, 'valor_pool', m.valor_pool,
+                   'participacion', m.participacion)
+                 ORDER BY m.participacion DESC, m.id_socio)
+          FROM matriz_participacion(pr.mes) m
+          JOIN socios s ON s.id_socio = m.id_socio), '[]'::jsonb),
+        'matriz_cabanas', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_cabana', d.id_cabana, 'cabana', d.cabana,
+                   'valor_relativo', d.valor_relativo, 'id_socio', d.id_socio,
+                   'beneficiario', d.beneficiario, 'participa', d.participa)
+                 ORDER BY d.id_cabana)
+          FROM detalle_participacion(pr.mes) d), '[]'::jsonb),
+        'incidencias', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_gasto', g.id_gasto, 'clase', g.clase, 'etiqueta', g.etiqueta,
+                   'monto', g.monto, 'destino', i.destino, 'id_socio', i.id_socio,
+                   'socio', i.socio, 'monto_incidido', i.monto, 'regla', i.regla)
+                 ORDER BY g.id_gasto, i.id_socio NULLS FIRST)
+          FROM gastos_internos g
+          CROSS JOIN LATERAL incidencia_gasto(g.id_gasto) i
+          WHERE g.periodo = pr.mes), '[]'::jsonb),
+        'gastos_sin_incidencia', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_gasto', x.id_gasto, 'clase', x.clase, 'etiqueta', x.etiqueta,
+                   'monto', x.monto, 'motivo', x.motivo)
+                 ORDER BY x.id_gasto)
+          FROM gastos_sin_incidencia_periodo(pr.mes) x), '[]'::jsonb)
+      )
+  END
+  FROM params pr;
+$function$
+;
+
 CREATE OR REPLACE FUNCTION public.mayor_socio(p_id_socio bigint)
  RETURNS TABLE(fecha date, tipo text, referencia text, monto numeric, saldo_acumulado numeric)
  LANGUAGE sql
@@ -6553,9 +6725,11 @@ REVOKE ALL ON SEQUENCE public.zonas_id_zona_seq,
                        public.movimientos_socio_id_movimiento_seq,
                        public.revaluaciones_id_revaluacion_seq
   FROM PUBLIC, anon, authenticated, service_role;
--- Funciones (21, incluye trg_9h_inmutable y abortar_si_falla):
+-- Funciones (23, incluye trg_9h_inmutable y abortar_si_falla):
 REVOKE EXECUTE ON FUNCTION public.abortar_si_falla(resultado jsonb) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.cascada_periodo(p_periodo date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_detalle(p_mes date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_viva(p_hasta_fecha date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.detalle_participacion(p_periodo date) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.gastos_sin_incidencia_periodo(p_periodo date) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.incidencia_gasto(p_id_gasto bigint) FROM PUBLIC, anon, authenticated, service_role;

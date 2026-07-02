@@ -1,4 +1,22 @@
 // supabase/functions/portal-api/index.ts
+//
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║ VERSIÓN OPS — Promoción coordinada Carril C a OPS, Bloque D.               ║
+// ║ Derivada de A10MP_B2_portal-api_index.ts (gateway TEST). El CATÁLOGO       ║
+// ║ LÓGICO es IDÉNTICO a TEST: mismas 14 actions, mismos roles, validators y   ║
+// ║ flags (isWrite/injectActor/needsIdempotencyKey), misma semántica de        ║
+// ║ errores. W10 (cobranza.registrar_saldo) sigue DEPRECATED-IN-PLACE por      ║
+// ║ paridad (el frontend no la llama; A10-MP es la acción vigente).            ║
+// ║ Cambios respecto a TEST (solo routing + transporte, NO lógica):           ║
+// ║   1. CORS por env var CORS_ALLOW_ORIGIN (obligatoria; nunca '*').          ║
+// ║   2. Los 13 webhooks del CATALOG apuntan a los wrappers __OPS.             ║
+// ║ Config OPS por env (jamás al repo): SUPABASE_URL, SUPABASE_SECRET_KEYS,    ║
+// ║   VITA_HMAC_SECRET (propio de OPS), VITA_AMBIENTE='ops', N8N_BASE_URL,     ║
+// ║   CORS_ALLOW_ORIGIN. El gateway NUNCA toca el motor directo: toda acción   ║
+// ║   n8n va por fetch al webhook __OPS; si el wrapper aún no existe (pre-E),  ║
+// ║   el fetch falla y devuelve error_entorno/estado_incierto SIN tocar        ║
+// ║   Postgres. Solo sesion.contexto (handler edge) resuelve sin n8n.          ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
 // ============================================================================
 // Carril C / Portal Operativo Interno — Edge Function "portal-api" (gateway/BFF).
 // Slice 1, Bloque 1A — infraestructura común del gateway.
@@ -617,57 +635,109 @@ export const payloadRegistrarCobro: PayloadValidator = (payload) => {
   return { ok: true, value };
 };
 
+// ============================================================================
+// A26 (OPS-B) -- disponibilidad.cabana (LECTURA pura, guardrail UX de A07/A08).
+// ESPEJO del validator del wrapper portal-a26-disponibilidad__OPS. Reusa isYMD_GW y
+// los tipos del gateway. Declarado ANTES del CATALOG (evita temporal-dead-zone).
+const SPAN_MAX_A26_GW = 366;
+export const payloadDisponibilidadCabana: PayloadValidator = (payload) => {
+  const bad = (message: string): PayloadValidation => ({ ok: false, message });
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return bad('payload invalido: se esperaba un objeto');
+  const p = payload as Record<string, unknown>;
+  const PERMITIDAS = ['id_cabana', 'fecha_desde', 'fecha_hasta'];
+  for (const k of Object.keys(p)) if (!PERMITIDAS.includes(k)) return bad(`clave no permitida en payload: ${k}`);
+
+  // id_cabana: entero positivo seguro OBLIGATORIO (mismo criterio que payloadIdReserva).
+  const idc = p.id_cabana;
+  if (typeof idc !== 'number' || !Number.isSafeInteger(idc) || idc <= 0) return bad('id_cabana debe ser un entero positivo');
+
+  // fechas: YMD reales OBLIGATORIAS; hasta > desde (lexicografico == cronologico para YMD).
+  if (!isYMD_GW(p.fecha_desde)) return bad('fecha_desde invalida (YYYY-MM-DD)');
+  if (!isYMD_GW(p.fecha_hasta)) return bad('fecha_hasta invalida (YYYY-MM-DD)');
+  const desde = p.fecha_desde as string;
+  const hasta = p.fecha_hasta as string;
+  if (!(desde < hasta)) return bad('fecha_hasta debe ser posterior a fecha_desde');
+
+  // span (hasta - desde) en dias <= 366 (no limita el futuro a 120; es cota anti-abuso).
+  const MS_DIA = 86400000;
+  const dDesde = Date.UTC(+desde.slice(0, 4), +desde.slice(5, 7) - 1, +desde.slice(8, 10));
+  const dHasta = Date.UTC(+hasta.slice(0, 4), +hasta.slice(5, 7) - 1, +hasta.slice(8, 10));
+  const span = Math.round((dHasta - dDesde) / MS_DIA);
+  if (span > SPAN_MAX_A26_GW) return bad(`rango demasiado amplio (maximo ${SPAN_MAX_A26_GW} dias)`);
+
+  return { ok: true, value: { id_cabana: idc, fecha_desde: desde, fecha_hasta: hasta } };
+};
+
+// A28 (Cuenta corriente socios / L2 drill-down) -- valida el payload { mes } de cuenta_corriente.detalle.
+// mes OBLIGATORIO (el drill-down siempre elige un mes); YMD real; >= piso contable 2026-07-01
+// (D-NEG-02). El SQL trunca a primer dia del mes. Reject-unknown. Reusa isYMD_GW. El pct NO viaja
+// en el payload (lo hardcodea el wrapper). Declarado antes del CATALOG (evita TDZ).
+const FLOOR_CC_GW = '2026-07-01';
+export const payloadCuentaCorrienteDetalle: PayloadValidator = (payload) => {
+  const bad = (message: string): PayloadValidation => ({ ok: false, message });
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return bad('payload invalido: se esperaba un objeto');
+  const p = payload as Record<string, unknown>;
+  const PERMITIDAS = ['mes'];
+  for (const k of Object.keys(p)) if (!PERMITIDAS.includes(k)) return bad(`clave no permitida en payload: ${k}`);
+  if (p.mes === undefined || p.mes === null) return bad('mes es obligatorio (YYYY-MM-DD)');
+  if (!isYMD_GW(p.mes)) return bad('mes invalido (YYYY-MM-DD)');
+  const mes = p.mes as string;
+  if (mes < FLOOR_CC_GW) return bad('mes anterior al piso contable (2026-07-01)');
+  return { ok: true, value: { mes } };
+};
+
+
 const CATALOG: Record<string, CatalogEntry> = {
   'sesion.contexto': { handler: 'edge', roles: ['jenny', 'vicky', 'socio'] },
   // A03 (Slice 1 / Bloque 3) — Calendario de limpieza. Wrapper n8n firmado
-  // (portal-a03-limpieza), 3 roles (D-C-39), sin parametros (validate: payloadVacio).
+  // (portal-a03-limpieza__OPS), 3 roles (D-C-39), sin parametros (validate: payloadVacio).
   // El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding).
-  'calendario.limpieza': { handler: 'n8n', roles: ['jenny', 'vicky', 'socio'], webhook: 'portal-a03-limpieza', validate: payloadVacio },
+  'calendario.limpieza': { handler: 'n8n', roles: ['jenny', 'vicky', 'socio'], webhook: 'portal-a03-limpieza__OPS', validate: payloadVacio },
   // A04 (Slice 1 / Bloque 5) — Calendario operativo (120 días, con montos). Wrapper n8n
-  // firmado (portal-a04-operativo). SOLO vicky/socio (D-C-39): jenny NO ve económicos →
+  // firmado (portal-a04-operativo__OPS). SOLO vicky/socio (D-C-39): jenny NO ve económicos →
   // rebota con rol_no_permitido EN EL GATEWAY (allowlist, línea ~392), antes de firmar y
   // sin tocar n8n. El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding,
   // D-C-41). validate: payloadVacio (acción sin parámetros).
-  'calendario.operativo': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a04-operativo', validate: payloadVacio },
+  'calendario.operativo': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a04-operativo__OPS', validate: payloadVacio },
   // A05 (Slice 1 / Bloque 7) — Detalle de reserva por id. Wrapper n8n firmado
-  // (portal-a05-detalle). SOLO vicky/socio (D-C-39): incluye montos → jenny excluida
+  // (portal-a05-detalle__OPS). SOLO vicky/socio (D-C-39): incluye montos → jenny excluida
   // (D-C-03), rebota con rol_no_permitido EN EL GATEWAY antes de firmar. PRIMERA acción con
   // payload: validate: payloadIdReserva (D-C-40, id entero positivo estricto; un payload
   // inválido se rechaza acá ANTES de firmar, no toca n8n). Action binding D-C-41/42; contrato
   // JSON data:{reserva,pagos} (D-C-43); lectura join directo, no vista_calendario (D-C-44).
-  'reserva.detalle': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a05-detalle', validate: payloadIdReserva },
+  'reserva.detalle': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a05-detalle__OPS', validate: payloadIdReserva },
   // A06 (Slice 1 / Bloque 9) — Prereservas activas (lista). Wrapper n8n firmado
-  // (portal-a06-prereservas). SOLO vicky/socio (D-C-39): muestra montos de prereserva →
+  // (portal-a06-prereservas__OPS). SOLO vicky/socio (D-C-39): muestra montos de prereserva →
   // jenny excluida (D-C-03), rebota con rol_no_permitido EN EL GATEWAY antes de firmar.
   // Sin parámetros (validate: payloadVacio). Lee vista_prereservas_activas (reuse, D-C-46);
   // contrato JSON data:{filas}, lista vacía => filas:[] con ok:true (D-C-47). Action binding
   // D-C-41/45 (key == EXPECTED_ACTION del wrapper).
-  'prereservas.activas': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a06-prereservas', validate: payloadVacio },
+  'prereservas.activas': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a06-prereservas__OPS', validate: payloadVacio },
   // A12 (Slice 1 / Bloque 11) — Saldos de cobranza (lista). Wrapper n8n firmado
-  // (portal-a12-saldos). SOLO vicky/socio (D-C-39): muestra montos/estado de cobranza →
+  // (portal-a12-saldos__OPS). SOLO vicky/socio (D-C-39): muestra montos/estado de cobranza →
   // jenny excluida (D-C-03), rebota con rol_no_permitido EN EL GATEWAY antes de firmar.
   // Sin parámetros (validate: payloadVacio). Reusa la lógica de vita_w09_listado_saldos
   // (D-C-49): reservas confirmada/activa con saldo_real>0, saldo calculado por pagos
   // confirmados (D-C-40/D-9B-05). Contrato JSON data:{filas}, lista vacía => filas:[] con
   // ok:true (D-C-47). Action binding D-C-41/48 (key == EXPECTED_ACTION del wrapper).
-  'cobranza.saldos': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a12-saldos', validate: payloadVacio },
+  'cobranza.saldos': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a12-saldos__OPS', validate: payloadVacio },
   // A24 (Slice 3a) — Histórico/buscador operativo de reservas. Wrapper n8n firmado
-  // (portal-a24-historico-reservas). SOLO vicky/socio (D-C-39): incluye montos/saldo →
+  // (portal-a24-historico-reservas__OPS). SOLO vicky/socio (D-C-39): incluye montos/saldo →
   // jenny excluida (D-C-03), rebota con rol_no_permitido EN EL GATEWAY antes de firmar.
   // validate: payloadHistoricoReservas (espejo del wrapper; devuelve el payload NORMALIZADO
   // que se firma — fecha_desde clampeada al floor 2026-07-01, D-C-11/20). LECTURA: sin
   // injectActor, sin isWrite. Floor inferior duro; puede incluir futuras; NO liquidación ni
   // Carril B; NO reemplaza A04. El key DEBE coincidir con EXPECTED_ACTION del wrapper (D-C-41).
-  'historico.reservas': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a24-historico-reservas', validate: payloadHistoricoReservas },
+  'historico.reservas': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a24-historico-reservas__OPS', validate: payloadHistoricoReservas },
   // A25 (Slice 3a) — Caja percibida por periodo (ingresos cobrados). Wrapper n8n firmado
-  // (portal-a25-ingresos). SOLO vicky/socio (D-C-27): jenny excluida, rebota con
+  // (portal-a25-ingresos__OPS). SOLO vicky/socio (D-C-27): jenny excluida, rebota con
   // rol_no_permitido EN EL GATEWAY antes de firmar. validate: payloadIngresosPeriodo, que
   // PRESERVA la ausencia de periodo_hasta (omitido NO va en value -> el wrapper defaultea a
   // hoy sin check de inversion; explicito -> YMD y, tras el clamp al floor, >= periodo_desde).
   // LECTURA: sin injectActor, sin isWrite. El key DEBE coincidir con EXPECTED_ACTION (D-C-41).
-  'ingresos.cobrados_periodo': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a25-ingresos', validate: payloadIngresosPeriodo },
+  'ingresos.cobrados_periodo': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a25-ingresos__OPS', validate: payloadIngresosPeriodo },
   // A13 (Slice 3b) -- Gastos internos por periodo contable (LECTURA, companion de A11). Wrapper n8n
-  // firmado (portal-a13-gastos-listado; SIN __TEST: convencion de lecturas A12/A24/A25). SOLO
+  // firmado (portal-a13-gastos-listado__OPS; en OPS todos los wrappers llevan __OPS, lecturas y escrituras). SOLO
   // vicky/socio (D-C-03): jenny excluida (contenido economico), rebota con rol_no_permitido EN EL
   // GATEWAY antes de firmar. validate: payloadGastosListado, que espeja la semantica MENSUAL del wrapper
   // (D-C-59/D-C-60): trunca periodo_desde/periodo_hasta a primer dia de mes ANTES del clamp y del check
@@ -675,25 +745,45 @@ const CATALOG: Record<string, CatalogEntry> = {
   // la ausencia de periodo_hasta (omitido O null NO van en value -> el wrapper defaultea al mes actual;
   // paridad con el wrapper directo A13). LECTURA: sin injectActor, sin isWrite, sin needsIdempotencyKey.
   // El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
-  'gastos.listado': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a13-gastos-listado', validate: payloadGastosListado },
+  'gastos.listado': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a13-gastos-listado__OPS', validate: payloadGastosListado },
+  // A26 (OPS-B) -- disponibilidad.cabana (LECTURA pura). Wrapper n8n firmado
+  // (portal-a26-disponibilidad__OPS). SOLO vicky/socio (D-C-39): jenny rebota con
+  // rol_no_permitido EN EL GATEWAY. LECTURA: sin injectActor/isWrite/needsIdempotencyKey.
+  // El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
+  'disponibilidad.cabana': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a26-disponibilidad__OPS', validate: payloadDisponibilidadCabana },
+  // A27 (Cuenta corriente socios / L1) -- cuenta_corriente.al_dia (LECTURA pura, socio-only).
+  // Expone cuenta_corriente_viva (saldo acumulado EN VIVO por socio desde el piso 2026-07-01).
+  // PRIMERA accion SOLO socio (D-C-03): es reparto de socios, no economia operativa -> ni vicky
+  // ni jenny la ven (A02 no la lista para ellas; el gateway rebota rol_no_permitido antes de
+  // firmar). Wrapper n8n firmado (portal-a27-cuenta-corriente; SIN sufijo: convencion de lecturas).
+  // Sin parametros (validate: payloadVacio); el pct 0.25 lo hardcodea el wrapper (interino,
+  // destino configuracion_general). LECTURA: sin injectActor, sin isWrite, sin needsIdempotencyKey.
+  // El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
+  'cuenta_corriente.al_dia': { handler: 'n8n', roles: ['socio'], webhook: 'portal-a27-cuenta-corriente__OPS', validate: payloadVacio },
+  // A28 (Cuenta corriente socios / L2 drill-down) -- cuenta_corriente.detalle (LECTURA, socio-only).
+  // Expone cuenta_corriente_detalle (jsonb: cascada 11 pasos + matriz + detalle por cabana +
+  // incidencias por gasto + gastos sin incidencia) para el mes elegido. Payload { mes } validado
+  // por payloadCuentaCorrienteDetalle. Wrapper firmado portal-a28-cuenta-corriente-detalle (SIN
+  // sufijo: lectura). pct 0.25 hardcodeado en el wrapper. El key == EXPECTED_ACTION (D-C-41).
+  'cuenta_corriente.detalle': { handler: 'n8n', roles: ['socio'], webhook: 'portal-a28-cuenta-corriente-detalle__OPS', validate: payloadCuentaCorrienteDetalle },
   // A07 (Slice 2) — Crear reserva manual. PRIMERA ESCRITURA vía gateway. Wrapper n8n
-  // firmado (portal-a07-crear-reserva__TEST). SOLO vicky/socio (D-C-39): jenny rebota
+  // firmado (portal-a07-crear-reserva__OPS). SOLO vicky/socio (D-C-39): jenny rebota
   // con rol_no_permitido EN EL GATEWAY antes de firmar. validate: payloadCrearManual
   // (espejo del wrapper). injectActor: el actor (persona) se inyecta server-side desde
   // portal_usuarios.nombre, NUNCA del frontend. isWrite: ante dispatch no confiable se
   // devuelve estado_incierto (no error_entorno), porque la escritura pudo aplicarse.
   // El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
-  'reserva.crear_manual': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a07-crear-reserva__TEST', validate: payloadCrearManual, injectActor: true, isWrite: true },
+  'reserva.crear_manual': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a07-crear-reserva__OPS', validate: payloadCrearManual, injectActor: true, isWrite: true },
   // A08 (Slice 2) — Crear bloqueo manual. Wrapper n8n firmado
-  // (portal-a08-crear-bloqueo__TEST). SOLO vicky/socio (D-C-39): jenny rebota con
+  // (portal-a08-crear-bloqueo__OPS). SOLO vicky/socio (D-C-39): jenny rebota con
   // rol_no_permitido EN EL GATEWAY antes de firmar. validate: payloadCrearBloqueo (espejo
   // del wrapper). injectActor: el actor (persona) se inyecta server-side desde
   // portal_usuarios.nombre y el wrapper lo usa como creado_por. isWrite: ante dispatch no
   // confiable, estado_incierto. id_cabana OBLIGATORIO (bloqueo total no se expone, 8D).
   // El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
-  'bloqueo.crear_manual': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a08-crear-bloqueo__TEST', validate: payloadCrearBloqueo, injectActor: true, isWrite: true },
+  'bloqueo.crear_manual': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a08-crear-bloqueo__OPS', validate: payloadCrearBloqueo, injectActor: true, isWrite: true },
   // A10 (Slice 2) — Registrar pago de saldo. Wrapper n8n firmado
-  // (portal-a10-registrar-saldo__TEST). SOLO vicky/socio (D-C-39): jenny rebota con
+  // (portal-a10-registrar-saldo__OPS). SOLO vicky/socio (D-C-39): jenny rebota con
   // rol_no_permitido EN EL GATEWAY antes de firmar. validate: payloadRegistrarSaldo
   // (espejo del wrapper, capa de payload). injectActor: el actor (persona) se inyecta
   // server-side desde portal_usuarios.nombre y el wrapper lo usa como validado_por,
@@ -701,9 +791,9 @@ const CATALOG: Record<string, CatalogEntry> = {
   // mapea excede_saldo/idempotency_mismatch/estado_no_cobrable/saldo_ya_cancelado →
   // conflicto, reserva_no_existe → no_encontrado, P0001 → error_interno (D-C-51); todos
   // allowlisted. El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
-  'cobranza.registrar_saldo': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a10-registrar-saldo__TEST', validate: payloadRegistrarSaldo, injectActor: true, isWrite: true },
+  'cobranza.registrar_saldo': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a10-registrar-saldo__OPS', validate: payloadRegistrarSaldo, injectActor: true, isWrite: true },
   // A11 (Slice 3b) — Cargar gasto interno. PRIMERA ESCRITURA NO-IDEMPOTENTE del Carril C. Wrapper
-  // n8n firmado (portal-a11-cargar-gasto-interno__TEST). SOLO vicky/socio (D-C-03): jenny rebota
+  // n8n firmado (portal-a11-cargar-gasto-interno__OPS). SOLO vicky/socio (D-C-03): jenny rebota
   // con rol_no_permitido EN EL GATEWAY antes de firmar. validate: payloadCargarGastoInterno (espejo
   // del paso 10 del wrapper). injectActor: el actor (persona) se inyecta server-side desde
   // portal_usuarios.nombre y la función lo usa como creado_por, NUNCA del frontend. isWrite: ante
@@ -712,11 +802,11 @@ const CATALOG: Record<string, CatalogEntry> = {
   // wrapper; éste deriva el nonce de la firma (D-C-56). El wrapper/función mapean nonce_replay/
   // payload_mismatch/actor_mismatch -> conflicto, constraint -> payload_invalido; todos allowlisted.
   // El key DEBE coincidir con EXPECTED_ACTION del wrapper (action binding, D-C-41).
-  'cargar.gasto_interno': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a11-cargar-gasto-interno__TEST', validate: payloadCargarGastoInterno, injectActor: true, isWrite: true, needsIdempotencyKey: true },
+  'cargar.gasto_interno': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a11-cargar-gasto-interno__OPS', validate: payloadCargarGastoInterno, injectActor: true, isWrite: true, needsIdempotencyKey: true },
   // A10-MP (mini-etapa) — Cobranza multi-porción (cobranza.registrar_cobro). Expone la lógica
   // multi-porción + recargo 5% de W09 por el gateway (D-C-61); CONVIVE con cobranza.registrar_saldo
   // (W10/A10), que queda DEPRECADO-IN-PLACE (sigue desplegado, el portal deja de llamarlo; B5 usa
-  // solo el nuevo). Wrapper n8n firmado (portal-a10mp-registrar-cobro__TEST). SOLO vicky/socio
+  // solo el nuevo). Wrapper n8n firmado (portal-a10mp-registrar-cobro__OPS). SOLO vicky/socio
   // (D-C-03): jenny rebota con rol_no_permitido EN EL GATEWAY antes de firmar. validate:
   // payloadRegistrarCobro (espejo del wrapper). injectActor: el actor (persona) se inyecta server-side
   // desde portal_usuarios.nombre y el wrapper lo usa como validado_por, NUNCA del frontend. isWrite:
@@ -725,7 +815,7 @@ const CATALOG: Record<string, CatalogEntry> = {
   // determinista (id_reserva+key), dedup por source_event, mismatch -> conflicto. El wrapper mapea
   // excede_saldo/idempotency_mismatch -> conflicto, reserva_no_existe -> no_encontrado, P0001 ->
   // error_interno; todos allowlisted. El key DEBE coincidir con EXPECTED_ACTION del wrapper (D-C-41).
-  'cobranza.registrar_cobro': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a10mp-registrar-cobro__TEST', validate: payloadRegistrarCobro, injectActor: true, isWrite: true },
+  'cobranza.registrar_cobro': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a10mp-registrar-cobro__OPS', validate: payloadRegistrarCobro, injectActor: true, isWrite: true },
 };
 
 const ROLES_VALIDOS: ReadonlySet<Rol> = new Set<Rol>(['jenny', 'vicky', 'socio']);
@@ -741,9 +831,14 @@ const CONTROL_TOPLEVEL_PROHIBIDAS = ['actor', 'rol', 'nonce', 'source_event', 'c
 // Envelope uniforme (D-C-18) + CORS.
 // D-C-35: HTTP 200 + envelope para resultados manejados; 5xx solo para fallos inesperados.
 // ---------------------------------------------------------------------------
+// CORS — origin RESTRINGIDO por env var (decisión OPS: NUNCA '*').
+// CORS_ALLOW_ORIGIN es OBLIGATORIA y se valida en resolveEnv (preflight duro): si
+// falta, este header queda '' (NO '*') y, además, el POST hace crash ruidoso por
+// preflight. El origin real del portal OPS (Vercel) se inyecta por env, jamás se
+// hardcodea ni va al repo (P-C-7). Las env vars son estables durante el proceso,
+// así que leer CORS_ALLOW_ORIGIN a nivel módulo es seguro.
 const CORS: Record<string, string> = {
-  // Slice 1: '*'. Restringir al origin del portal en la pasada de hardening (P-C-4).
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('CORS_ALLOW_ORIGIN') ?? '',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -800,6 +895,7 @@ function resolveEnv(): { env?: Env; missing: string[] } {
   const hmac = Deno.env.get('VITA_HMAC_SECRET');
   const ambiente = Deno.env.get('VITA_AMBIENTE');
   const n8nBaseUrl = Deno.env.get('N8N_BASE_URL');
+  const corsAllowOrigin = Deno.env.get('CORS_ALLOW_ORIGIN');
 
   const missing: string[] = [];
   if (!url) missing.push('SUPABASE_URL');
@@ -808,6 +904,9 @@ function resolveEnv(): { env?: Env; missing: string[] } {
   if (!ambiente) missing.push('VITA_AMBIENTE');
   else if (ambiente !== 'test' && ambiente !== 'ops') missing.push("VITA_AMBIENTE (valor inválido; debe ser 'test' u 'ops')");
   if (!n8nBaseUrl) missing.push('N8N_BASE_URL');
+  // CORS_ALLOW_ORIGIN obligatoria (OPS, decisión hardening): sin esto el gateway NO
+  // sirve (preflight ruidoso). Nunca abrir '*' por defecto silenciosamente.
+  if (!corsAllowOrigin) missing.push('CORS_ALLOW_ORIGIN');
 
   if (missing.length) return { missing };
   return {
