@@ -1,40 +1,50 @@
 -- =====================================================================
--- HORARIOS_B2_GUARD_HELPER_TEST.sql
--- Bloque 2 - Motor formal de horarios : guard temporal + helper de fecha AR.
+-- HORARIOS_FASEB_B3_INTEGRACION_CREAR_PRERESERVA_TEST.sql  (v3)
+-- Fase B / Bloque 3 - Integracion de resolver_horario() en crear_prereserva.
 -- ALCANCE: SOLO TEST (ref bdskhhbmcksskkzqkcdp). NO ejecutar en OPS.
--- SIN override manual, SIN overrides_operativos, SIN tocar gateway/EXCLUDE.
--- Orden obligatorio: el helper PRIMERO (las funciones lo referencian; con
--- check_function_bodies=on el CREATE OR REPLACE de las funciones lo exige).
--- Las dos funciones usan CREATE OR REPLACE (NO drop): preserva el ACL del
--- hardening del Bloque 23 (un DROP reabriria el agujero PUBLIC-ejecuta).
--- Ejecutar el script completo (sin seleccion parcial, L-8A-01).
+-- Metodo: CREATE OR REPLACE (NO drop) - preserva ACL Bloque 23, COMMENT y
+--   ownership (precedente B2). NO crea funciones nuevas (resolver ya existe).
+--   Firma CALIFICADA public.crear_prereserva (v3): sin ambiguedad de search_path.
+-- GATE ANTI-OPS DURO, dentro de BEGIN..COMMIT. Chequea (ejecutable):
+--   (1) configuracion_general.ambiente = 'test';
+--   (2) current_schema() = 'public';
+--   (3) public.crear_prereserva(jsonb) existe;
+--   (4) fingerprint baseline = f258ad9b6e4cd0f7dcb7318e5724f0ce.
+--   Si cualquiera falla, RAISE aborta la tx => el CREATE OR REPLACE NO corre.
+--   El CREATE en si es el de B2 + 4 deltas: si el gate pasa en TEST, corre igual.
+-- Deltas: D1 DECLARE +v_res_in/+v_res_out; D2 bloque 3.5 (dos llamadas al
+--   resolver, fail-closed, RETURN enriquecido borde+fecha_resolver, antes de
+--   upsert_huesped); D3/D4 base check-in/out <- resolver (reemplazan las CASE);
+--   D5 firma calificada public.
+--   Bounds 22:00/07:00, guard fecha_in_pasada, locks, double-check idempotencia,
+--   validar_disponibilidad, EXCLUDE, INSERTs y retorno exitoso: SIN cambios.
+-- Ejecutar el script COMPLETO, con NADA seleccionado (L-8A-01).
 -- =====================================================================
 
--- ---------------------------------------------------------------------
--- 1) HELPER fecha_hoy_ar() - fecha calendario en zona Argentina.
--- ---------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION fecha_hoy_ar()
-RETURNS DATE
-LANGUAGE sql
-STABLE
-SECURITY INVOKER
-AS $$
-  SELECT (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
-$$;
+BEGIN;
 
--- Hardening (espejo Bloque 23): solo el owner ejecuta. Cierra la trampa
--- proacl IS NULL => PUBLIC ejecuta de una funcion recien creada (L-PROMO-06).
-REVOKE EXECUTE ON FUNCTION public.fecha_hoy_ar() FROM PUBLIC, anon, authenticated, service_role;
+-- ---- GATE ANTI-OPS (ambiente + schema + existencia + fingerprint) ----
+DO $gate$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM configuracion_general
+                 WHERE clave = 'ambiente' AND valor = 'test') THEN
+    RAISE EXCEPTION 'ABORT B3: configuracion_general.ambiente <> ''test'' (o clave ausente). Aplicar SOLO en TEST.';
+  END IF;
+  IF current_schema() <> 'public' THEN
+    RAISE EXCEPTION 'ABORT B3: current_schema() = % (esperado public).', current_schema();
+  END IF;
+  IF to_regprocedure('public.crear_prereserva(jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'ABORT B3: public.crear_prereserva(jsonb) no existe en el schema public.';
+  END IF;
+  IF md5(pg_get_functiondef('public.crear_prereserva(jsonb)'::regprocedure))
+       <> 'f258ad9b6e4cd0f7dcb7318e5724f0ce' THEN
+    RAISE EXCEPTION 'ABORT B3: fingerprint baseline distinto de f258ad9b... El cuerpo vivo no es la base asumida; PARAR.';
+  END IF;
+END
+$gate$;
 
-COMMENT ON FUNCTION public.fecha_hoy_ar() IS
-  'Fecha calendario en America/Argentina/Buenos_Aires, independiente del timezone de sesion. Evita drift UTC cerca de medianoche. Bloque 2 - motor de horarios (guard temporal).';
-
--- ---------------------------------------------------------------------
--- 2) crear_prereserva(jsonb) - guard fecha_in_pasada agregado.
---    CREATE OR REPLACE (preserva grants Bloque 23). Cuerpo = canonico v1.9.0
---    + unico delta: el bloque IF del guard temporal.
--- ---------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION crear_prereserva(payload JSONB)
+-- ---- Integracion (CREATE OR REPLACE, cuerpo = base + deltas) ----
+CREATE OR REPLACE FUNCTION public.crear_prereserva(payload JSONB)
 RETURNS JSONB
 LANGUAGE plpgsql
 AS $$
@@ -75,6 +85,8 @@ DECLARE
   v_disponibilidad       JSONB;
   v_existente            pre_reservas%ROWTYPE;
   v_upsert_result        JSONB;
+  v_res_in               JSONB;
+  v_res_out              JSONB;
 BEGIN
   -- ─── 1. Extraer payload y validar ──────────────────────
   -- (v1.7.2) Extract defensivo unificado: todos los campos derivados de
@@ -183,6 +195,25 @@ BEGIN
     END IF;
   END IF;
 
+  -- ─── 3.5 Resolver horario base (motor formal de horarios) ──
+  -- Cablea resolver_horario() como fuente de la base check-in/check-out.
+  -- Se ejecuta DESPUES del pre-check de idempotencia y ANTES de
+  -- upsert_huesped: un override invalido (HARD) rebota como rechazo puro
+  -- sin consumir id_huesped ni id_pre_reserva (secuencias no-transaccionales).
+  -- fail-closed ante ok ausente (NULL => false). Por contrato el resolver
+  -- siempre devuelve ok booleano; un ok fuera de contrato (no booleano)
+  -- haria fallar el cast ::BOOLEAN, no un rebote silencioso. El error se
+  -- enriquece con borde (que fecha disparo) y fecha_resolver: las 8 claves.
+  v_res_in := resolver_horario(v_id_cabana, v_fecha_in);
+  IF COALESCE((v_res_in->>'ok')::BOOLEAN, false) IS NOT TRUE THEN
+    RETURN v_res_in || jsonb_build_object('borde', 'fecha_in', 'fecha_resolver', v_fecha_in);
+  END IF;
+
+  v_res_out := resolver_horario(v_id_cabana, v_fecha_out);
+  IF COALESCE((v_res_out->>'ok')::BOOLEAN, false) IS NOT TRUE THEN
+    RETURN v_res_out || jsonb_build_object('borde', 'fecha_out', 'fecha_resolver', v_fecha_out);
+  END IF;
+
   -- ─── 4. Resolver huésped ──────
   v_upsert_result := upsert_huesped(v_huesped_payload);
   IF NOT (v_upsert_result->>'ok')::BOOLEAN THEN
@@ -243,22 +274,12 @@ BEGIN
   END IF;
 
   -- ─── 8. Calcular horarios finales (v1.7) ──
-  v_hora_checkin_min := CASE
-    WHEN EXTRACT(DOW FROM v_fecha_in) = 0
-      THEN COALESCE((v_config->>'hora_checkin_domingo')::TIME, TIME '18:00')
-    ELSE
-      COALESCE((v_config->>'hora_checkin_default')::TIME, TIME '13:00')
-  END;
+  v_hora_checkin_min := (v_res_in->>'hora_checkin')::TIME;
   v_hora_checkin_max := COALESCE((v_config->>'hora_checkin_max_cliente')::TIME, TIME '22:00');
 
   v_hora_checkout_min := COALESCE((v_config->>'hora_checkout_min_cliente')::TIME, TIME '07:00');
 
-  v_hora_checkout_max := CASE
-    WHEN EXTRACT(DOW FROM v_fecha_out) = 0
-      THEN COALESCE((v_config->>'hora_checkout_domingo')::TIME, TIME '16:00')
-    ELSE
-      COALESCE((v_config->>'hora_checkout_default')::TIME, TIME '10:00')
-  END;
+  v_hora_checkout_max := (v_res_out->>'hora_checkout')::TIME;
 
   IF v_hora_checkin_sol IS NULL THEN
     v_hora_checkin_final := v_hora_checkin_min;
@@ -389,234 +410,4 @@ BEGIN
 END;
 $$;
 
-
--- ---------------------------------------------------------------------
--- 3) crear_bloqueo(jsonb) - guard rango_pasado agregado.
---    CREATE OR REPLACE (preserva grants Bloque 23). Cuerpo = canonico v1.9.0
---    + unico delta: el bloque IF del guard temporal.
--- ---------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION crear_bloqueo(payload JSONB)
-RETURNS JSONB
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  v_id_cabana            BIGINT;
-  v_fecha_desde          DATE;
-  v_fecha_hasta          DATE;
-  v_motivo               TEXT;
-  v_descripcion          TEXT;
-  v_creado_por           TEXT;
-  v_source_event         TEXT;
-  v_id_bloqueo           BIGINT;
-  v_reservas_ids         BIGINT[];
-  v_prereservas_ids      BIGINT[];
-  v_bloqueos_ids         BIGINT[];
-BEGIN
-  -- 1. Extraer payload (v1.7.2 — extract defensivo unificado)
-  -- Todos los campos derivados de payload->>'...' pasan por
-  -- NULLIF(TRIM(...),'') antes del cast. Esto:
-  --   - normaliza "" y whitespace puro ("   ") a NULL real
-  --   - evita errores crudos de cast en BIGINT y DATE
-  --   - mantiene el contrato: las validaciones siguen rebotando con
-  --     payload_invalido cuando un obligatorio queda NULL.
-  --
-  -- Caso especial v_id_cabana: null significa "bloqueo total" (válido).
-  -- Tanto null como "" como "   " se interpretan como bloqueo total.
-  v_id_cabana    := NULLIF(TRIM(payload->>'id_cabana'), '')::BIGINT;
-  v_fecha_desde  := NULLIF(TRIM(payload->>'fecha_desde'), '')::DATE;
-  v_fecha_hasta  := NULLIF(TRIM(payload->>'fecha_hasta'), '')::DATE;
-  v_motivo       := NULLIF(TRIM(payload->>'motivo'), '');
-  v_descripcion  := NULLIF(TRIM(payload->>'descripcion'), '');
-  v_creado_por   := NULLIF(TRIM(payload->>'creado_por'), '');
-  v_source_event := NULLIF(TRIM(payload->>'source_event'), '');
-
-  IF v_fecha_desde IS NULL OR v_fecha_hasta IS NULL
-     OR v_motivo IS NULL OR v_creado_por IS NULL OR v_source_event IS NULL THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'payload_invalido');
-  END IF;
-
-  IF v_fecha_hasta <= v_fecha_desde THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'fechas_invalidas');
-  END IF;
-
-  -- Guard temporal (Bloque 2 / motor de horarios): rechazar solo rangos
-  -- completamente pasados en zona Argentina. fecha_hasta es exclusiva '[)':
-  -- fecha_hasta <= hoy_ar => ultima noche cubierta <= ayer => rango vencido.
-  -- Un bloqueo que empezo ayer pero sigue vigente (fecha_hasta > hoy_ar) pasa.
-  IF v_fecha_hasta <= fecha_hoy_ar() THEN
-    RETURN jsonb_build_object(
-      'ok', false, 'error', 'rango_pasado',
-      'campo', 'fecha_hasta', 'minimo', fecha_hoy_ar(), 'recibido', v_fecha_hasta
-    );
-  END IF;
-
-  IF v_motivo NOT IN ('mantenimiento', 'uso_propio', 'tormenta', 'overbooking', 'otro') THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'motivo_invalido');
-  END IF;
-
-  -- 2. Locks (INVARIANTE DE LOCKS v1.5: SIEMPRE primero el global)
-  PERFORM pg_advisory_xact_lock(10, 0);
-
-  IF v_id_cabana IS NOT NULL THEN
-    -- Bloqueo específico: tomar también lock por cabaña con cast a INTEGER (v1.6)
-    PERFORM pg_advisory_xact_lock(1, v_id_cabana::INTEGER);
-
-    -- Verificar cabaña existe
-    IF NOT EXISTS (SELECT 1 FROM cabanas WHERE id_cabana = v_id_cabana) THEN
-      RETURN jsonb_build_object('ok', false, 'error', 'cabana_no_existe');
-    END IF;
-
-    -- 3.A.1 Verificar conflicto con reservas confirmadas/activas en esta cabaña
-    SELECT COALESCE(array_agg(id_reserva), ARRAY[]::BIGINT[])
-    INTO v_reservas_ids
-    FROM reservas
-    WHERE id_cabana = v_id_cabana
-      AND estado IN ('confirmada', 'activa')
-      AND daterange(fecha_checkin, fecha_checkout, '[)')
-          && daterange(v_fecha_desde, v_fecha_hasta, '[)');
-
-    IF cardinality(v_reservas_ids) > 0 THEN
-      RETURN jsonb_build_object(
-        'ok',                    false,
-        'error',                 'conflicto_con_reserva',
-        'reservas_en_conflicto', to_jsonb(v_reservas_ids)
-      );
-    END IF;
-
-    -- 3.A.2 Verificar conflicto con pre-reservas vigentes en esta cabaña
-    SELECT COALESCE(array_agg(id_pre_reserva), ARRAY[]::BIGINT[])
-    INTO v_prereservas_ids
-    FROM pre_reservas
-    WHERE id_cabana = v_id_cabana
-      AND (
-        (estado = 'pendiente_pago' AND expira_en > NOW())
-        OR estado = 'pago_en_revision'
-      )
-      AND daterange(fecha_in, fecha_out, '[)')
-          && daterange(v_fecha_desde, v_fecha_hasta, '[)');
-
-    IF cardinality(v_prereservas_ids) > 0 THEN
-      RETURN jsonb_build_object(
-        'ok',                       false,
-        'error',                    'conflicto_con_prereserva',
-        'prereservas_en_conflicto', to_jsonb(v_prereservas_ids),
-        'motivo',                   'Hay pre-reservas vigentes en el rango. Cancelarlas antes de bloquear.'
-      );
-    END IF;
-
-    -- 3.A.3 Verificar bloqueos solapados (específico vs específico o específico vs total)
-    SELECT COALESCE(array_agg(id_bloqueo), ARRAY[]::BIGINT[])
-    INTO v_bloqueos_ids
-    FROM bloqueos
-    WHERE activo = TRUE
-      AND (id_cabana = v_id_cabana OR id_cabana IS NULL)
-      AND daterange(fecha_desde, fecha_hasta, '[)')
-          && daterange(v_fecha_desde, v_fecha_hasta, '[)');
-
-    IF cardinality(v_bloqueos_ids) > 0 THEN
-      RETURN jsonb_build_object(
-        'ok',                    false,
-        'error',                 'bloqueo_solapado',
-        'bloqueos_en_conflicto', to_jsonb(v_bloqueos_ids),
-        'motivo',                'Ya hay un bloqueo activo (específico o total) en el rango'
-      );
-    END IF;
-
-  ELSE
-    -- Bloqueo total (id_cabana IS NULL)
-    -- 3.B.1 Verificar conflicto con reservas en cualquier cabaña
-    SELECT COALESCE(array_agg(id_reserva), ARRAY[]::BIGINT[])
-    INTO v_reservas_ids
-    FROM reservas
-    WHERE estado IN ('confirmada', 'activa')
-      AND daterange(fecha_checkin, fecha_checkout, '[)')
-          && daterange(v_fecha_desde, v_fecha_hasta, '[)');
-
-    IF cardinality(v_reservas_ids) > 0 THEN
-      RETURN jsonb_build_object(
-        'ok',                    false,
-        'error',                 'conflicto_con_reserva',
-        'motivo',                'Hay reservas confirmadas en el rango. Resolver antes de bloquear el complejo.',
-        'reservas_en_conflicto', to_jsonb(v_reservas_ids)
-      );
-    END IF;
-
-    -- 3.B.2 Verificar conflicto con pre-reservas vigentes en cualquier cabaña
-    SELECT COALESCE(array_agg(id_pre_reserva), ARRAY[]::BIGINT[])
-    INTO v_prereservas_ids
-    FROM pre_reservas
-    WHERE (
-        (estado = 'pendiente_pago' AND expira_en > NOW())
-        OR estado = 'pago_en_revision'
-      )
-      AND daterange(fecha_in, fecha_out, '[)')
-          && daterange(v_fecha_desde, v_fecha_hasta, '[)');
-
-    IF cardinality(v_prereservas_ids) > 0 THEN
-      RETURN jsonb_build_object(
-        'ok',                       false,
-        'error',                    'conflicto_con_prereserva',
-        'prereservas_en_conflicto', to_jsonb(v_prereservas_ids),
-        'motivo',                   'Hay pre-reservas vigentes en el rango. Cancelarlas antes de bloquear el complejo.'
-      );
-    END IF;
-
-    -- 3.B.3 Verificar bloqueos solapados (total vs total o total vs específico existente)
-    SELECT COALESCE(array_agg(id_bloqueo), ARRAY[]::BIGINT[])
-    INTO v_bloqueos_ids
-    FROM bloqueos
-    WHERE activo = TRUE
-      AND daterange(fecha_desde, fecha_hasta, '[)')
-          && daterange(v_fecha_desde, v_fecha_hasta, '[)');
-
-    IF cardinality(v_bloqueos_ids) > 0 THEN
-      RETURN jsonb_build_object(
-        'ok',                    false,
-        'error',                 'bloqueo_solapado',
-        'bloqueos_en_conflicto', to_jsonb(v_bloqueos_ids),
-        'motivo',                'Ya hay bloqueos activos en el rango (totales o específicos)'
-      );
-    END IF;
-  END IF;
-
-  -- 4. INSERT con captura defensiva de exclusion_violation
-  BEGIN
-    INSERT INTO bloqueos (
-      id_cabana, fecha_desde, fecha_hasta, motivo, descripcion,
-      creado_por, activo, source_event
-    ) VALUES (
-      v_id_cabana, v_fecha_desde, v_fecha_hasta, v_motivo, v_descripcion,
-      v_creado_por, TRUE, v_source_event
-    )
-    RETURNING id_bloqueo INTO v_id_bloqueo;
-
-  EXCEPTION
-    WHEN exclusion_violation THEN
-      RETURN jsonb_build_object('ok', false, 'error', 'bloqueo_solapado',
-                                'motivo', 'EXCLUDE detectó conflicto residual');
-  END;
-
-  -- 5. Log
-  INSERT INTO log_cambios (
-    tabla_afectada, id_registro, modificado_por, source_event, nivel, detalle
-  ) VALUES (
-    'bloqueos', v_id_bloqueo::TEXT, v_creado_por, v_source_event, 'info',
-    jsonb_build_object(
-      'evento',       'bloqueo_creado',
-      'id_bloqueo',   v_id_bloqueo,
-      'id_cabana',    v_id_cabana,
-      'fecha_desde',  v_fecha_desde,
-      'fecha_hasta',  v_fecha_hasta,
-      'motivo',       v_motivo,
-      'tipo_bloqueo', CASE WHEN v_id_cabana IS NULL THEN 'total' ELSE 'cabana_especifica' END
-    )
-  );
-
-  RETURN jsonb_build_object(
-    'ok',           true,
-    'id_bloqueo',   v_id_bloqueo,
-    'id_cabana',    v_id_cabana,
-    'tipo_bloqueo', CASE WHEN v_id_cabana IS NULL THEN 'total' ELSE 'cabana_especifica' END
-  );
-END;
-$$;
+COMMIT;
