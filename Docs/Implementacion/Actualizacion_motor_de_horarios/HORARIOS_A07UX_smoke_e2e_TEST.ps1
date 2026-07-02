@@ -14,8 +14,8 @@ $ErrorActionPreference = 'Stop'
 
 # ---- Parametros (EDITAR) ----
 $BaseUrl  = 'https://federicosecchi.app.n8n.cloud'   # base de n8n TEST
-$Secret   = '__PEGAR_SECRETO_HMAC__'                 # mismo VITA_HMAC_SECRET del wrapper A07 TEST
-$IdCabana = 0                                        # <-- id_cabana impreso por el [SETUP]
+$Secret   = 'd3cb37c88b688c6e104f133d08990312134ee5df6775e2dff267e0deac16c3f4'                 # mismo VITA_HMAC_SECRET del wrapper A07 TEST
+$IdCabana = 1                                        # <-- id_cabana impreso por el [SETUP]
 $FechaIn  = '2027-06-15'
 $FechaOut = '2027-06-17'
 
