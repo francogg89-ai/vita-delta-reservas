@@ -22,7 +22,7 @@
 $BaseUrl   = "https://federicosecchi.app.n8n.cloud"
 $Webhook27 = "portal-a27-cuenta-corriente"
 $Webhook28 = "portal-a28-cuenta-corriente-detalle"
-$Secret    = "d3cb37c88b688c6e104f133d08990312134ee5df6775e2dff267e0deac16c3f4"
+$Secret    = "Secreto_no_subir"
 $Ambiente  = "test"
 $Mes       = (Get-Date).ToString("yyyy-MM-01")   # mes para A28 (primer dia del mes actual)
 # =============================

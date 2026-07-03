@@ -1,9 +1,9 @@
 # 6B_SCHEMA_SQL.md
 # Schema PostgreSQL — Vita Delta Reservas
 
-**Versión:** 1.10.0
+**Versión:** 1.10.1
 **Fecha:** Julio 2026
-**Estado:** Canónico vigente: **`6B_SCHEMA_SQL.md v1.10.0`**. v1.8.0 consolidó el **Carril B** (contabilidad operativa interna, sub-etapas 9C→9H + helper 9B) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026; **v1.8.1 canoniza el hardening de las funciones base del motor** (Bloque 23, `REVOKE EXECUTE`), que se venía aplicando fuera de banda por entorno; **v1.9.0 consolida el Carril C — Portal Operativo Interno** (las tablas `portal_usuarios` y `portal_idempotencia` y la función `portal_cargar_gasto_interno(jsonb)`) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026 (bloques A→H); **v1.10.0 consolida las 2 funciones de lectura de la cuenta corriente de socios** (`cuenta_corriente_viva`, `cuenta_corriente_detalle`) en la PARTE C, capa de lectura socio-only expuesta por el portal (acciones `cuenta_corriente.al_dia` y `cuenta_corriente.detalle`), tras la promoción coordinada TEST→OPS de julio 2026. La base (Partes A y B) refleja el estado alineado DEV/TEST/OPS de v1.7.3; el Carril B (sección 24 y PARTE C) refleja el estado final TEST=OPS verificado por huella estructural (K1, `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17`); el Carril C (sección 25 y PARTE D) parte de la estructura certificada por la huella del Bloque H (`TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`), con un único delta intencional respecto de esa huella: dos comentarios SQL actualizados al estatus canónico (ver changelog v1.8.1 → v1.9.0). El canónico es autocontenido y apto para bootstrappear un entorno nuevo de cero. **DEV fue reconstruido desde cero desde v1.8.0** (jun-2026, proyecto nuevo `wsrdzjmvnzxidjlovlja`, cerrado como OPS); el hallazgo que motivó v1.8.1 surgió en esa reconstrucción (ver changelog).
+**Estado:** Canónico vigente: **`6B_SCHEMA_SQL.md v1.10.1`**. v1.8.0 consolidó el **Carril B** (contabilidad operativa interna, sub-etapas 9C→9H + helper 9B) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026; **v1.8.1 canoniza el hardening de las funciones base del motor** (Bloque 23, `REVOKE EXECUTE`), que se venía aplicando fuera de banda por entorno; **v1.9.0 consolida el Carril C — Portal Operativo Interno** (las tablas `portal_usuarios` y `portal_idempotencia` y la función `portal_cargar_gasto_interno(jsonb)`) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026 (bloques A→H); **v1.10.0 consolida las 2 funciones de lectura de la cuenta corriente de socios** (`cuenta_corriente_viva`, `cuenta_corriente_detalle`) en la PARTE C, capa de lectura socio-only expuesta por el portal (acciones `cuenta_corriente.al_dia` y `cuenta_corriente.detalle`), tras la promoción coordinada TEST→OPS de julio 2026. **v1.10.1 mueve el porcentaje operativo a `configuracion_general`** (clave `pct_operativo`, D-CC-13) y agrega el helper `pct_operativo_vigente()` a la PARTE C; los wrappers A27/A28 pasan a leer el pct desde config (aditivo, output-neutral verificado por hash TEST=OPS, promovido a OPS 2026-07-03). La base (Partes A y B) refleja el estado alineado DEV/TEST/OPS de v1.7.3; el Carril B (sección 24 y PARTE C) refleja el estado final TEST=OPS verificado por huella estructural (K1, `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17`); el Carril C (sección 25 y PARTE D) parte de la estructura certificada por la huella del Bloque H (`TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`), con un único delta intencional respecto de esa huella: dos comentarios SQL actualizados al estatus canónico (ver changelog v1.8.1 → v1.9.0). El canónico es autocontenido y apto para bootstrappear un entorno nuevo de cero. **DEV fue reconstruido desde cero desde v1.8.0** (jun-2026, proyecto nuevo `wsrdzjmvnzxidjlovlja`, cerrado como OPS); el hallazgo que motivó v1.8.1 surgió en esa reconstrucción (ver changelog).
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1
@@ -15,6 +15,16 @@
 > **NOTA — Carril C / Portal Operativo Interno, consolidado en el canónico v1.9.0:** El Carril C (Portal Operativo Interno: gateway `portal-api` + identidad→rol del personal) fue **promovido a OPS** en una operación coordinada bloque por bloque (junio 2026, bloques A→H) y ahora **forma parte de este canónico** en su capa de base de datos: la tabla `portal_usuarios` (mapeo identidad `auth.users`→rol), la tabla `portal_idempotencia` (anti-replay de nonce + idempotencia de negocio) y la función `portal_cargar_gasto_interno(jsonb)` (carga atómica de gasto). El **diseño conceptual** está en la **sección 25** y el **DDL ejecutable autocontenido** en la **PARTE D**. La paridad estructural TEST↔OPS quedó verificada por huella estructural (Bloque H, `TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`, 3 objetos); la PARTE D parte de esa estructura certificada y su único delta intencional son dos comentarios SQL actualizados al estatus canónico (ver changelog v1.8.1 → v1.9.0). Esta capa es **solo estructura**: el seed de `portal_usuarios`, los usuarios de Auth y los secretos del gateway viven **fuera** del canónico. Cierre de referencia de la promoción: `PROMO_C_BLOQUE_H_CIERRE.md`.
 
 ---
+
+## RESUMEN DE CAMBIOS v1.10.0 → v1.10.1
+
+Bump menor **aditivo** que mueve el porcentaje operativo (`0.25`) de estar hardcodeado en los wrappers A27/A28 a una clave de `configuracion_general`, leída por un helper con validación fuerte y **sin fallback silencioso**:
+
+- **Nueva función `pct_operativo_vigente()`** (PARTE C, antes de `cuenta_corriente_viva`): lee la clave `pct_operativo` y la valida (existe / no NULL / no vacía / decimal por regex `^[0-9]+([.][0-9]+)?$` / rango `[0,1]`), abortando con errores parseables `[pct_config_ausente]` / `[pct_config_invalido]`. Sin `COALESCE` a un default (D-CC-14): un pct mal cargado corrompería el reparto de plata, mejor abortar visible. `REVOKE EXECUTE` en la sección de hardening de la PARTE C.
+- **Nueva clave de seed `pct_operativo`** en `configuracion_general` (C13): `valor='0.25'`, `tipo_valor='numeric'`, `editable=false` (D-CC-13; primera clave con `tipo_valor` poblado). `editable=false` es guardrail hasta el bloque de pct periodizado (P-CC-5): cambiarlo hoy re-liquidaría retroactivamente meses pasados.
+- **Wrappers A27/A28** (viven fuera del canónico): pasan a leer `cuenta_corriente_viva(NULL, pct_operativo_vigente())` y `cuenta_corriente_detalle(<mes>, pct_operativo_vigente())` en lugar del `0.25` hardcodeado. Cambio **output-neutral** verificado por doble prueba (identidad SQL determinística + hash SHA256 pre/post del webhook directo), idéntico en TEST y OPS (S0.2/S0.3, L-CC-10). Promovido a OPS el 2026-07-03; el canónico se bumpea una sola vez al cierre.
+
+**Nota — bootstrap kit (deuda consciente P-CC-4):** el kit sigue en `bootstrap_entorno_nuevo_v1.9.0/`, rezagado respecto de este canónico. La deuda acumulada incluye v1.10.0 (`cuenta_corriente_viva`, `cuenta_corriente_detalle` + su `REVOKE`) y v1.10.1 (`pct_operativo_vigente()` + `REVOKE` + seed `pct_operativo`). Se regenerará al cierre del frente completo de cuenta corriente (escritura/retiros + snapshot mensual + L3), salvo necesidad real de crear un entorno nuevo antes.
 
 ## RESUMEN DE CAMBIOS v1.9.0 → v1.10.0
 
@@ -6287,6 +6297,53 @@ AS $function$
 $function$
 ;
 
+-- pct_operativo_vigente -- pct operativo unico vigente desde configuracion_general (clave pct_operativo),
+-- con validacion fuerte y errores parseables; SIN fallback silencioso (D-CC-13/D-CC-14). Lo consumen las
+-- funciones de cuenta corriente (viva/detalle) y el futuro frente de escritura/retiros (P-CC-2).
+CREATE OR REPLACE FUNCTION public.pct_operativo_vigente()
+RETURNS numeric
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+AS $fn$
+DECLARE
+  v_txt text;
+  v_num numeric;
+BEGIN
+  SELECT valor INTO v_txt
+    FROM configuracion_general
+   WHERE clave = 'pct_operativo';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '[pct_config_ausente] falta la clave pct_operativo en configuracion_general';
+  END IF;
+
+  IF v_txt IS NULL THEN
+    RAISE EXCEPTION '[pct_config_invalido] pct_operativo es NULL';
+  END IF;
+
+  v_txt := btrim(v_txt);
+
+  IF v_txt = '' THEN
+    RAISE EXCEPTION '[pct_config_invalido] pct_operativo vacio';
+  END IF;
+
+  -- decimal valido: digitos, opcionalmente punto + digitos ([.] evita depender de
+  -- standard_conforming_strings). Rechaza texto, notacion cientifica, coma, signos.
+  IF v_txt !~ '^[0-9]+([.][0-9]+)?$' THEN
+    RAISE EXCEPTION '[pct_config_invalido] pct_operativo no es decimal valido: %', v_txt;
+  END IF;
+
+  v_num := v_txt::numeric;
+
+  IF v_num < 0 OR v_num > 1 THEN
+    RAISE EXCEPTION '[pct_config_invalido] pct_operativo fuera de [0,1]: %', v_num;
+  END IF;
+
+  RETURN v_num;
+END
+$fn$;
+
 -- cuenta_corriente_viva -- saldo de cuenta corriente ACUMULADO EN VIVO por socio desde el piso
 -- contable 2026-07-01 (frente Cuenta Corriente / L1; lectura socio-only, action cuenta_corriente.al_dia).
 CREATE OR REPLACE FUNCTION public.cuenta_corriente_viva(
@@ -6730,6 +6787,7 @@ REVOKE EXECUTE ON FUNCTION public.abortar_si_falla(resultado jsonb) FROM PUBLIC,
 REVOKE EXECUTE ON FUNCTION public.cascada_periodo(p_periodo date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_detalle(p_mes date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_viva(p_hasta_fecha date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.pct_operativo_vigente() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.detalle_participacion(p_periodo date) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.gastos_sin_incidencia_periodo(p_periodo date) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.incidencia_gasto(p_id_gasto bigint) FROM PUBLIC, anon, authenticated, service_role;
@@ -6761,6 +6819,14 @@ REVOKE EXECUTE ON FUNCTION public.trg_9h_inmutable() FROM PUBLIC, anon, authenti
 INSERT INTO configuracion_general (clave, valor, descripcion, categoria, editable)
 VALUES ('ambiente', 'dev',
         'Marcador de entorno para identidad de Carril B. Valor por-entorno: dev/test/ops. Default dev para bootstrap del canónico.', 'infra', FALSE)
+ON CONFLICT (clave) DO NOTHING;
+-- C13.1-bis pct operativo (contabilidad, D-NEG-01); tipada + no editable (D-CC-13; guardrail hasta P-CC-5)
+INSERT INTO configuracion_general (clave, valor, tipo_valor, descripcion, categoria, editable)
+VALUES ('pct_operativo', '0.25', 'numeric',
+        'Porcentaje operativo sobre ingreso cobrado neto de gastos operativos (D-NEG-01); '
+        'usado en el reparto de la cuenta corriente (L1/L2/retiro) y persistido en cada snapshot. '
+        'editable=false: no cambiar en operacion hasta el bloque de pct_operativo periodizado / vigencia futura.',
+        'contabilidad', FALSE)
 ON CONFLICT (clave) DO NOTHING;
 
 -- C13.2 Zonas (estructural: grandes/chicas)

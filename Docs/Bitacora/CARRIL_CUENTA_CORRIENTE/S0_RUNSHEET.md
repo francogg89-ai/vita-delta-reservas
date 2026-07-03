@@ -99,14 +99,22 @@ Tres artefactos (validados por Claude: patcher corrido en scratch, SQL con pglas
 
 ## S0.3 — Promoción OPS (Ajuste B: "lo mismo para OPS" + rollback)
 
-A27/A28 están **vivos en OPS** con `0.25` hardcodeado. Runsheet propio (patrón `PROMO_CC_OPS`):
-1. **Snapshot pre-OPS** (read-only): baseline A27/A28 `__OPS` por socio.
-2. **Seed + helper en OPS** (SQL Editor OPS `lpiatqztudxiwdlcoasv`): versión OPS del S0.1 (gate `ambiente=ops`; `CREATE OR REPLACE` en el canónico, `DROP+CREATE` si se corre suelto).
-3. **Re-import wrappers OPS**: `portal-a27-cuenta-corriente__OPS.json` / `portal-a28-...__OPS.json` ya parcheados (leen `pct_operativo_vigente()`). Import from File, activar.
-4. **Smoke `__OPS`** (GUARD OPS): números **idénticos** al snapshot pre-OPS.
-5. **Rollback OPS claro**: re-importar la versión previa de `portal-a27/a28__OPS.json` (con `0.25` hardcodeado) — reversible sin tocar SQL. El seed/helper quedan (inocuos); si se quisiera revertir, DROP del helper + DELETE de la clave **después** de revertir los wrappers.
+A27/A28 están **vivos en OPS** con `0.25` hardcodeado. Dos artefactos (validados por Claude en PG local: helper **byte-idéntico** a S0.1, gate ops/test, corrida OK + idempotente; smoke derivado del TEST verde por transform, cuerpo intacto):
 
-Orden inquebrantable: **seed+helper → wrappers → smoke**. La clave debe existir en OPS **antes** de que los wrappers la lean (sin fallback → si falta, marcador/error visible, no cálculo silencioso).
+- **`S0_3_pct_config_OPS.sql`** — seed `pct_operativo` (editable=false, numeric) + helper `pct_operativo_vigente()` (misma definición que TEST) en OPS. Gate exige `ambiente=ops` (aborta en cualquier otro). `DROP+CREATE` del helper (corre suelto en el SQL Editor).
+- **`S0_3_smoke_directo_OPS.ps1`** — lee A27+A28 directo a los webhooks **`__OPS`**, GUARD OPS (frena si algún webhook no es `__OPS` o ambiente≠ops), falla dura (`exit 1`) si no `ok:true`, emite `HASH_S0.3` + `SMOKE_S0.3_OK`.
+- Wrappers a re-importar: `portal-a27/a28 __OPS.json` **ya parcheados por el patcher de S0.2** (leen `pct_operativo_vigente()`).
+
+**Orden de ejecución (OPS) — inquebrantable: seed+helper → wrappers → smoke.** La clave debe existir en OPS **antes** de que los wrappers la lean (sin fallback → si falta, error visible, no cálculo silencioso).
+
+1. **Smoke PRE** (baseline): editar `Secret` en `S0_3_smoke_directo_OPS.ps1`, correr → esperar `SMOKE_S0.3_OK` y **anotar `HASH_S0.3` (PRE)**. Golpea los wrappers OPS actuales (0.25 hardcodeado).
+2. **Seed+helper**: correr `S0_3_pct_config_OPS.sql` en el SQL Editor OPS (`lpiatqztudxiwdlcoasv`), nada seleccionado → fila `S0.3_OK | 0.25 | numeric | f | 0.25 | ops`. **[checkpoint recomendado: reportar acá antes de tocar wrappers]**
+3. **Re-import wrappers OPS**: Import from File de `portal-a27/a28 __OPS.json` parcheados en n8n, activar ambos.
+4. **Smoke POST**: correr `S0_3_smoke_directo_OPS.ps1` de nuevo → `SMOKE_S0.3_OK` + **`HASH_S0.3` idéntico al PRE**.
+
+**Criterio de éxito S0.3:** seed `S0.3_OK` + `HASH_S0.3` **idéntico** pre/post + `SMOKE_S0.3_OK` en ambas.
+
+**Rollback** (reversible sin tocar SQL): re-importar la versión **original** de `portal-a27/a28 __OPS.json` (con `0.25` hardcodeado) desde un clon limpio / `git checkout`, y activar. El seed/helper quedan (inocuos: nadie los lee tras el rollback). Si se quisiera revertir todo, DROP del helper + DELETE de la clave **después** de revertir los wrappers.
 
 ---
 
