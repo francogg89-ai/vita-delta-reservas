@@ -6,7 +6,7 @@ Antes de trabajar, leer en este orden:
 
 1. Docs/Operacional/ESTADO_ACTUAL_VITA_DELTA.md
 2. Docs/Operacional/DECISIONES_NO_REABRIR.md
-3. Docs/Implementacion/6B_SCHEMA_SQL.md (schema canónico actual: **v1.10.0**)
+3. Docs/Implementacion/6B_SCHEMA_SQL.md (schema canónico actual: **v1.10.1**)
 4. Docs/Bitacora/9H_CIERRE.md (cierre formal Etapa 9H — cuenta corriente interna / capa con estado; cierra el Carril B en TEST)
 5. Docs/Bitacora/9G_CIERRE.md (cierre formal Etapa 9G — cascada de liquidación read-only)
 6. Docs/Bitacora/9F_CIERRE.md (cierre formal Etapa 9F — gasto interno rediseñado)
