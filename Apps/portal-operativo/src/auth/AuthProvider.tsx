@@ -8,6 +8,7 @@ import {
 } from 'react';
 import { supabase } from '../lib/supabase';
 import { callPortal, PortalApiError } from '../lib/callPortal';
+import { limpiarBorradores } from '../hooks/useBorradorPersistente';
 import type { SesionContexto } from '../lib/types';
 
 export type AuthStatus = 'cargando' | 'anonimo' | 'autenticado' | 'error';
@@ -85,6 +86,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (!activo) return;
       if (event === 'SIGNED_OUT' || !session) {
+        // Higiene: al cerrar sesion (logout explicito o corte por no_autorizado) se borran los
+        // borradores locales de formularios, para no dejar datos de huesped en un dispositivo compartido.
+        limpiarBorradores();
         setContexto(null);
         setStatus('anonimo');
         return;
@@ -120,6 +124,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    // Limpia los borradores locales ANTES del signOut: asi ocurre siempre en el logout explicito
+    // aunque el listener de auth cambie a futuro. El SIGNED_OUT lo cubre igual (idempotente).
+    limpiarBorradores();
     await supabase.auth.signOut();
     setContexto(null);
     setErrorMessage(null);
