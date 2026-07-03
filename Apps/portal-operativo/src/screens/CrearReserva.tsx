@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useEnviar } from '../hooks/useEnviar';
+import { useBorradorPersistente } from '../hooks/useBorradorPersistente';
 import { Campo } from '../ui/Campo';
 import { BotonSubmit } from '../ui/BotonSubmit';
 import { TarjetaExito } from '../ui/TarjetaExito';
@@ -141,7 +142,8 @@ function Seccion({ titulo }: { titulo: string }) {
 }
 
 export function CrearReserva() {
-  const [form, setForm] = useState<FormReserva>(INICIAL);
+  const { valor: form, setValor: setForm, limpiar: limpiarBorrador } =
+    useBorradorPersistente<FormReserva>('a07-crear-reserva:v1', INICIAL);
   const [errores, setErrores] = useState<Errores>({});
   const [emailUsuario, setEmailUsuario] = useState<string | null>(null);
   useEffect(() => {
@@ -151,6 +153,12 @@ export function CrearReserva() {
   }, []);
   const { enviar, enviando, resultado, error, estadoIncierto, reset } =
     useEnviar<CrearReservaData>('reserva.crear_manual', 'none');
+
+  // Al confirmarse la reserva, el borrador deja de tener sentido: se limpia. `limpiarBorrador`
+  // tiene referencia estable (useCallback en el hook), asi el efecto solo corre al cambiar `resultado`.
+  useEffect(() => {
+    if (resultado) limpiarBorrador();
+  }, [resultado, limpiarBorrador]);
 
   function set<K extends keyof FormReserva>(k: K, v: FormReserva[K]) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -198,6 +206,7 @@ export function CrearReserva() {
   }
 
   function otra() {
+    limpiarBorrador();
     reset();
     setForm(INICIAL);
     setErrores({});
