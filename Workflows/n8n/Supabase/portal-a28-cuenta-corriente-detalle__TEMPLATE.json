@@ -105,7 +105,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- portal-a28: detalle (drill-down) del mes. pct hardcodeado 0.25 (interino; destino\n-- configuracion_general). El mes viene normalizado en payload_norm ($1::jsonb->>'mes').\nSELECT cuenta_corriente_detalle(($1::jsonb ->> 'mes')::date, 0.25) AS detalle;",
+        "query": "-- portal-a28: detalle (drill-down) del mes. pct hardcodeado 0.25 (interino; destino\n-- configuracion_general). El mes viene normalizado en payload_norm ($1::jsonb->>'mes').\nSELECT cuenta_corriente_detalle(($1::jsonb ->> 'mes')::date, pct_operativo_vigente()) AS detalle;",
         "options": {
           "queryReplacement": "={{ JSON.stringify($('validar_firma_ts_rol').first().json.payload_norm) }}"
         }

@@ -105,7 +105,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- portal-a27: cuenta corriente de socios, acumulada en vivo. pct hardcodeado 0.25\n-- (interino; destino configuracion_general). hasta_fecha NULL => hoy AR (dentro de la funcion).\nSELECT id_socio, socio,\n       liquidacion_meses_previos, liquidacion_mes_en_curso,\n       reembolsos_acumulados, movimientos, saldo_al_dia\nFROM cuenta_corriente_viva(NULL, 0.25);",
+        "query": "-- portal-a27: cuenta corriente de socios, acumulada en vivo. pct hardcodeado 0.25\n-- (interino; destino configuracion_general). hasta_fecha NULL => hoy AR (dentro de la funcion).\nSELECT id_socio, socio,\n       liquidacion_meses_previos, liquidacion_mes_en_curso,\n       reembolsos_acumulados, movimientos, saldo_al_dia\nFROM cuenta_corriente_viva(NULL, pct_operativo_vigente());",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
