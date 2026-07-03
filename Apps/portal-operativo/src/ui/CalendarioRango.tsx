@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAction } from '../hooks/useAction';
 import { formatFecha } from '../lib/formato';
 import {
@@ -93,8 +93,17 @@ export function CalendarioRango({
   const cache: Map<string, EstadoDisponibilidad> =
     cacheState.cabana === idCabana ? cacheState.dias : new Map();
 
+  // Cabana anterior para distinguir el PRIMER montaje de un cambio real de cabana.
+  const idCabanaAnterior = useRef<number | null>(idCabana);
+
   // Cambio de cabana: reinicia cache, vista y seleccion (la disponibilidad es por cabana).
   useEffect(() => {
+    // Primer montaje: idCabanaAnterior.current === idCabana -> NO limpia, porque A07 puede venir
+    // con fecha_in/fecha_out restaurados desde el borrador persistente. Solo reacciona al cambio
+    // REAL de cabana despues del montaje.
+    if (idCabanaAnterior.current === idCabana) return;
+    idCabanaAnterior.current = idCabana;
+
     setCacheState({ cabana: idCabana, dias: new Map() });
     setVisibleYm(ymDe(desde || hoy));
     if (desde || hasta) onChange('', '');
