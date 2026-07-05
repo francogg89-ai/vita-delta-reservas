@@ -15,11 +15,13 @@ const SHIM_ID = 'vd-cal-shim';
  */
 const SHIM_CSS =
   'section.mes{display:block !important;}.tabs,.tab{display:none !important;}' +
-  // Divisor marcado entre cabanas (microfix UX A04): borde superior negro en la PRIMERA
-  // fila de cada grupo. tr.r-huesped ya viene en el HTML del backend como hook semantico
-  // -> no depende de nth-child(3n) ni cambia HTML/datos. Solo presentacion, dentro del
-  // shim que ya se inyecta (D-FE-03). Las 3 filas internas de cada cabana quedan intactas.
-  '.r-huesped>td{border-top:2px solid #000 !important;}';
+  // Divisor marcado entre cabanas (microfix UX A04 + A03): borde superior negro en la
+  // PRIMERA fila de cada grupo de cabana. Cada calendario nombra esa fila distinto y esas
+  // clases ya vienen en el HTML del backend como hook semantico: A04 = r-huesped, A03
+  // limpieza = r-mov. Cada selector matchea SOLO su calendario (el otro no tiene esa clase),
+  // asi que este mismo shim compartido sirve para los dos. No depende de nth-child(3n) ni
+  // cambia HTML/datos. Solo presentacion (D-FE-03). Las 3 filas internas quedan intactas.
+  '.r-huesped>td,.r-mov>td{border-top:2px solid #000 !important;}';
 
 /**
  * Render del HTML temporal de los calendarios A03/A04 (D-FE-03 / D-FE-14, opcion A).
