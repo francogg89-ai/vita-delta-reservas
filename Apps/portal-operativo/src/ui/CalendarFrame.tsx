@@ -13,7 +13,13 @@ const SHIM_ID = 'vd-cal-shim';
  * A03 limpieza es single-view (sin .mes/.tabs/script) -> los selectores no matchean (no-op).
  * Temporal: cuando A03/A04 migren a JSON (P-C-3) el shim desaparece.
  */
-const SHIM_CSS = 'section.mes{display:block !important;}.tabs,.tab{display:none !important;}';
+const SHIM_CSS =
+  'section.mes{display:block !important;}.tabs,.tab{display:none !important;}' +
+  // Divisor marcado entre cabanas (microfix UX A04): borde superior negro en la PRIMERA
+  // fila de cada grupo. tr.r-huesped ya viene en el HTML del backend como hook semantico
+  // -> no depende de nth-child(3n) ni cambia HTML/datos. Solo presentacion, dentro del
+  // shim que ya se inyecta (D-FE-03). Las 3 filas internas de cada cabana quedan intactas.
+  '.r-huesped>td{border-top:2px solid #000 !important;}';
 
 /**
  * Render del HTML temporal de los calendarios A03/A04 (D-FE-03 / D-FE-14, opcion A).
