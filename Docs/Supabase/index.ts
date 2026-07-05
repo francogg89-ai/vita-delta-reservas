@@ -43,6 +43,15 @@
 // EN el handler con getUser, para devolver SIEMPRE el envelope uniforme, incluso si
 // el JWT falta / es inválido / está expirado.
 // ============================================================================
+//
+// A29 (Cuenta corriente socios / RETIRO desde saldo vivo) -- derivado de A28_OPS por patcher.
+//   Accion nueva 'cuenta_corriente.retirar' (ESCRITURA, socio-only) -> wrapper n8n portal-a29-retiro__OPS
+//   -> portal_registrar_retiro(jsonb) (SB1). Cambios ADITIVOS: nuevo validator payloadRegistrarRetiro;
+//   nuevo flag injectSocioIdentity (inyecta id_socio+user_id server-side, SOLO A29); id_socio/user_id
+//   sumados a CONTROL_TOPLEVEL_PROHIBIDAS (rebotan payload_invalido si vienen del cliente); saldo_insuficiente
+//   sumado al allowlist con detail SANITIZADO { saldo_disponible, monto_solicitado } (D-A29-3). Ninguna
+//   accion previa cambia su sobre firmado (los flags nuevos quedan undefined para el resto).
+// ============================================================================
 
 // jsr es el specifier actual de Supabase; "npm:@supabase/supabase-js@2" es equivalente.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -61,7 +70,7 @@ export type PayloadValidator = (payload: unknown) => PayloadValidation;
 
 type CatalogEntry =
   | { handler: 'edge'; roles: Rol[] }
-  | { handler: 'n8n'; roles: Rol[]; webhook: string; validate: PayloadValidator; injectActor?: boolean; isWrite?: boolean; needsIdempotencyKey?: boolean };
+  | { handler: 'n8n'; roles: Rol[]; webhook: string; validate: PayloadValidator; injectActor?: boolean; isWrite?: boolean; needsIdempotencyKey?: boolean; injectSocioIdentity?: boolean };
 
 // ---------------------------------------------------------------------------
 // Validadores de payload (D-C-18: payload mínimo en el gateway, ANTES de firmar; el
@@ -429,6 +438,49 @@ export const payloadCargarGastoInterno: PayloadValidator = (payload) => {
     medio_pago: (p.medio_pago != null ? (p.medio_pago as string).trim() : null),
     comentario: (p.comentario != null ? (p.comentario as string).trim() : null),
     comprobante_url: (p.comprobante_url != null ? (p.comprobante_url as string).trim() : null),
+  };
+  return { ok: true, value };
+};
+
+// A29 (Cuenta corriente / RETIRO desde saldo vivo) -- cuenta_corriente.retirar (ESCRITURA, socio-only).
+// ESPEJO de la capa de payload del wrapper portal-a29-retiro (validar_firma_ts_rol) y del contrato de
+// portal_registrar_retiro (SB1): reject-control + whitelist (monto, medio_pago, comentario) + reject-unknown.
+// monto es STRING por precision de plata (D-A29-1): regex ^[0-9]{1,12}(\.[0-9]{1,2})?$ (<=12 enteros, <=2
+// decimales, sin signo) y > 0; viaja como string y la funcion lo valida textualmente igual (doble allowlist,
+// D-C-39) -> sin floats en el camino. medio_pago MVP {efectivo, transferencia_bancaria}. comentario opcional:
+// trim + '' -> null (ajuste obligatorio 3; nunca rebota recien por constraint SQL). Los campos de control
+// (actor/rol/nonce/source_event/creado_por/request_ts/idempotency_key/id_socio/user_id) se RECHAZAN en payload
+// (fail-fast); el reject-unknown igual los bouncearia. id_socio/user_id ademas los inyecta el gateway server-side
+// (injectSocioIdentity), NUNCA el cliente. Devuelve el payload whitelisteado { monto, medio_pago, comentario }.
+const CONTROL_EN_PAYLOAD_A29 = ['actor', 'rol', 'nonce', 'source_event', 'creado_por', 'request_ts', 'idempotency_key', 'id_socio', 'user_id'];
+const MEDIOS_RETIRO_GW = ['efectivo', 'transferencia_bancaria'];
+const MONTO_RETIRO_RE_GW = /^[0-9]{1,12}(\.[0-9]{1,2})?$/;
+export const payloadRegistrarRetiro: PayloadValidator = (payload) => {
+  const bad = (message: string): PayloadValidation => ({ ok: false, message });
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return bad('payload invalido: se esperaba un objeto');
+  const p = payload as Record<string, unknown>;
+  // Rechazo explicito de control en payload (fail-fast); el reject-unknown de abajo igual los bouncearia.
+  for (const k of CONTROL_EN_PAYLOAD_A29) if (k in p) return bad(`campo de control no permitido en payload: ${k}`);
+  const PERMITIDAS = ['monto', 'medio_pago', 'comentario'];
+  for (const k of Object.keys(p)) if (!PERMITIDAS.includes(k)) return bad(`clave no permitida en payload: ${k}`);
+
+  // monto STRING (D-A29-1): <=12 enteros, <=2 decimales, > 0. Espejo textual del wrapper SQL.
+  if (typeof p.monto !== 'string' || !MONTO_RETIRO_RE_GW.test(p.monto) || Number(p.monto) <= 0) {
+    return bad('monto invalido: string entero o con hasta 2 decimales (max 12 enteros), > 0');
+  }
+  if (typeof p.medio_pago !== 'string' || !MEDIOS_RETIRO_GW.includes(p.medio_pago)) {
+    return bad('medio_pago invalido (efectivo | transferencia_bancaria)');
+  }
+  if (p.comentario != null && (typeof p.comentario !== 'string' || (p.comentario as string).length > MAXLEN_GW)) {
+    return bad('comentario invalido');
+  }
+
+  // comentario: trim + '' -> null (ajuste 3). Nunca se deja rebotar por constraint SQL.
+  const comentarioTrim = (p.comentario != null ? (p.comentario as string).trim() : '');
+  const value = {
+    monto: p.monto,
+    medio_pago: p.medio_pago,
+    comentario: (comentarioTrim !== '' ? comentarioTrim : null),
   };
   return { ok: true, value };
 };
@@ -816,6 +868,16 @@ const CATALOG: Record<string, CatalogEntry> = {
   // excede_saldo/idempotency_mismatch -> conflicto, reserva_no_existe -> no_encontrado, P0001 ->
   // error_interno; todos allowlisted. El key DEBE coincidir con EXPECTED_ACTION del wrapper (D-C-41).
   'cobranza.registrar_cobro': { handler: 'n8n', roles: ['vicky', 'socio'], webhook: 'portal-a10mp-registrar-cobro__OPS', validate: payloadRegistrarCobro, injectActor: true, isWrite: true },
+
+  // A29 (Cuenta corriente socios / RETIRO desde saldo vivo) -- cuenta_corriente.retirar (ESCRITURA, socio-only).
+  // Wrapper n8n firmado (portal-a29-retiro__OPS) -> portal_registrar_retiro(jsonb) (SB1). SOLO socio: vicky/jenny
+  // rebotan rol_no_permitido EN EL GATEWAY antes de firmar. validate: payloadRegistrarRetiro (espejo del wrapper +
+  // contrato SQL). injectActor: actor=persona server-side (portal_usuarios.nombre). injectSocioIdentity (NUEVO):
+  // inyecta id_socio (portal_usuarios.id_socio, FK SB0) + user_id (uid del JWT) server-side; el cliente NO puede
+  // mandarlos. isWrite: ante dispatch no confiable, estado_incierto. needsIdempotencyKey (D-C-57): key sibling
+  // exigida/validada (IDEM_RE_GW) y top-level en el sobre. saldo_insuficiente/conflicto/payload_invalido los mapea
+  // el wrapper SQL; todos allowlisted. El key DEBE coincidir con EXPECTED_ACTION del wrapper (D-C-41).
+  'cuenta_corriente.retirar': { handler: 'n8n', roles: ['socio'], webhook: 'portal-a29-retiro__OPS', validate: payloadRegistrarRetiro, injectActor: true, injectSocioIdentity: true, isWrite: true, needsIdempotencyKey: true },
 };
 
 const ROLES_VALIDOS: ReadonlySet<Rol> = new Set<Rol>(['jenny', 'vicky', 'socio']);
@@ -824,8 +886,10 @@ const ROLES_VALIDOS: ReadonlySet<Rol> = new Set<Rol>(['jenny', 'vicky', 'socio']
 // request, para NINGUNA acción (defense-in-depth, fail-loud). actor/rol los inyecta el gateway
 // desde el JWT; nonce/request_ts son server-side; source_event/creado_por los deriva la función.
 // idempotency_key NO está acá: es sibling legítimo de payload (gobernado por needsIdempotencyKey).
+// A29: id_socio/user_id se suman acá -- los inyecta el gateway (injectSocioIdentity); un cliente que los
+// mande TOP-LEVEL rebota payload_invalido. (Dentro de payload los rechaza cada validator; ver A29.)
 // No afecta requests legítimos previos (que nunca traen estos campos) -> sus sobres quedan byte-idénticos.
-const CONTROL_TOPLEVEL_PROHIBIDAS = ['actor', 'rol', 'nonce', 'source_event', 'creado_por', 'request_ts'];
+const CONTROL_TOPLEVEL_PROHIBIDAS = ['actor', 'rol', 'nonce', 'source_event', 'creado_por', 'request_ts', 'id_socio', 'user_id'];
 
 // ---------------------------------------------------------------------------
 // Envelope uniforme (D-C-18) + CORS.
@@ -953,6 +1017,8 @@ export async function buildSignedEnvelope(
   ambienteEsperado: string,
   actor?: string,
   idempotencyKey?: string,
+  idSocio?: number,
+  userId?: string,
 ): Promise<{ body: string; signatureHeader: string }> {
   const envelope: Record<string, unknown> = {
     action,
@@ -968,6 +1034,11 @@ export async function buildSignedEnvelope(
   // D-C-57: idempotency_key top-level, solo si la acción lo provee (needsIdempotencyKey). Para
   // todo caller que no lo pase, la clave NO se agrega -> sobre byte-idéntico al previo.
   if (idempotencyKey !== undefined) envelope.idempotency_key = idempotencyKey;
+  // A29 (injectSocioIdentity): id_socio + user_id inyectados server-side, top-level en el sobre firmado
+  // (el wrapper portal-a29-retiro los lee de body.id_socio/body.user_id). Solo A29 los pasa; para toda
+  // otra accion quedan undefined -> el sobre NO los agrega -> byte-identico al previo.
+  if (idSocio !== undefined) envelope.id_socio = idSocio;
+  if (userId !== undefined) envelope.user_id = userId;
   const body = JSON.stringify(envelope);
   const sig = await hmacSha256Hex(hmacSecret, body);
   return { body, signatureHeader: `sha256=${sig}` };
@@ -989,6 +1060,7 @@ const CODIGOS_ERROR_PERMITIDOS: ReadonlySet<string> = new Set<string>([
   'payload_invalido', 'no_autorizado', 'rol_no_permitido', 'accion_desconocida',
   'no_encontrado', 'conflicto', 'error_entorno', 'error_interno', 'estado_incierto',
   'firma_invalida', 'ts_fuera_de_ventana', 'raw_body_ausente', 'ambiente_incorrecto',
+  'saldo_insuficiente',
 ]);
 
 // Códigos de INFRAESTRUCTURA: el gateway IMPONE el message y nunca conserva el del
@@ -1027,8 +1099,10 @@ async function dispatchN8n(
   actor?: string,
   isWrite = false,
   idempotencyKey?: string,
+  idSocio?: number,
+  userId?: string,
 ): Promise<Response> {
-  const { body, signatureHeader } = await buildSignedEnvelope(env.hmac, action, payload, rol, env.ambiente, actor, idempotencyKey);
+  const { body, signatureHeader } = await buildSignedEnvelope(env.hmac, action, payload, rol, env.ambiente, actor, idempotencyKey, idSocio, userId);
   // Normaliza el join base/webhook (tolera trailing slash en N8N_BASE_URL y leading en webhook).
   const url = `${env.n8nBaseUrl.replace(/\/+$/, '')}/${webhook.replace(/^\/+/, '')}`;
 
@@ -1099,6 +1173,21 @@ async function dispatchN8n(
   }
   const rawMsg = (err as { message?: unknown }).message;
   const message = typeof rawMsg === 'string' && rawMsg.length > 0 ? rawMsg : 'error en el backend';
+  // A29 (D-A29-3): UNICA excepcion al detail:null. Para saldo_insuficiente se propaga un detail SANITIZADO
+  // con SOLO { saldo_disponible, monto_solicitado }, y solo si AMBOS son numeros finitos (reconstruido,
+  // nunca el detail crudo del wrapper). Cualquier otra forma -> detail:null. El resto de los codigos sigue
+  // con detail:null (no se filtra nada interno).
+  if (err.code === 'saldo_insuficiente') {
+    const d = (err as { detail?: unknown }).detail;
+    if (d && typeof d === 'object' && !Array.isArray(d)) {
+      const sd = (d as Record<string, unknown>).saldo_disponible;
+      const ms = (d as Record<string, unknown>).monto_solicitado;
+      if (typeof sd === 'number' && Number.isFinite(sd) && typeof ms === 'number' && Number.isFinite(ms)) {
+        return fail(err.code, message, { saldo_disponible: sd, monto_solicitado: ms });
+      }
+    }
+    return fail(err.code, message, null);
+  }
   return fail(err.code, message, null);
 }
 
@@ -1162,7 +1251,7 @@ Deno.serve(async (req: Request) => {
     // Lookup de identidad/rol (server-side).
     const { data: pu, error: puErr } = await admin
       .from('portal_usuarios')
-      .select('nombre, rol, activo')
+      .select('nombre, rol, activo, id_socio')
       .eq('user_id', uid)
       .maybeSingle();
     if (puErr) {
@@ -1224,7 +1313,21 @@ Deno.serve(async (req: Request) => {
         return fail('payload_invalido', 'idempotency_key inválida (8-64 [A-Za-z0-9_-], sibling de payload)');
       }
     }
-    return await dispatchN8n(env, action, entry.webhook, v.value, rol, actor, entry.isWrite === true, idempotencyKey);
+    // A29 (injectSocioIdentity): identidad de socio inyectada server-side ANTES de firmar. id_socio sale de
+    // portal_usuarios.id_socio (FK SB0) y user_id del JWT (uid) -- NUNCA del cliente. Un socio post-SB0 SIEMPRE
+    // tiene id_socio (CHECK chk_portal_usuarios_socio_rol); si faltara, es inconsistencia de datos y NO se firma
+    // (fail-closed, como actorCoherente). Solo A29 setea el flag -> el resto de las acciones queda sin cambios.
+    let idSocio: number | undefined;
+    let userId: string | undefined;
+    if (entry.injectSocioIdentity) {
+      if (pu.id_socio == null) {
+        console.error(`portal-api: socio sin id_socio (rol=${rol}, nombre=${pu.nombre}) en ${action}`);
+        return crash('id_socio_ausente');
+      }
+      idSocio = pu.id_socio as number;
+      userId = uid;
+    }
+    return await dispatchN8n(env, action, entry.webhook, v.value, rol, actor, entry.isWrite === true, idempotencyKey, idSocio, userId);
   } catch (e) {
     console.error('portal-api: excepción no controlada:', e instanceof Error ? e.message : String(e));
     return crash('excepcion');
