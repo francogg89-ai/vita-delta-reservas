@@ -1,10 +1,16 @@
 # Cierre técnico preliminar — Integración de `resolver_horario()` en `obtener_disponibilidad_rango` (TEST)
 
 **Frente:** Motor formal de horarios — bloque de integración en la función de **lectura** que alimenta el calendario del frontend (vía wrapper n8n A26).
+**Ubicación del frente en el repo:** `Docs/Bitacora/CARRIL_MOTOR_DE_HORARIOS/`.
 **Entorno:** TEST (ref `bdskhhbmcksskkzqkcdp`).
-**Estado:** ✅ **Cerrado técnicamente en TEST.** Cierre **preliminar** — **sin** promoción a OPS, **sin** canonización, **sin** acuñar `D-*`/`L-*`.
-**Repo de referencia:** commit `aca90143` (canónico v1.10.0; el commit es "ajustando el motor contable", de otro frente, no afecta horarios).
-**Fecha:** 2026-07-03 (AR).
+**Estado:** ✅ **Cerrado técnicamente en TEST.** Cierre **preliminar** — **sin** promoción a OPS, **sin** canonización de horarios, **sin** acuñar `D-*`/`L-*` de horarios.
+
+**Evidencia de repo (clone fresco):**
+- Commit vigente: **`5a859b1a9d65a15a857e7f33c4357f7099120937`** — *"docs: close cuenta corriente S0 satellites"* (2026-07-03).
+- Canónico vigente: **`6B_SCHEMA_SQL.md v1.10.1`**.
+- El bump `v1.10.0 → v1.10.1` corresponde a **Cuenta Corriente S0 / porcentaje operativo**, **no** al motor de horarios: mueve el pct a `configuracion_general` (clave `pct_operativo`, `editable=false`, D-CC-13), agrega `pct_operativo_vigente()` a la PARTE C, y A27/A28 pasan a leerlo desde config (output-neutral, verificado por hash TEST=OPS, promovido a OPS 2026-07-03). El bootstrap kit sigue rezagado como deuda consciente P-CC-4.
+
+**Fecha del cierre:** 2026-07-03 (AR).
 
 ---
 
@@ -18,22 +24,38 @@ Se integró `resolver_horario()` dentro de `obtener_disponibilidad_rango(date,da
 
 **Se tocó (solo TEST):** la definición de `obtener_disponibilidad_rango` en el entorno TEST, vía `CREATE OR REPLACE` (owner-only, sin `DROP`, para preservar ACL y la dependiente `vista_disponibilidad`).
 
-**Intacto (verificado / no tocado):**
+**No tocado / estado verificado:**
 
 | Componente | Estado |
 |---|---|
-| **OPS** (ref `lpiatqztudxiwdlcoasv`) | Intacto — no se generó ni ejecutó ningún artefacto contra OPS |
-| **Canónico** `6B_SCHEMA_SQL.md` (v1.10.0) | Intacto — `resolver_horario` aparece **0 veces** en el canónico; la ODR canónica conserva los `CASE` hardcodeados |
-| **Gateway** `portal-api` | Intacto — sin cambios |
-| **Frontend** (contrato + `CalendarioRango.tsx`) | Intacto — el frontend consume solo `estado`; D1 no exige cambios |
-| **Workflows n8n** (A26 y demás) | Intacto — sin cambios |
-| **A07 / A08** (guards UX del motor temporal) | Intacto — fuera de este bloque |
-| **`crear_prereserva`** (integración B3) | Intacto — fuera de este bloque |
-| **`resolver_horario`** (dependencia) | Intacto — fingerprint sin cambios |
+| **OPS** (ref `lpiatqztudxiwdlcoasv`) | No tocado — no se generó ni ejecutó ningún artefacto contra OPS |
+| **Canónico** `6B_SCHEMA_SQL.md` | **Vigente v1.10.1, modificado por Cuenta Corriente S0** (no por horarios). Esta integración de horarios **todavía no está canonizada** — ver §3 |
+| **Gateway** `portal-api` | No tocado |
+| **Frontend** (contrato + `CalendarioRango.tsx`) | No tocado — el frontend consume solo `estado`; D1 no exige cambios |
+| **Workflows n8n** (A26 y demás) | No tocado |
+| **A07 / A08** (guards UX del motor temporal) | No tocado — fuera de este bloque |
+| **`crear_prereserva`** (integración B3) | No tocado — fuera de este bloque |
+| **`resolver_horario`** (dependencia) | No tocado — fingerprint sin cambios |
 
 ---
 
-## 3. Artefactos del bloque
+## 3. Horarios NO canonizados (evidencia en v1.10.1)
+
+Respecto del motor de horarios, el canónico v1.10.1 **sigue sin canonizar** esta integración. Verificado sobre la definición canónica de `obtener_disponibilidad_rango`:
+
+- **`resolver_horario` no aparece** en la definición canónica de la ODR (0 ocurrencias; y 0 en todo el canónico).
+- La **ODR canónica conserva los `CASE` hardcodeados**:
+  - `CASE WHEN EXTRACT(DOW FROM m.fecha) = 0 THEN TIME '18:00' ELSE TIME '13:00' END AS hora_checkin_base`
+  - `CASE WHEN EXTRACT(DOW FROM m.fecha) = 0 THEN TIME '16:00' ELSE TIME '10:00' END AS hora_checkout_base  -- v1.7.1 (D47)`
+- **No hay `CROSS JOIN LATERAL resolver_horario(...)`** en la ODR canónica (0 ocurrencias).
+
+La integración vive **solo en TEST**. La canonización del motor de horarios queda como diferido (§13).
+
+---
+
+## 4. Artefactos del bloque
+
+Destino en repo: `Docs/Bitacora/CARRIL_MOTOR_DE_HORARIOS/`.
 
 | Archivo | Rol |
 |---|---|
@@ -44,10 +66,11 @@ Se integró `resolver_horario()` dentro de `obtener_disponibilidad_rango(date,da
 | `HORARIOS_DISPONIBILIDAD_RANGO_C_SMOKES_TEST.sql` (rev 2) | Smokes (12 casos) — gate + writes controlados en tx + teardown |
 | `HORARIOS_DISPONIBILIDAD_RANGO_D_RUNSHEET.md` | Runsheet de ejecución |
 | `HORARIOS_REQUISITO_GUARD_ALTA_OVERRIDES_PENDIENTE.md` | Requisito obligatorio diferido (bloque futuro) |
+| `HORARIOS_DISPONIBILIDAD_RANGO_CIERRE_TECNICO_PRELIMINAR.md` | Este documento |
 
 ---
 
-## 4. Estado de ejecución
+## 5. Estado de ejecución (TEST)
 
 - **Paso 0 (live):** ✅ entorno TEST, ambas funciones presentes, def live ≡ canónico salvo comentarios/EOL (cero drift lógico), fingerprints capturados.
 - **Paso A (integración):** ✅ aplicado con `todo_ok = true`. Gate embebido validó ambiente/schema/existencia/fingerprints antes del `CREATE OR REPLACE`.
@@ -56,7 +79,7 @@ Se integró `resolver_horario()` dentro de `obtener_disponibilidad_rango(date,da
 
 ---
 
-## 5. Fingerprints (`md5(pg_get_functiondef(...))`)
+## 6. Fingerprints (`md5(pg_get_functiondef(...))`)
 
 | Objeto | Fingerprint | Nota |
 |---|---|---|
@@ -66,7 +89,7 @@ Se integró `resolver_horario()` dentro de `obtener_disponibilidad_rango(date,da
 
 ---
 
-## 6. Política D1 (aplicada)
+## 7. Política D1 (aplicada)
 
 Ante `resolver_horario()` con `ok=false` (override horario corrupto: `formato_invalido` / `cast_invalido` / `fuera_de_ventana`), la ODR pone **ambas** horas (`hora_checkin_base`, `hora_checkout_base`) → **NULL** por fila, **preservando el `estado` ocupacional** (all-or-nothing por fila; espejo del over-blocking de B3 en el lado de escritura).
 
@@ -74,13 +97,13 @@ Ante `resolver_horario()` con `ok=false` (override horario corrupto: `formato_in
 
 ---
 
-## 7. Cambio funcional aprobado
+## 8. Cambio funcional aprobado
 
 La ODR **ahora respeta `overrides_operativos` válidos** (precedencia cabaña > global, `created_at` DESC; `fecha_hasta` inclusiva). Antes ignoraba los overrides con `CASE` hardcodeados, lo que generaba divergencia latente con `crear_prereserva` desde B3. Este cambio alinea la lectura con la escritura. Aprobado por Franco previo a la generación de artefactos.
 
 ---
 
-## 8. No-regresión comprobada
+## 9. No-regresión comprobada
 
 - **Estados:** comparación NUEVA vs VIEJA (oracle `pg_temp._smoke_odr_vieja`) sobre 120 días de datos reales → **0 diferencias** en `estado` (los estados no dependen de overrides).
 - **Semántica `[fecha_in, fecha_out)` + `checkout_disponible`:** columnas no-horas idénticas NUEVA vs VIEJA; y bloqueo media-abierta determinista `[j, j+2)` verificado (`j` y `j+1` bloqueadas, `j+2` libre).
@@ -88,7 +111,7 @@ La ODR **ahora respeta `overrides_operativos` válidos** (precedencia cabaña > 
 
 ---
 
-## 9. Performance real (TEST)
+## 10. Performance real (TEST)
 
 | Escenario | Tiempo real | Umbral | Resultado |
 |---|---|---|---|
@@ -99,33 +122,32 @@ El `CROSS JOIN LATERAL` que invoca el resolver por fila no introduce costo probl
 
 ---
 
-## 10. Cero residuos
+## 11. Cero residuos
 
 Post-`COMMIT` de C rev2: `overrides` marcados = **0**, `bloqueos` marcados = **0**, oracle `pg_temp._smoke_odr_vieja` **eliminado**, ODR real intacta. Mecanismo: el fixture se borra en el TEARDOWN antes del `COMMIT` (se persiste solo la limpieza); si el script abortara antes del teardown, la transacción revierte y nada persiste. Gate negativo verificado: fingerprint no coincidente → `RAISE EXCEPTION` sin sembrar fixture.
 
 ---
 
-## 11. Requisito obligatorio diferido registrado
+## 12. Requisito obligatorio diferido registrado
 
 **Guard de alta segura de overrides horarios contra reservas/pre-reservas comprometidas** (`HORARIOS_REQUISITO_GUARD_ALTA_OVERRIDES_PENDIENTE.md`): impedir crear/cargar un override horario (global → todas las cabañas activas; por cabaña → solo esa; `tipo_override IN ('hora_checkin','hora_checkout')`) si alguna cabaña afectada ya tiene reserva activa/confirmada/completada o pre-reserva vigente/en revisión con check-in/check-out en el rango. **Punto crítico:** n8n no alcanza; el bloque futuro debe diseñar una **función de alta segura y/o un trigger en DB** (criterio de aceptación: un `INSERT` directo que viole la regla debe **fallar en la DB**). Registrado como bloque futuro, **no** implementado.
 
 ---
 
-## 12. Formalización
+## 13. Formalización
 
-**Sin `D-*`/`L-*` acuñados.** Se mantiene el criterio de reservar la acuñación (y la propagación a satélites) para el **cierre formal del frente completo de horarios**. Este documento es un cierre **técnico preliminar** del bloque en TEST.
+**Sin `D-*`/`L-*` de horarios acuñados.** Se mantiene el criterio de reservar la acuñación (y la propagación a satélites) para el **cierre formal del frente completo de horarios**. Este documento es un cierre **técnico preliminar** del bloque en TEST.
 
 ---
 
-## 13. Diferidos del frente (NO en este bloque)
+## 14. Diferidos del frente (NO en este bloque)
 
 - **Promoción a OPS** — **no** generar todavía. Cuando se abra: coordinada con el resto del motor (guard B2 + resolver + integración B3 en `crear_prereserva` + wrapper A07 + esta integración), gate anti-OPS adaptado, y parity de fingerprint del motor.
-- **Canonización** — **no** todavía. Un solo bump sobre v1.10.0 al cerrar el frente completo, cubriendo todos los cambios del motor de horarios.
-- **Guard de alta de overrides** (requisito §11) — bloque futuro propio.
-- **Organización de bitácora** — decidir si `Actualizacion_motor_de_horarios/` se mueve a `Docs/Bitacora/` (consistencia con Cuenta Corriente y Carril C).
+- **Canonización de horarios** — **no** todavía. Un solo bump al cerrar el frente completo, partiendo del canónico vigente **v1.10.1** y cubriendo todos los cambios del motor de horarios.
+- **Guard de alta de overrides** (requisito §12) — bloque futuro propio.
 
 ---
 
-## 14. Próximo paso
+## 15. Próximo paso
 
-El bloque está **cerrado técnicamente en TEST**. No se avanza a OPS ni canónico. El siguiente movimiento del frente lo decidís vos: abrir otro bloque del motor de horarios, o preparar el cierre formal del frente completo (con acuñación de `D-*`/`L-*` y promoción coordinada).
+El bloque está **cerrado técnicamente en TEST**. No se avanza a OPS ni a canonización de horarios. El siguiente movimiento del frente lo decidís vos: abrir otro bloque del motor de horarios, o preparar el cierre formal del frente completo (con acuñación de `D-*`/`L-*` de horarios y promoción coordinada TEST→OPS + canonización en un solo bump sobre v1.10.1).

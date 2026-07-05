@@ -1,0 +1,299 @@
+{
+ "name": "portal-a29-retiro__OPS",
+ "nodes": [
+  {
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "portal-a29-retiro__OPS",
+    "responseMode": "responseNode",
+    "options": {
+     "rawBody": true
+    }
+   },
+   "id": "75db5722-f49b-406c-bb0d-512fbf0aec9b",
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2.1,
+   "position": [
+    0,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// portal-a29-retiro__OPS - validar_firma_ts_rol (ESCRITURA / A29) v1.\n// Molde a11 (HMAC sobre buffer crudo, timing-safe, ventana ts, raw body binario con fallback,\n// assert por prefijo __PEGAR_). A29 (D-C-56 / SB1):\n//   - EXPECTED_ACTION = 'cuenta_corriente.retirar'.\n//   - ROLES_OK = ['socio'] (vicky/jenny rebotan; el gateway ya los filtra, esto es 2da defensa).\n//   - nonce DERIVADO de la firma ESPERADA recomputada y normalizada (D-C-56): nonce = expectedHex.toLowerCase().\n//   - id_socio + user_id vienen del SOBRE (inyectados por el gateway, injectSocioIdentity), NO del payload:\n//     id_socio entero positivo; user_id uuid. Se validan aca (2da defensa) y se pasan a Code: derivar.\n//   - idempotency_key estricta ^[A-Za-z0-9_-]{8,64}$.\n//   - payload de negocio REJECT-UNKNOWN {monto, medio_pago, comentario}: monto STRING ^[0-9]{1,12}(\\.[0-9]{1,2})?$\n//     y > 0 (D-A29-1); medio_pago {efectivo, transferencia_bancaria}; comentario opcional trim -> null (ajuste 3).\n//     La coherencia de saldo (retiro <= saldo vivo) la valida portal_registrar_retiro (SB1).\nconst crypto = require('crypto');\n\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_OPS_O_USAR_VARIABLE__';\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado (assert por prefijo, L-C-10).');\n}\n\nconst ROLES_OK        = ['socio'];\nconst ENUM_ACTOR      = ['franco','rodrigo','remo'];\nconst MEDIOS_OK       = ['efectivo','transferencia_bancaria'];\nconst EXPECTED_ACTION = 'cuenta_corriente.retirar';\nconst IDEM_RE         = /^[A-Za-z0-9_-]{8,64}$/;\nconst MONTO_RE        = /^[0-9]{1,12}(\\.[0-9]{1,2})?$/;\nconst UUID_RE         = /^[0-9a-fA-F-]{36}$/;\nconst MAXLEN          = 1000;\n\nfunction rej(motivo, body) {\n  body = body || {};\n  return [{ json: { ok_firma:false, motivo, ambiente_esperado: body.ambiente_esperado ?? null,\n    rol: body.rol ?? null, action: body.action ?? null, ts: (typeof body.ts!=='undefined'?body.ts:null),\n    actor: body.actor ?? null, idempotency_key: body.idempotency_key ?? null,\n    id_socio: null, user_id: null, nonce: null, payload: null } }];\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\n// 1) Raw body Buffer exacto (binario 'data' prioridad; fallback rawBody, L-C-05).\nlet buf = null;\ntry { if (item.binary && item.binary.data) buf = await this.helpers.getBinaryDataBuffer(0, 'data'); } catch (e) { buf = null; }\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) return rej('raw_body_ausente', {});\n\n// 2) Firma HMAC recomputada sobre los mismos bytes (hex en minuscula).\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\nconst expectedHex = crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\nconst expected = 'sha256=' + expectedHex;\nlet firmaOk = false;\ntry { const a = Buffer.from(sigHeader); const b = Buffer.from(expected); firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b); } catch (e) { firmaOk = false; }\nif (!firmaOk) return rej('firma_invalida', {});\n\n// 3) nonce = firma ESPERADA calculada y normalizada (D-C-56).\nconst nonce = expectedHex.toLowerCase();\n\n// 4) Parseo (firma ya validada).\nlet body;\ntry { body = JSON.parse(buf.toString('utf8')); } catch (e) { return rej('payload_invalido', {}); }\n\n// 5) Ventana ts +-300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) return rej('ts_fuera_de_ventana', body);\n\n// 6) Rol allowlist (D-C-39).\nif (!ROLES_OK.includes(body.rol)) return rej('rol_no_permitido', body);\n// 7) Action binding (D-C-41).\nif (body.action !== EXPECTED_ACTION) return rej('accion_desconocida', body);\n// 8) actor (sobre firmado; persona socio).\nif (typeof body.actor !== 'string' || !ENUM_ACTOR.includes(body.actor)) return rej('payload_invalido', body);\n// 9) idempotency_key formato estricto.\nif (typeof body.idempotency_key !== 'string' || !IDEM_RE.test(body.idempotency_key)) return rej('payload_invalido', body);\n\n// 10) id_socio + user_id INYECTADOS por el gateway (sobre firmado), 2da defensa. NO vienen del payload.\nconst idSocioRaw = body.id_socio;\nlet idSocio = null;\nif (typeof idSocioRaw === 'number' && Number.isSafeInteger(idSocioRaw) && idSocioRaw > 0) idSocio = idSocioRaw;\nelse if (typeof idSocioRaw === 'string' && /^[0-9]{1,18}$/.test(idSocioRaw) && Number(idSocioRaw) > 0) idSocio = Number(idSocioRaw);\nif (idSocio === null) return rej('payload_invalido', body);\nconst userId = (typeof body.user_id === 'string' && UUID_RE.test(body.user_id)) ? body.user_id : null;\nif (userId === null) return rej('payload_invalido', body);\n\n// 11) Payload de negocio: REJECT-UNKNOWN {monto, medio_pago, comentario}.\nconst p = body.payload;\nif (!p || typeof p !== 'object' || Array.isArray(p)) return rej('payload_invalido', body);\nconst PERMITIDAS = ['monto','medio_pago','comentario'];\nfor (const k of Object.keys(p)) { if (!PERMITIDAS.includes(k)) return rej('payload_invalido', body); }\n\n// monto STRING (D-A29-1): <=12 enteros, <=2 decimales, > 0. Espejo textual de portal_registrar_retiro.\nif (typeof p.monto !== 'string' || !MONTO_RE.test(p.monto) || !(Number(p.monto) > 0)) return rej('payload_invalido', body);\nif (typeof p.medio_pago !== 'string' || !MEDIOS_OK.includes(p.medio_pago)) return rej('payload_invalido', body);\nif (p.comentario != null && (typeof p.comentario !== 'string' || p.comentario.length > MAXLEN)) return rej('payload_invalido', body);\n\n// comentario: trim + '' -> null (ajuste 3).\nconst comentarioTrim = (p.comentario != null ? p.comentario.trim() : '');\nconst payloadWL = {\n  monto: p.monto,\n  medio_pago: p.medio_pago,\n  comentario: (comentarioTrim !== '' ? comentarioTrim : null)\n};\n\nreturn [{ json: { ok_firma:true, motivo:null, ambiente_esperado: body.ambiente_esperado ?? null,\n  rol: body.rol, action: body.action, ts, actor: body.actor,\n  idempotency_key: body.idempotency_key, id_socio: idSocio, user_id: userId, nonce, payload: payloadWL } }];\n"
+   },
+   "id": "fd8a5aee-2693-4431-8b09-daaf2dc41dd4",
+   "name": "validar_firma_ts_rol",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    240,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+    "options": {}
+   },
+   "id": "903af24d-c485-4ed0-8c87-3120657b9caf",
+   "name": "leer_ambiente",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.6,
+   "position": [
+    480,
+    0
+   ],
+   "credentials": {
+    "postgres": {
+     "id": "REEMPLAZAR_POR_CRED_OPS",
+     "name": "vita_supabase_ops (reemplazar al importar)"
+    }
+   }
+  },
+  {
+   "parameters": {
+    "jsCode": "// portal-a29-retiro__OPS - verificar_acceso (ambiente + envelope de rechazo).\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\nfunction envErr(code, message, detail) { return [{ json: { ok:false, error: { code, message, detail: detail ?? null } } }]; }\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'payload invalido (monto/medio_pago/comentario, actor, identidad o idempotency_key)',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\nreturn [{ json: { ok:true } }];\n"
+   },
+   "id": "c6c920df-aced-4205-bff7-e32314e93966",
+   "name": "verificar_acceso",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    720,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "099da4fa-ca43-4c48-94ed-7dacb11ce626",
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": true,
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "6a1f3c4f-7d3e-4603-9c1e-1657ad8dfe48",
+   "name": "IF acceso",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    960,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// portal-a29-retiro__OPS - Code: derivar.\n// Arma el jsonb para portal_registrar_retiro (SB1): negocio (monto/medio_pago/comentario del payload\n// whitelisteado) + control server-side. id_socio/user_id salen del SOBRE (inyectados por el gateway),\n// NUNCA del payload. source_event y creado_por NO se mandan: los deriva la funcion ('portal_a29_'||key ;\n// creado_por = actor). request_ts = ts del sobre (opcional; la funcion estampa fecha=hoy AR internamente).\nconst v = $('validar_firma_ts_rol').first().json;\nconst idem = v.idempotency_key;\nconst fnPayload = {\n  monto: v.payload.monto,\n  medio_pago: v.payload.medio_pago,\n  comentario: v.payload.comentario,\n  id_socio: v.id_socio,\n  user_id: v.user_id,\n  actor: v.actor,\n  rol: v.rol,\n  nonce: v.nonce,\n  idempotency_key: idem,\n  request_ts: v.ts\n};\nconst payload1 = JSON.stringify(fnPayload);\nreturn [{ json: { payload1, idem, sev: 'portal_a29_' + idem } }];\n"
+   },
+   "id": "05449ca1-fb55-427e-8987-02d7ce9db585",
+   "name": "Code: derivar",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1200,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "SELECT portal_registrar_retiro($1::jsonb) AS resultado;",
+    "options": {
+     "queryReplacement": "={{ $('Code: derivar').first().json.payload1 }}"
+    }
+   },
+   "id": "c47d3b59-482a-4f6b-a46b-34bfcc900d60",
+   "name": "PG registrar_retiro",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.6,
+   "position": [
+    1440,
+    0
+   ],
+   "credentials": {
+    "postgres": {
+     "id": "REEMPLAZAR_POR_CRED_OPS",
+     "name": "vita_supabase_ops (reemplazar al importar)"
+    }
+   },
+   "onError": "continueRegularOutput",
+   "alwaysOutputData": true
+  },
+  {
+   "parameters": {
+    "jsCode": "// portal-a29-retiro__OPS - router_retiro.\n// portal_registrar_retiro ya devuelve el contrato final {ok,data|error} con codigos de la allowlist\n// (ok idempotente/nuevo; saldo_insuficiente; conflicto nonce_replay/payload_mismatch/actor_mismatch;\n// payload_invalido; rol_no_permitido; error_interno). Solo agregamos estado_incierto si el nodo PG no\n// devolvio el contrato (fallo de dispatch; L-8D-01).\nconst res = $json.resultado;\nconst D = $('Code: derivar').first().json;\nif (!res || typeof res !== 'object') {\n  return [{ json: { ok:false, error: { code:'estado_incierto',\n    message:'estado incierto al registrar el retiro; verificar antes de reintentar con la misma idempotency_key',\n    detail: { idempotency_key: D.idem, source_event: D.sev } } } }];\n}\nreturn [{ json: res }];\n"
+   },
+   "id": "b4f3b883-a5c1-4775-81ec-c421081c1371",
+   "name": "router_retiro",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1680,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// portal-a29-retiro__OPS - Code: render. Punto unico de salida.\n// Extrae el envelope de router; o pasa el rechazo de verificar_acceso ($json {ok:false,error}).\nconst e = ($json && $json.envelope) ? $json.envelope : $json;\nreturn [{ json: e }];"
+   },
+   "id": "be8c9ab3-13fe-4fa0-9ad7-a3ee756e3f6c",
+   "name": "Code: render",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1920,
+    0
+   ]
+  },
+  {
+   "parameters": {
+    "respondWith": "firstIncomingItem",
+    "options": {
+     "responseCode": 200
+    }
+   },
+   "id": "84527d89-f03a-45f3-87b8-bf6ed396b27b",
+   "name": "Respond",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.5,
+   "position": [
+    2160,
+    0
+   ]
+  }
+ ],
+ "pinData": {},
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "validar_firma_ts_rol",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "validar_firma_ts_rol": {
+   "main": [
+    [
+     {
+      "node": "leer_ambiente",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "leer_ambiente": {
+   "main": [
+    [
+     {
+      "node": "verificar_acceso",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "verificar_acceso": {
+   "main": [
+    [
+     {
+      "node": "IF acceso",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "IF acceso": {
+   "main": [
+    [
+     {
+      "node": "Code: derivar",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Code: render",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Code: derivar": {
+   "main": [
+    [
+     {
+      "node": "PG registrar_retiro",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "PG registrar_retiro": {
+   "main": [
+    [
+     {
+      "node": "router_retiro",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "router_retiro": {
+   "main": [
+    [
+     {
+      "node": "Code: render",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Code: render": {
+   "main": [
+    [
+     {
+      "node": "Respond",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "active": false,
+ "settings": {
+  "executionOrder": "v1",
+  "binaryMode": "separate"
+ },
+ "tags": []
+}
