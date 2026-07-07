@@ -92,6 +92,12 @@ BEGIN
 END
 $g1$;
 
+-- ---- Captura pre-DDL: conteo de vista_disponibilidad (para verificar invariancia) ----
+-- La vista es cabanas_activas x horizonte (en TEST: 5 x 120 = 600). El cableado del
+-- resolver cambia HORAS, nunca el conteo; el postcheck confirma post == pre.
+CREATE TEMP TABLE _mig_meta(k text, v bigint) ON COMMIT DROP;
+INSERT INTO _mig_meta VALUES ('vista_pre', (SELECT count(*) FROM public.vista_disponibilidad));
+
 -- =====================================================================
 -- (1) INTERNO public._resolver_horario  (refactor R0; Paso A = vigencia|config)
 -- =====================================================================
@@ -247,14 +253,14 @@ COMMENT ON FUNCTION public.vigencias_conflictos_comprometidos(date,date,boolean,
 
 -- ---- POSTCHECKS intra-tx ----
 DO $post$
-DECLARE r text; v_res_fp text; v_odr_fp text; v_int_fp text; v_vista int;
+DECLARE r text; v_res_fp text; v_odr_fp text; v_int_fp text; v_vista_pre bigint; v_vista_post bigint;
 BEGIN
   IF to_regprocedure('public._resolver_horario(bigint,date,boolean)') IS NULL THEN
     RAISE EXCEPTION 'POST: public._resolver_horario ausente.';
   END IF;
-  FOREACH r IN ARRAY ARRAY['anon','authenticated','service_role'] LOOP
+  FOREACH r IN ARRAY ARRAY['public','anon','authenticated','service_role'] LOOP
     IF has_function_privilege(r, 'public._resolver_horario(bigint,date,boolean)', 'EXECUTE') THEN
-      RAISE EXCEPTION 'POST: interno EXECUTE concedido a % (esperado owner-only).', r;
+      RAISE EXCEPTION 'POST: interno EXECUTE concedido a % (esperado owner-only, incl. PUBLIC).', r;
     END IF;
     IF has_function_privilege(r, 'public.resolver_horario(bigint,date)', 'EXECUTE') THEN
       RAISE EXCEPTION 'POST: wrapper EXECUTE concedido a % (esperado owner-only).', r;
@@ -271,12 +277,16 @@ BEGIN
   IF v_odr_fp IS DISTINCT FROM '37009a32154f93b80520500c0f15b46b' THEN
     RAISE EXCEPTION 'POST: ODR fingerprint cambio a % (esperado 37009a32... intacto).', v_odr_fp;
   END IF;
-  SELECT count(*) INTO v_vista FROM public.vista_disponibilidad;
-  IF v_vista = 0 THEN
+  SELECT v INTO v_vista_pre FROM _mig_meta WHERE k = 'vista_pre';
+  SELECT count(*) INTO v_vista_post FROM public.vista_disponibilidad;
+  IF v_vista_post = 0 THEN
     RAISE EXCEPTION 'POST: vista_disponibilidad devolvio 0 filas (cadena rota).';
   END IF;
+  IF v_vista_post IS DISTINCT FROM v_vista_pre THEN
+    RAISE EXCEPTION 'POST: conteo de vista_disponibilidad cambio (pre=%, post=%). El cableado no debe alterar el conteo.', v_vista_pre, v_vista_post;
+  END IF;
   v_int_fp := md5(pg_get_functiondef('public._resolver_horario(bigint,date,boolean)'::regprocedure));
-  RAISE NOTICE 'POSTCHECKS OK: interno/wrapper/helper owner-only; wrapper_fp=% (!=R0); interno_fp=%; ODR intacto; vista=% filas.', v_res_fp, v_int_fp, v_vista;
+  RAISE NOTICE 'POSTCHECKS OK: interno/wrapper/helper owner-only (incl. PUBLIC); wrapper_fp=% (!=R0); interno_fp=%; ODR intacto; vista=% filas (== pre).', v_res_fp, v_int_fp, v_vista_post;
 END
 $post$;
 
