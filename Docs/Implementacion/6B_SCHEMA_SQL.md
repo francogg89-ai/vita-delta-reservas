@@ -1,9 +1,9 @@
 # 6B_SCHEMA_SQL.md
 # Schema PostgreSQL — Vita Delta Reservas
 
-**Versión:** 1.11.0
+**Versión:** 1.12.0
 **Fecha:** Julio 2026
-**Estado:** Canónico vigente: **`6B_SCHEMA_SQL.md v1.11.0`**. v1.8.0 consolidó el **Carril B** (contabilidad operativa interna, sub-etapas 9C→9H + helper 9B) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026; **v1.8.1 canoniza el hardening de las funciones base del motor** (Bloque 23, `REVOKE EXECUTE`), que se venía aplicando fuera de banda por entorno; **v1.9.0 consolida el Carril C — Portal Operativo Interno** (las tablas `portal_usuarios` y `portal_idempotencia` y la función `portal_cargar_gasto_interno(jsonb)`) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026 (bloques A→H); **v1.10.0 consolida las 2 funciones de lectura de la cuenta corriente de socios** (`cuenta_corriente_viva`, `cuenta_corriente_detalle`) en la PARTE C, capa de lectura socio-only expuesta por el portal (acciones `cuenta_corriente.al_dia` y `cuenta_corriente.detalle`), tras la promoción coordinada TEST→OPS de julio 2026. **v1.10.1 mueve el porcentaje operativo a `configuracion_general`** (clave `pct_operativo`, D-CC-13) y agrega el helper `pct_operativo_vigente()` a la PARTE C; los wrappers A27/A28 pasan a leer el pct desde config (aditivo, output-neutral verificado por hash TEST=OPS, promovido a OPS 2026-07-03). **v1.11.0 consolida la capa de escritura de la cuenta corriente (retiro desde saldo vivo)**: `portal_usuarios.id_socio` (FK a `socios`, `UNIQUE`, `CHECK` bicondicional) en la PARTE D, la tabla `portal_idempotencia_cc`, la función `registrar_retiro_desde_saldo_vivo` en la PARTE C, el wrapper `portal_registrar_retiro(jsonb)` en la PARTE D y el auto-test D5 extendido a las dos FKs de `portal_usuarios` (aditivo, promovido a OPS 2026-07-05). La base (Partes A y B) refleja el estado alineado DEV/TEST/OPS de v1.7.3; el Carril B (sección 24 y PARTE C) refleja el estado final TEST=OPS verificado por huella estructural (K1, `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17`); el Carril C (sección 25 y PARTE D) parte de la estructura certificada por la huella del Bloque H (`TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`), que es la referencia **histórica** de la promoción del Carril C (v1.9.0, 3 objetos): v1.9.0 difería de esa huella solo por dos comentarios SQL (cosmético), y **v1.11.0 la extiende con deltas estructurales intencionales** (`portal_usuarios.id_socio`, `portal_idempotencia_cc`, `portal_registrar_retiro(jsonb)` y el D5 extendido), por lo que un bootstrap v1.11.0 ya no reproduce `TOTAL_PORTAL (3 objetos)` sino que lo extiende canónicamente (ver changelogs v1.8.1 → v1.9.0 y v1.10.1 → v1.11.0). El canónico es autocontenido y apto para bootstrappear un entorno nuevo de cero. **DEV fue reconstruido desde cero desde v1.8.0** (jun-2026, proyecto nuevo `wsrdzjmvnzxidjlovlja`, cerrado como OPS); el hallazgo que motivó v1.8.1 surgió en esa reconstrucción (ver changelog).
+**Estado:** Canónico vigente: **`6B_SCHEMA_SQL.md v1.12.0`**. v1.8.0 consolidó el **Carril B** (contabilidad operativa interna, sub-etapas 9C→9H + helper 9B) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026; **v1.8.1 canoniza el hardening de las funciones base del motor** (Bloque 23, `REVOKE EXECUTE`), que se venía aplicando fuera de banda por entorno; **v1.9.0 consolida el Carril C — Portal Operativo Interno** (las tablas `portal_usuarios` y `portal_idempotencia` y la función `portal_cargar_gasto_interno(jsonb)`) dentro del canónico, tras la promoción coordinada TEST→OPS de junio 2026 (bloques A→H); **v1.10.0 consolida las 2 funciones de lectura de la cuenta corriente de socios** (`cuenta_corriente_viva`, `cuenta_corriente_detalle`) en la PARTE C, capa de lectura socio-only expuesta por el portal (acciones `cuenta_corriente.al_dia` y `cuenta_corriente.detalle`), tras la promoción coordinada TEST→OPS de julio 2026. **v1.10.1 mueve el porcentaje operativo a `configuracion_general`** (clave `pct_operativo`, D-CC-13) y agrega el helper `pct_operativo_vigente()` a la PARTE C; los wrappers A27/A28 pasan a leer el pct desde config (aditivo, output-neutral verificado por hash TEST=OPS, promovido a OPS 2026-07-03). **v1.11.0 consolida la capa de escritura de la cuenta corriente (retiro desde saldo vivo)**: `portal_usuarios.id_socio` (FK a `socios`, `UNIQUE`, `CHECK` bicondicional) en la PARTE D, la tabla `portal_idempotencia_cc`, la función `registrar_retiro_desde_saldo_vivo` en la PARTE C, el wrapper `portal_registrar_retiro(jsonb)` en la PARTE D y el auto-test D5 extendido a las dos FKs de `portal_usuarios` (aditivo, promovido a OPS 2026-07-05). **v1.12.0 consolida el cierre del frente Cuenta Corriente — snapshot mensual con detalle fino congelado + lecturas históricas L3**: 3 tablas append-only (`liquidacion_participacion`, `liquidacion_gasto`, `liquidacion_incidencia`) + 6 triggers de inmutabilidad (reusan `trg_9h_inmutable()`) en la PARTE C, la extensión de `registrar_snapshot_periodo` (congela también el detalle fino) y las 2 funciones de lectura histórica `cuenta_corriente_historico(date)` / `cuenta_corriente_historico_acumulados()` (aditivo, desplegado y verde TEST+OPS, promovido 2026-07-06/07). La base (Partes A y B) refleja el estado alineado DEV/TEST/OPS de v1.7.3; el Carril B (sección 24 y PARTE C) parte de la estructura certificada por la huella estructural histórica (K1, `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17`), correspondiente a la promoción v1.8.0: **v1.12.0 la extiende con deltas estructurales intencionales** (3 tablas de detalle fino, 6 triggers, 2 funciones L3 y el snapshot extendido), por lo que un bootstrap v1.12.0 ya no reproduce `TOTAL_CARRIL` sino que lo extiende canónicamente (ver changelog v1.11.0 → v1.12.0); el Carril C (sección 25 y PARTE D) parte de la estructura certificada por la huella del Bloque H (`TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`), que es la referencia **histórica** de la promoción del Carril C (v1.9.0, 3 objetos): v1.9.0 difería de esa huella solo por dos comentarios SQL (cosmético), y **v1.11.0 la extiende con deltas estructurales intencionales** (`portal_usuarios.id_socio`, `portal_idempotencia_cc`, `portal_registrar_retiro(jsonb)` y el D5 extendido), por lo que un bootstrap v1.11.0 ya no reproduce `TOTAL_PORTAL (3 objetos)` sino que lo extiende canónicamente (ver changelogs v1.8.1 → v1.9.0 y v1.10.1 → v1.11.0). El canónico es autocontenido y apto para bootstrappear un entorno nuevo de cero. **DEV fue reconstruido desde cero desde v1.8.0** (jun-2026, proyecto nuevo `wsrdzjmvnzxidjlovlja`, cerrado como OPS); el hallazgo que motivó v1.8.1 surgió en esa reconstrucción (ver changelog).
 **Proyecto:** Sistema de gestión y automatización — Complejo Vita Delta
 **Autores:** Franco (titular) + Claude (arquitecto)
 **Depende de:** ARQUITECTURA_ETAPA_6A_DECISION_MIGRACION.md v1.1
@@ -13,6 +13,27 @@
 > **NOTA DE SANITIZACIÓN:** Este documento fue revisado para subir a GitHub. No contiene Project ID, Project URL, passwords, connection strings, anon keys, service role keys, JWTs ni datos reales de huéspedes. Los teléfonos en tests funcionales son sintéticos. Las credenciales reales del proyecto Supabase deben vivir fuera del repositorio.
 > **NOTA — Carril B / contabilidad operativa interna (9C→9H), consolidado en el canónico v1.8.0:** El Carril B (sub-etapas 9C a 9H + helper 9B) fue **promovido a OPS** en una operación coordinada (junio 2026) y ahora **forma parte de este canónico**: nuevas columnas en `cabanas` (`valor_relativo`, `id_socio_beneficiario`), tablas `zonas`/`cabana_zona`/`activaciones_operativas`/`gastos_internos` y las cinco tablas de la cuenta corriente (`liquidaciones_periodo`/`liquidacion_cascada`/`liquidacion_socio`/`movimientos_socio`/`revaluaciones`), el marcador `configuracion_general('ambiente')`, los triggers de inmutabilidad y las funciones de matriz, cascada y cuenta corriente, más el helper `abortar_si_falla(jsonb)`. El **diseño conceptual** está en la **sección 24** y el **DDL ejecutable autocontenido** en la **PARTE C**. La paridad estructural TEST↔OPS quedó verificada (huella `TOTAL_CARRIL` idéntica, ver changelog v1.7.3 → v1.8.0). Cierres formales de referencia: `9B_CIERRE.md`, `9C_CIERRE.md` … `9H_CIERRE.md`.
 > **NOTA — Carril C / Portal Operativo Interno, consolidado en el canónico v1.9.0:** El Carril C (Portal Operativo Interno: gateway `portal-api` + identidad→rol del personal) fue **promovido a OPS** en una operación coordinada bloque por bloque (junio 2026, bloques A→H) y ahora **forma parte de este canónico** en su capa de base de datos: la tabla `portal_usuarios` (mapeo identidad `auth.users`→rol), la tabla `portal_idempotencia` (anti-replay de nonce + idempotencia de negocio) y la función `portal_cargar_gasto_interno(jsonb)` (carga atómica de gasto). El **diseño conceptual** está en la **sección 25** y el **DDL ejecutable autocontenido** en la **PARTE D**. La paridad estructural TEST↔OPS quedó verificada por huella estructural (Bloque H, `TOTAL_PORTAL = dee953e867aed06a9c65836bac14e8f7`, 3 objetos); esa huella es **histórica de v1.9.0** (la PARTE D de v1.9.0 difería solo por dos comentarios SQL, cosmético). **v1.11.0 extiende esa base con deltas estructurales** —`portal_usuarios.id_socio`, `portal_idempotencia_cc`, el wrapper `portal_registrar_retiro(jsonb)` y el D5 extendido (ver changelog v1.10.1 → v1.11.0 y sección 25)—, por lo que un bootstrap v1.11.0 ya no reproduce `TOTAL_PORTAL (3 objetos)`. Esta capa es **solo estructura**: el seed de `portal_usuarios`, los usuarios de Auth y los secretos del gateway viven **fuera** del canónico. Cierre de referencia de la promoción: `PROMO_C_BLOQUE_H_CIERRE.md`.
+
+---
+
+## RESUMEN DE CAMBIOS v1.11.0 → v1.12.0
+
+Bump menor **aditivo** que consolida el **cierre del frente Cuenta Corriente — snapshot mensual con detalle fino congelado (Bloque 1) + lecturas históricas L3 (Bloque 2)** dentro del canónico, tras la **promoción coordinada TEST→OPS de julio 2026** (2026-07-06 el detalle fino, 2026-07-07 las lecturas L3). Todo el frente estaba desplegado y verde en TEST y OPS; este bump lo canoniza. Ninguna tabla/función existente cambia salvo la extensión intencional de `registrar_snapshot_periodo`.
+
+- **3 tablas append-only** en la PARTE C (**BLOQUE C5-bis**), foto fiel del detalle fino de la liquidación: `liquidacion_participacion` (participación por cabaña; ground truth de la matriz por socio), `liquidacion_gasto` (foto de `gastos_internos`; `id_gasto` copiado sin FK, D-CC-30) y `liquidacion_incidencia` (regla de incidencia congelada; FK compuesta a `liquidacion_gasto`). PKs compuestas: **0 secuencias nuevas**.
+- **6 triggers de inmutabilidad** (2 por tabla) que reusan `trg_9h_inmutable()`, integrados **extendiendo el `ARRAY` del loop de C6** (5→8 tablas; 10→16 triggers).
+- **`registrar_snapshot_periodo` extendida** (misma firma `(date,numeric,text,bigint,text)`): además de cascada/socios, congela también el detalle fino (participación/gasto/incidencia) con guards de completitud. Reemplazo único vía `CREATE OR REPLACE`; la maquinaria de despliegue —`DROP`, gate de ambiente, `BEGIN/COMMIT`— **no entra al canónico**. Se mantiene el **fold ASCII** de 3 mensajes heredados (`periodo` sin acento): se canonicaliza lo desplegado/verificado, no se re-acentúa el cuerpo.
+- **2 funciones de lectura histórica L3** en la PARTE C, `sql`/`STABLE`/`SECURITY INVOKER`/`SET search_path = pg_catalog, public`, `REVOKE EXECUTE` en C12: `cuenta_corriente_historico(date)` (detalle de un mes; resuelve la vigente vía `liquidacion_vigente`; tolera fotos pre-extensión devolviendo secciones `[]`) y `cuenta_corriente_historico_acumulados()` (agregados globales sobre todas las fotos vigentes + mayor). Ubicadas **tras `reporte_retribucion_operativo_periodo`** (dependencia: L3 la referencia) y antes de `registrar_snapshot_periodo`.
+- **C12 (hardening):** `REVOKE ALL` de las 3 tablas nuevas y `REVOKE EXECUTE` de las 2 funciones L3. Se **corrigen los conteos stale** de C12 (venían de v1.8.0/v1.10.0): `9 tablas → 12`, `21/23 funciones → 27` (corrección de consistencia del canónico).
+- **C14 (verificación):** el barrido de hardening de **tablas** pasa a cubrir las **12 tablas** del Carril B (agrega las 3 de detalle fino). La lista `proname IN (...)` se mantiene **histórica/no exhaustiva** por decisión; el hardening canónico de las funciones CC agregadas en v1.10.0–v1.12.0 es su `REVOKE EXECUTE` en C12 (nota de C14 actualizada).
+
+**Conteos:** tablas **32 → 35** (Carril B 9 → 12); funciones **36 → 38** (PARTE C 25 → 27); triggers de inmutabilidad 9H **10 → 16**.
+
+**Huella estructural:** el set extendido del Carril B **ya no reproduce** la huella histórica `TOTAL_CARRIL = f5187092083451ceb5b182334bdb4a17` (suma 3 tablas + 6 triggers + 2 funciones L3 + el cuerpo extendido del snapshot). **No se declara una huella nueva**: no fue calculada por un cierre/verificación real; se recalcularía en una verificación estructural dedicada si se requiere.
+
+**Numeración (acuñación diferida a Bloque B / satélites):** decisiones `D-CC-23…30` (Bloque 1) y `D-CC-31…39` (L3) — contiguas, sin colisión. Lecciones reconciliadas: Bloque 1 → `L-CC-13/14/15`; L3 → `L-CC-16/17/18/19` (renumerando los `L-CC-14…17` del cierre L3, que asumía el 13 tomado). En este bump **no** se acuñan en `DECISIONES_NO_REABRIR.md`/`Lecciones_Aprendidas.md`.
+
+**Validación:** DDL y funciones verificados con `pglast` + harness PostgreSQL 16 y desplegados verdes en TEST/OPS (ver `EXT_SNAPSHOT_BLOQUE1_CIERRE.md`, `L3_HISTORICO_BLOQUE2_CIERRE.md`). El **bootstrap kit** sigue pineado a `bootstrap_entorno_nuevo_v1.9.0/` (**P-CC-4**; se regenera en Bloque C).
 
 ---
 
@@ -869,11 +890,11 @@ El schema implementa el modelo de datos cerrado en Etapa 5A sobre PostgreSQL, co
 - Triggers automáticos manejan `updated_at` y logs de cambios de estado.
 - Pre-reservas se crean exclusivamente vía `crear_prereserva()` con advisory lock; nunca por INSERT directo.
 
-**Tablas totales (canónico vigente v1.11.0): 32** — 20 tablas base (Parte B) + 9 tablas del Carril B (sección 24 / Parte C) + **3** tablas del Carril C / portal (sección 25 / Parte D: `portal_usuarios`, `portal_idempotencia`, `portal_idempotencia_cc`). En v1.9.0 eran 31 (2 tablas de portal); v1.11.0 suma `portal_idempotencia_cc`.
+**Tablas totales (canónico vigente v1.12.0): 35** — 20 tablas base (Parte B) + 12 tablas del Carril B (sección 24 / Parte C) + **3** tablas del Carril C / portal (sección 25 / Parte D: `portal_usuarios`, `portal_idempotencia`, `portal_idempotencia_cc`). En v1.9.0 eran 31 (2 tablas de portal); v1.11.0 suma `portal_idempotencia_cc`; v1.12.0 suma las 3 tablas de detalle fino del snapshot (`liquidacion_participacion`, `liquidacion_gasto`, `liquidacion_incidencia`).
 
 **Vistas SQL:** 6 vistas operativas (incluyendo dos nuevas para los Sistemas 3 y 4 mencionados por Franco).
 
-**Funciones (canónico vigente v1.11.0): 36** — 9 funciones base críticas (8 transaccionales + 1 helper IMMUTABLE para normalización de teléfono), más **25** funciones de la PARTE C (Carril B + las lecturas de cuenta corriente `cuenta_corriente_viva`/`cuenta_corriente_detalle`, el helper `pct_operativo_vigente()` y el retiro `registrar_retiro_desde_saldo_vivo`), más **2** funciones del Carril C / PARTE D (`portal_cargar_gasto_interno(jsonb)` y `portal_registrar_retiro(jsonb)`, `SECURITY INVOKER`). En v1.9.0 eran 31.
+**Funciones (canónico vigente v1.12.0): 38** — 9 funciones base críticas (8 transaccionales + 1 helper IMMUTABLE para normalización de teléfono), más **27** funciones de la PARTE C (Carril B + las lecturas de cuenta corriente `cuenta_corriente_viva`/`cuenta_corriente_detalle`, el helper `pct_operativo_vigente()` y el retiro `registrar_retiro_desde_saldo_vivo`, más las 2 lecturas históricas L3 `cuenta_corriente_historico(date)`/`cuenta_corriente_historico_acumulados()`), más **2** funciones del Carril C / PARTE D (`portal_cargar_gasto_interno(jsonb)` y `portal_registrar_retiro(jsonb)`, `SECURITY INVOKER`). En v1.9.0 eran 31.
 
 **Principios rectores:**
 
@@ -1010,7 +1031,7 @@ Siguiendo el criterio aprobado, solo enums para estados estables. Para el resto,
 
 ## 5. CATÁLOGO DE TABLAS
 
-Este catálogo lista las **20 tablas base** de la Parte B. El Carril B agrega **9 tablas adicionales**, documentadas en la sección 24 y la Parte C. Ordenadas por dependencias.
+Este catálogo lista las **20 tablas base** de la Parte B. El Carril B agrega **12 tablas adicionales** (9 consolidadas en v1.8.0 + 3 de detalle fino del snapshot en v1.12.0: `liquidacion_participacion`, `liquidacion_gasto`, `liquidacion_incidencia`), documentadas en la sección 24 y la Parte C. Ordenadas por dependencias.
 
 ### Grupo 1 — Catálogo (sin dependencias entre sí)
 
@@ -2201,6 +2222,8 @@ Fue construido en las sub-etapas **9C→9H** (más el helper **9B** de cobranza 
 | 9B | Helper `abortar_si_falla(jsonb)` | Cobranza posterior atómica (rollback en n8n) |
 
 En total: **9 tablas** nuevas + **2 columnas** en `cabanas`, **21 funciones**, **10 triggers** de inmutabilidad y el marcador de entorno `configuracion_general('ambiente')`.
+
+> **La extensión v1.12.0 (Bloque 1 + L3)** amplía el Carril B **vigente**: al snapshot original se le suman el **detalle fino congelado** (3 tablas append-only + 6 triggers) y las **lecturas históricas L3** (2 funciones). Los conteos de esta sección (tablas, funciones, triggers y el alcance del `REVOKE`) reflejan la consolidación **histórica v1.8.0**; el **estado vigente del Carril B es 12 tablas, 27 funciones (PARTE C) y 16 triggers de inmutabilidad** (8 tablas × 2), con el hardening extendido a las 12 tablas y 27 funciones en C12/C14. Detalle en el changelog v1.11.0 → v1.12.0 y en la PARTE C (BLOQUE C5-bis + capa de lectura CC).
 
 ### Conceptos clave
 
@@ -5410,7 +5433,7 @@ Esta parte contiene el **DDL canónico final** del Carril B (sub-etapas 9C→9H 
 
 Representa el **estado final**, no los wrappers de promoción: no incluye gates de ambiente, asserts de migración, snapshots, ni scripts de reversión (esos viven en los artefactos `PROMO_BLOQUE_*` y en los cierres `9B`→`9H`). Sí incluye una verificación de seeds (C14) como auto-test del bootstrap.
 
-**Orden de dependencias:** las tablas (C1–C5) van antes que las funciones (C7–C11) porque PostgreSQL valida los cuerpos al crearlos; los seeds (C13) van al final, y recién ahí se aplica el `NOT NULL` de las columnas de `cabanas`. El bootstrap real **Parte B + Parte C** fue verificado en limpio: 9 tablas, 21 funciones, 10 triggers de inmutabilidad, seam 5/5, matriz 378/456, reparto exacto y hardening sin exposición.
+**Orden de dependencias:** las tablas (C1–C5) van antes que las funciones (C7–C11) porque PostgreSQL valida los cuerpos al crearlos; los seeds (C13) van al final, y recién ahí se aplica el `NOT NULL` de las columnas de `cabanas`. El bootstrap real **Parte B + Parte C** fue verificado en limpio **en su momento (v1.8.0/v1.9.0)**: 9 tablas, 21 funciones, 10 triggers de inmutabilidad, seam 5/5, matriz 378/456, reparto exacto y hardening sin exposición. **Nota (v1.12.0):** esa verificación es la del bootstrap **histórico**; el estado vigente de la PARTE C es **12 tablas, 27 funciones y 16 triggers de inmutabilidad** (ver BLOQUE C5-bis y el changelog v1.11.0 → v1.12.0). La **regeneración del bootstrap kit a v1.12.0** queda pendiente en **Bloque C** (P-CC-4).
 
 > **Nota sobre datos:** los únicos `INSERT` de esta parte son **seeds estructurales** (configuración del complejo: zonas, pertenencias, beneficiarios, pool de activaciones) y el marcador de entorno. **No hay** fixtures de TEST ni datos operativos reales de OPS (pagos, reservas, bloqueos, gastos, liquidaciones).
 
@@ -5714,9 +5737,87 @@ CREATE TABLE revaluaciones (
 );
 ```
 
+## BLOQUE C5-bis — Detalle fino 9H (snapshot extendido)
+
+**Descripción:** Tablas append-only del detalle fino de la foto 9H (extensión del snapshot, D-CC-23…30): `liquidacion_participacion` (participación por cabaña; ground truth de la matriz por socio), `liquidacion_gasto` (foto fiel de `gastos_internos`; `id_gasto` copiado sin FK, D-CC-30) y `liquidacion_incidencia` (regla de incidencia congelada; FK compuesta a `liquidacion_gasto`). PKs compuestas (**0 secuencias**). Van **antes** de C6 porque el loop de inmutabilidad las incluye; su `REVOKE` está en C12.
+
+```sql
+-- ── C5-bis. Detalle fino 9H (snapshot extendido) — 3 tablas append-only ──
+-- T1: participacion por cabana (ground truth; matriz por socio deriva de aca)
+CREATE TABLE liquidacion_participacion (
+  id_liquidacion        BIGINT   NOT NULL REFERENCES liquidaciones_periodo(id_liquidacion) ON DELETE RESTRICT,
+  id_cabana             BIGINT   NOT NULL REFERENCES cabanas(id_cabana)                     ON DELETE RESTRICT,
+  valor_relativo        NUMERIC  NOT NULL,
+  id_socio_beneficiario BIGINT   NOT NULL REFERENCES socios(id_socio)                       ON DELETE RESTRICT,
+  participa             BOOLEAN  NOT NULL,
+  PRIMARY KEY (id_liquidacion, id_cabana),
+  CONSTRAINT chk_lpart_valor_pos CHECK (valor_relativo > 0)
+);
+
+-- T2: gasto por gasto (foto fiel de gastos_internos; id_gasto COPIADO sin FK, D-CC-30) + sin_incidencia/motivo
+CREATE TABLE liquidacion_gasto (
+  id_liquidacion        BIGINT        NOT NULL REFERENCES liquidaciones_periodo(id_liquidacion) ON DELETE RESTRICT,
+  id_gasto              BIGINT        NOT NULL,
+  fecha                 DATE          NOT NULL,
+  clase                 TEXT          NOT NULL,
+  clase_sugerida        TEXT,
+  etiqueta              TEXT          NOT NULL,
+  monto                 NUMERIC(14,2) NOT NULL,
+  moneda                TEXT          NOT NULL,
+  id_zona               BIGINT        REFERENCES zonas(id_zona)     ON DELETE RESTRICT,
+  id_cabana             BIGINT        REFERENCES cabanas(id_cabana) ON DELETE RESTRICT,
+  pagador_tipo          TEXT          NOT NULL,
+  id_socio_pagador      BIGINT        REFERENCES socios(id_socio)   ON DELETE RESTRICT,
+  medio_pago            TEXT,
+  comentario            TEXT,
+  comprobante_url       TEXT,
+  creado_por            TEXT          NOT NULL,
+  created_at            TIMESTAMPTZ   NOT NULL,
+  sin_incidencia        BOOLEAN       NOT NULL,
+  motivo_sin_incidencia TEXT,
+  PRIMARY KEY (id_liquidacion, id_gasto),
+  CONSTRAINT chk_lgasto_clase         CHECK (clase IN ('A','C','D','E')),
+  CONSTRAINT chk_lgasto_monto_pos     CHECK (monto > 0),
+  CONSTRAINT chk_lgasto_moneda        CHECK (moneda = 'ARS'),
+  CONSTRAINT chk_lgasto_pagador_tipo  CHECK (pagador_tipo IN ('socio','caja')),
+  CONSTRAINT chk_lgasto_pagador_cons  CHECK (
+       (pagador_tipo='socio' AND id_socio_pagador IS NOT NULL)
+    OR (pagador_tipo='caja'  AND id_socio_pagador IS NULL)),
+  CONSTRAINT chk_lgasto_alcance_clase CHECK (
+       (clase='D' AND id_zona IS NOT NULL AND id_cabana IS NULL)
+    OR (clase='E' AND id_cabana IS NOT NULL AND id_zona IS NULL)
+    OR (clase IN ('A','C') AND id_zona IS NULL AND id_cabana IS NULL)),
+  CONSTRAINT chk_lgasto_sin_incidencia_coherente CHECK (
+       sin_incidencia = (motivo_sin_incidencia IS NOT NULL)),
+  CONSTRAINT chk_lgasto_clase_sug     CHECK (clase_sugerida IS NULL OR clase_sugerida IN ('A','C','D','E')),
+  CONSTRAINT chk_lgasto_motivo_dom    CHECK (motivo_sin_incidencia IS NULL
+                                             OR motivo_sin_incidencia IN ('pool_vacio','zona_sin_activas'))
+);
+
+-- T3: incidencia por gasto (regla congelada); FK compuesta a T2 (ambas tablas congeladas)
+CREATE TABLE liquidacion_incidencia (
+  id_liquidacion  BIGINT        NOT NULL,
+  id_gasto        BIGINT        NOT NULL,
+  seq             SMALLINT      NOT NULL,
+  destino         TEXT          NOT NULL,
+  id_socio        BIGINT        REFERENCES socios(id_socio) ON DELETE RESTRICT,
+  monto_incidido  NUMERIC(14,2) NOT NULL,
+  regla           TEXT          NOT NULL,
+  PRIMARY KEY (id_liquidacion, id_gasto, seq),
+  CONSTRAINT fk_linc_gasto FOREIGN KEY (id_liquidacion, id_gasto)
+      REFERENCES liquidacion_gasto (id_liquidacion, id_gasto) ON DELETE RESTRICT,
+  CONSTRAINT chk_linc_seq_pos        CHECK (seq > 0),
+  CONSTRAINT chk_linc_destino        CHECK (destino IN ('pool_pre_operativo','socio')),
+  CONSTRAINT chk_linc_monto_centavos CHECK (monto_incidido = ROUND(monto_incidido, 2)),
+  CONSTRAINT chk_linc_destino_socio  CHECK (
+       (destino='socio' AND id_socio IS NOT NULL)
+    OR (destino='pool_pre_operativo' AND id_socio IS NULL))
+);
+```
+
 ## BLOQUE C6 — Inmutabilidad 9H — trigger y triggers
 
-**Descripción:** Inmutabilidad de la capa 9H (D-9H-15): función de trigger que rechaza UPDATE/DELETE/TRUNCATE, y los 10 triggers que la aplican (5 tablas × 2).
+**Descripción:** Inmutabilidad de la capa 9H (D-9H-15): función de trigger que rechaza UPDATE/DELETE/TRUNCATE, y los 16 triggers que la aplican (8 tablas × 2).
 
 ```sql
 -- ── C6. Inmutabilidad 9H — función de trigger + triggers anti UPDATE/DELETE/TRUNCATE ──
@@ -5735,7 +5836,8 @@ DO $mk_triggers$
 DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY['liquidaciones_periodo','liquidacion_cascada','liquidacion_socio',
-                           'movimientos_socio','revaluaciones'] LOOP
+                           'movimientos_socio','revaluaciones',
+                           'liquidacion_participacion','liquidacion_gasto','liquidacion_incidencia'] LOOP
     EXECUTE format(
       'CREATE TRIGGER trg_%s_no_upd_del BEFORE UPDATE OR DELETE ON %I '
       'FOR EACH ROW EXECUTE FUNCTION trg_9h_inmutable()', t, t);
@@ -6587,14 +6689,236 @@ AS $function$
 $function$
 ;
 
+-- cuenta_corriente_historico -- L3: foto congelada de UN mes (detalle fino); resuelve la vigente via liquidacion_vigente. Casos: foto con detalle / foto pre-extension (secciones []) / sin foto.
+CREATE OR REPLACE FUNCTION public.cuenta_corriente_historico(p_mes date)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $function$
+  WITH resolved AS (
+    SELECT date_trunc('month', p_mes)::date AS mes,
+           liquidacion_vigente(date_trunc('month', p_mes)::date) AS id_liq
+  ),
+  info AS (
+    SELECT r.mes, r.id_liq,
+           (r.id_liq IS NULL) AS sin_foto,
+           COALESCE((SELECT count(*) FROM liquidacion_participacion pa
+                     WHERE pa.id_liquidacion = r.id_liq), 0) AS n_part
+    FROM resolved r
+  )
+  SELECT CASE
+    WHEN i.sin_foto THEN
+      jsonb_build_object(
+        'sin_foto', true,
+        'detalle_disponible', false,
+        'detalle_motivo', 'sin_foto_vigente',
+        'periodo', i.mes,
+        'cabecera', NULL,
+        'cascada', '[]'::jsonb,
+        'socios', '[]'::jsonb,
+        'participacion', '[]'::jsonb,
+        'gastos', '[]'::jsonb,
+        'incidencias', '[]'::jsonb,
+        'movimientos', '[]'::jsonb,
+        'matriz_por_socio', '[]'::jsonb,
+        'gastos_sin_incidencia', '[]'::jsonb,
+        'retribucion_operativo', NULL
+      )
+    ELSE
+      jsonb_build_object(
+        'sin_foto', false,
+        'detalle_disponible', (i.n_part > 0),
+        'detalle_motivo', CASE WHEN i.n_part > 0 THEN NULL ELSE 'foto_pre_extension' END,
+        'periodo', i.mes,
+        'cabecera', (
+          SELECT jsonb_build_object(
+                   'id_liquidacion', lp.id_liquidacion,
+                   'periodo', lp.periodo,
+                   'pct_operativo', lp.pct_operativo,
+                   'creado_por', lp.creado_por,
+                   'created_at', lp.created_at,
+                   'comentario', lp.comentario,
+                   'linaje', jsonb_build_object(
+                     'es_raiz', (lp.id_liquidacion_supersede IS NULL),
+                     'id_liquidacion_supersede', lp.id_liquidacion_supersede))
+          FROM liquidaciones_periodo lp WHERE lp.id_liquidacion = i.id_liq),
+        -- cascada: presente para toda foto (tabla original 9G/9H)
+        'cascada', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object('paso', c.paso, 'concepto', c.concepto, 'monto', c.monto)
+                 ORDER BY c.paso)
+          FROM liquidacion_cascada c WHERE c.id_liquidacion = i.id_liq), '[]'::jsonb),
+        -- socios: presente para toda foto (tabla original 9H)
+        'socios', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_socio', ls.id_socio, 'socio', s.nombre,
+                   'saldo_bruto', ls.saldo_bruto, 'gastos_d', ls.gastos_d, 'gastos_e', ls.gastos_e,
+                   'saldo_final', ls.saldo_final, 'desembolsado_periodo', ls.desembolsado_periodo)
+                 ORDER BY ls.id_socio)
+          FROM liquidacion_socio ls JOIN socios s ON s.id_socio = ls.id_socio
+          WHERE ls.id_liquidacion = i.id_liq), '[]'::jsonb),
+        -- participacion (detalle fino): [] si pre-extension
+        'participacion', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_cabana', pa.id_cabana, 'cabana', cb.nombre,
+                   'valor_relativo', pa.valor_relativo, 'id_socio_beneficiario', pa.id_socio_beneficiario,
+                   'beneficiario', sb.nombre, 'participa', pa.participa)
+                 ORDER BY pa.id_cabana)
+          FROM liquidacion_participacion pa
+          JOIN cabanas cb ON cb.id_cabana = pa.id_cabana
+          JOIN socios sb ON sb.id_socio = pa.id_socio_beneficiario
+          WHERE pa.id_liquidacion = i.id_liq), '[]'::jsonb),
+        -- gastos (detalle fino): [] si pre-extension
+        'gastos', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_gasto', g.id_gasto, 'fecha', g.fecha, 'clase', g.clase,
+                   'clase_sugerida', g.clase_sugerida, 'etiqueta', g.etiqueta, 'monto', g.monto,
+                   'moneda', g.moneda, 'id_zona', g.id_zona, 'id_cabana', g.id_cabana,
+                   'pagador_tipo', g.pagador_tipo, 'id_socio_pagador', g.id_socio_pagador,
+                   'medio_pago', g.medio_pago, 'comentario', g.comentario, 'comprobante_url', g.comprobante_url,
+                   'creado_por', g.creado_por, 'created_at', g.created_at,
+                   'sin_incidencia', g.sin_incidencia, 'motivo_sin_incidencia', g.motivo_sin_incidencia)
+                 ORDER BY g.id_gasto)
+          FROM liquidacion_gasto g WHERE g.id_liquidacion = i.id_liq), '[]'::jsonb),
+        -- incidencias (detalle fino): respeta seq congelado
+        'incidencias', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_gasto', ic.id_gasto, 'seq', ic.seq, 'destino', ic.destino,
+                   'id_socio', ic.id_socio, 'socio', si.nombre,
+                   'monto_incidido', ic.monto_incidido, 'regla', ic.regla)
+                 ORDER BY ic.id_gasto, ic.seq)
+          FROM liquidacion_incidencia ic LEFT JOIN socios si ON si.id_socio = ic.id_socio
+          WHERE ic.id_liquidacion = i.id_liq), '[]'::jsonb),
+        -- movimientos del mes: LECTURA VIVA del mayor, ventaneada por fecha
+        -- [mes, mes+1 mes); NO forma parte de la foto congelada (mayor aparte).
+        'movimientos', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_movimiento', m.id_movimiento, 'id_socio', m.id_socio, 'socio', sm.nombre,
+                   'fecha', m.fecha, 'tipo', m.tipo, 'monto', m.monto,
+                   'medio_pago', m.medio_pago, 'comentario', m.comentario, 'periodo', m.periodo)
+                 ORDER BY m.fecha, m.id_movimiento)
+          FROM movimientos_socio m JOIN socios sm ON sm.id_socio = m.id_socio
+          WHERE m.fecha >= i.mes AND m.fecha < (i.mes + INTERVAL '1 month')), '[]'::jsonb),
+        -- matriz_por_socio: DERIVADA de participacion (no reimplementa vivas)
+        'matriz_por_socio', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_socio', x.id_socio, 'socio', s.nombre,
+                   'valor_socio', x.valor_socio, 'valor_pool', x.pool,
+                   'participacion', CASE WHEN x.pool > 0 THEN round(x.valor_socio / x.pool, 4) ELSE 0 END)
+                 ORDER BY x.valor_socio DESC, x.id_socio)
+          FROM (
+            SELECT pa.id_socio_beneficiario AS id_socio,
+                   SUM(pa.valor_relativo) AS valor_socio,
+                   SUM(SUM(pa.valor_relativo)) OVER () AS pool
+            FROM liquidacion_participacion pa
+            WHERE pa.id_liquidacion = i.id_liq AND pa.participa = true
+            GROUP BY pa.id_socio_beneficiario
+          ) x
+          JOIN socios s ON s.id_socio = x.id_socio), '[]'::jsonb),
+        -- gastos_sin_incidencia: DERIVADO (filtro sobre liquidacion_gasto)
+        'gastos_sin_incidencia', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_gasto', g.id_gasto, 'clase', g.clase, 'etiqueta', g.etiqueta,
+                   'monto', g.monto, 'motivo', g.motivo_sin_incidencia)
+                 ORDER BY g.id_gasto)
+          FROM liquidacion_gasto g WHERE g.id_liquidacion = i.id_liq AND g.sin_incidencia = true), '[]'::jsonb),
+        -- retribucion_operativo: conciliacion del paso 4 (presente en A y B)
+        'retribucion_operativo', (
+          SELECT jsonb_build_object(
+                   'periodo', rr.periodo, 'calculado', rr.calculado, 'asignado', rr.asignado,
+                   'diferencia', rr.diferencia, 'estado', rr.estado)
+          FROM reporte_retribucion_operativo_periodo(i.mes) rr)
+      )
+  END
+  FROM info i;
+$function$;
+
+-- cuenta_corriente_historico_acumulados -- L3: agregados globales sobre TODAS las fotos vigentes + mayor (reusa saldo_corriente_socio).
+CREATE OR REPLACE FUNCTION public.cuenta_corriente_historico_acumulados()
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $function$
+  WITH piso AS (SELECT DATE '2026-07-01' AS d),   -- D-NEG-02 (piso contable)
+  vig AS (
+    SELECT lp.id_liquidacion, lp.periodo
+    FROM liquidaciones_periodo lp
+    WHERE NOT EXISTS (SELECT 1 FROM liquidaciones_periodo s
+                      WHERE s.id_liquidacion_supersede = lp.id_liquidacion)
+  ),
+  casc AS (SELECT v.id_liquidacion, c.paso, c.monto
+           FROM vig v JOIN liquidacion_cascada c ON c.id_liquidacion = v.id_liquidacion),
+  soc AS (SELECT v.id_liquidacion, ls.saldo_bruto, ls.gastos_d, ls.gastos_e
+          FROM vig v JOIN liquidacion_socio ls ON ls.id_liquidacion = v.id_liquidacion),
+  evo AS (
+    SELECT v.periodo, v.id_liquidacion,
+      COALESCE((SELECT SUM(c.monto) FROM casc c WHERE c.id_liquidacion = v.id_liquidacion AND c.paso IN (1,6)),0) AS ingresos,
+      COALESCE((SELECT SUM(c.monto) FROM casc c WHERE c.id_liquidacion = v.id_liquidacion AND c.paso IN (2,7)),0)
+        + COALESCE((SELECT SUM(x.gastos_d + x.gastos_e) FROM soc x WHERE x.id_liquidacion = v.id_liquidacion),0) AS gastos,
+      COALESCE((SELECT SUM(c.monto) FROM casc c WHERE c.id_liquidacion = v.id_liquidacion AND c.paso = 8),0) AS utilidad,
+      COALESCE((SELECT SUM(x.saldo_bruto) FROM soc x WHERE x.id_liquidacion = v.id_liquidacion),0) AS repartos,
+      COALESCE((SELECT SUM(m.monto) FROM movimientos_socio m
+                WHERE m.tipo = 'retiro' AND m.fecha >= v.periodo AND m.fecha < (v.periodo + INTERVAL '1 month')),0) AS retiros_mes
+    FROM vig v
+  )
+  SELECT jsonb_build_object(
+    'sin_datos', (SELECT count(*) FROM vig) = 0,
+    'piso', (SELECT d FROM piso),
+    'totales', jsonb_build_object(
+      'ingresos_acumulados', COALESCE((SELECT SUM(ingresos) FROM evo),0),
+      'gastos_acumulados',
+        COALESCE((SELECT SUM(monto) FROM casc WHERE paso IN (2,7)),0)
+        + COALESCE((SELECT SUM(gastos_d + gastos_e) FROM soc),0),
+      'gastos_desglose', jsonb_build_object(
+        'a_paso2',    COALESCE((SELECT SUM(monto) FROM casc WHERE paso = 2),0),
+        'c_paso7',    COALESCE((SELECT SUM(monto) FROM casc WHERE paso = 7),0),
+        'd_e_socios', COALESCE((SELECT SUM(gastos_d + gastos_e) FROM soc),0)
+      ),
+      'utilidad_acumulada',  COALESCE((SELECT SUM(monto) FROM casc WHERE paso = 8),0),
+      'repartos_acumulados', COALESCE((SELECT SUM(saldo_bruto) FROM soc),0),
+      'retiros_acumulados',  COALESCE((SELECT SUM(monto) FROM movimientos_socio WHERE tipo = 'retiro'),0)
+    ),
+    'evolucion', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+               'periodo', e.periodo, 'id_liquidacion', e.id_liquidacion,
+               'ingresos', e.ingresos, 'gastos', e.gastos, 'utilidad', e.utilidad,
+               'repartos', e.repartos, 'retiros_mes', e.retiros_mes)
+             ORDER BY e.periodo)
+      FROM evo e), '[]'::jsonb),
+    'saldos_por_socio', COALESCE((
+      SELECT jsonb_agg(x.obj ORDER BY x.id_socio)
+      FROM (
+        SELECT s.id_socio,
+          jsonb_build_object(
+            'id_socio', s.id_socio, 'socio', s.nombre,
+            'resultado_liquidacion', MAX(sc.monto) FILTER (WHERE sc.orden = 1),
+            'reembolso_desembolso',  MAX(sc.monto) FILTER (WHERE sc.orden = 2),
+            'movimientos',           MAX(sc.monto) FILTER (WHERE sc.orden = 3),
+            'saldo_vivo',            MAX(sc.monto) FILTER (WHERE sc.orden = 4)) AS obj
+        FROM socios s
+        CROSS JOIN LATERAL saldo_corriente_socio(s.id_socio) sc
+        GROUP BY s.id_socio, s.nombre
+      ) x), '[]'::jsonb),
+    'meta', jsonb_build_object(
+      'fotos_vigentes', (SELECT count(*) FROM vig),
+      'fotos_pre_piso', (SELECT count(*) FROM vig WHERE periodo < (SELECT d FROM piso)),
+      'movimientos_pre_piso', (SELECT count(*) FROM movimientos_socio WHERE fecha < (SELECT d FROM piso))
+    )
+  );
+$function$;
+
 CREATE OR REPLACE FUNCTION public.registrar_snapshot_periodo(p_periodo date, p_pct numeric, p_creado_por text, p_supersede_id bigint DEFAULT NULL::bigint, p_comentario text DEFAULT NULL::text)
  RETURNS bigint
  LANGUAGE plpgsql
 AS $function$
 DECLARE v_periodo DATE := date_trunc('month', p_periodo)::date;
         v_cola BIGINT; v_id BIGINT; v_n_cascada INTEGER; v_n_socios INTEGER; v_socios_total INTEGER;
+        v_n_part INTEGER; v_cabanas_total INTEGER; v_n_gasto INTEGER; v_gastos_total INTEGER;
 BEGIN
-  PERFORM pg_advisory_xact_lock(919001, hashtext(v_periodo::text));  -- lock por período
+  PERFORM pg_advisory_xact_lock(919001, hashtext(v_periodo::text));  -- lock por periodo
   IF p_pct IS NULL OR p_pct < 0 OR p_pct > 1 THEN
     RAISE EXCEPTION '9H snapshot: pct_operativo invalido (% fuera de [0,1])', p_pct;
   END IF;
@@ -6604,11 +6928,11 @@ BEGIN
   v_cola := liquidacion_vigente(v_periodo);
   IF v_cola IS NULL THEN
     IF p_supersede_id IS NOT NULL THEN
-      RAISE EXCEPTION '9H snapshot: el período % no tiene foto vigente; p_supersede_id debe ser NULL', v_periodo;
+      RAISE EXCEPTION '9H snapshot: el periodo % no tiene foto vigente; p_supersede_id debe ser NULL', v_periodo;
     END IF;
   ELSE
     IF p_supersede_id IS NULL OR p_supersede_id <> v_cola THEN
-      RAISE EXCEPTION '9H snapshot: el período % ya tiene foto vigente (id=%); para re-snapshot pasar p_supersede_id=% (la cola actual)', v_periodo, v_cola, v_cola;
+      RAISE EXCEPTION '9H snapshot: el periodo % ya tiene foto vigente (id=%); para re-snapshot pasar p_supersede_id=% (la cola actual)', v_periodo, v_cola, v_cola;
     END IF;
     IF p_comentario IS NULL OR btrim(p_comentario) = '' THEN
       RAISE EXCEPTION '9H snapshot: re-snapshot exige comentario (D-9H-24)';
@@ -6637,6 +6961,47 @@ BEGIN
     RAISE EXCEPTION '9H snapshot: liquidacion_socio incompleta para % (% filas, esperadas 0 o %)',
       v_periodo, v_n_socios, v_socios_total;
   END IF;
+
+  -- ===================== EXTENSION P-CC-2: detalle fino congelado (D-CC-23..30) =====================
+  -- T1: participacion por cabana <- detalle_participacion (ground truth; matriz por socio deriva de aca)
+  INSERT INTO liquidacion_participacion (id_liquidacion, id_cabana, valor_relativo, id_socio_beneficiario, participa)
+  SELECT v_id, dp.id_cabana, dp.valor_relativo, dp.id_socio, dp.participa
+  FROM detalle_participacion(v_periodo) dp;
+  GET DIAGNOSTICS v_n_part = ROW_COUNT;
+  SELECT COUNT(*) INTO v_cabanas_total FROM cabanas;
+  IF v_n_part <> v_cabanas_total THEN
+    RAISE EXCEPTION '9H snapshot: liquidacion_participacion incompleta para % (% filas, esperadas %)',
+      v_periodo, v_n_part, v_cabanas_total;
+  END IF;
+
+  -- T2: gasto por gasto <- gastos_internos + LEFT JOIN gastos_sin_incidencia (sin_incidencia/motivo CONGELADOS)
+  INSERT INTO liquidacion_gasto (id_liquidacion, id_gasto, fecha, clase, clase_sugerida, etiqueta, monto, moneda,
+                                 id_zona, id_cabana, pagador_tipo, id_socio_pagador, medio_pago, comentario,
+                                 comprobante_url, creado_por, created_at, sin_incidencia, motivo_sin_incidencia)
+  SELECT v_id, g.id_gasto, g.fecha, g.clase, g.clase_sugerida, g.etiqueta, g.monto, g.moneda,
+         g.id_zona, g.id_cabana, g.pagador_tipo, g.id_socio_pagador, g.medio_pago, g.comentario,
+         g.comprobante_url, g.creado_por, g.created_at,
+         (sic.id_gasto IS NOT NULL) AS sin_incidencia, sic.motivo
+  FROM gastos_internos g
+  LEFT JOIN gastos_sin_incidencia_periodo(v_periodo) sic ON sic.id_gasto = g.id_gasto
+  WHERE g.periodo = v_periodo;
+  GET DIAGNOSTICS v_n_gasto = ROW_COUNT;
+  SELECT COUNT(*) INTO v_gastos_total FROM gastos_internos WHERE periodo = v_periodo;
+  IF v_n_gasto <> v_gastos_total THEN
+    RAISE EXCEPTION '9H snapshot: liquidacion_gasto incompleta para % (% filas, esperadas %)',
+      v_periodo, v_n_gasto, v_gastos_total;
+  END IF;
+
+  -- T3: incidencia por gasto <- incidencia_gasto (regla CONGELADA); seq por gasto; sin-incidencia => 0 filas
+  INSERT INTO liquidacion_incidencia (id_liquidacion, id_gasto, seq, destino, id_socio, monto_incidido, regla)
+  SELECT v_id, g.id_gasto,
+         (ROW_NUMBER() OVER (PARTITION BY g.id_gasto ORDER BY i.id_socio NULLS FIRST))::smallint AS seq,
+         i.destino, i.id_socio, i.monto, i.regla
+  FROM gastos_internos g
+  CROSS JOIN LATERAL incidencia_gasto(g.id_gasto) i
+  WHERE g.periodo = v_periodo;
+  -- (T3 sin guard de cantidad fija: varia por clase; la coherencia sin_incidencia<->vacuidad se valida aparte)
+  -- ==================================================================================================
 
   RETURN v_id;
 END $function$
@@ -6856,15 +7221,17 @@ $function$
 
 ## BLOQUE C12 — Hardening — REVOKE
 
-**Descripción:** Hardening: `REVOKE` total sobre las **9 tablas, 6 secuencias y 21 funciones** del Carril B, quitando todo acceso a `PUBLIC`/`anon`/`authenticated`/`service_role`. Solo el owner ejecuta.
+**Descripción:** Hardening: `REVOKE` total sobre las **12 tablas, 6 secuencias y 27 funciones** del Carril B, quitando todo acceso a `PUBLIC`/`anon`/`authenticated`/`service_role`. Solo el owner ejecuta.
 
 ```sql
 -- ── C12. Hardening — REVOKE total a PUBLIC/anon/authenticated/service_role ──
--- Tablas (9):
+-- Tablas (12):
 REVOKE ALL ON TABLE public.zonas, public.cabana_zona, public.activaciones_operativas,
                     public.gastos_internos, public.liquidaciones_periodo,
                     public.liquidacion_cascada, public.liquidacion_socio,
-                    public.movimientos_socio, public.revaluaciones
+                    public.movimientos_socio, public.revaluaciones,
+                    public.liquidacion_participacion, public.liquidacion_gasto,
+                    public.liquidacion_incidencia
   FROM PUBLIC, anon, authenticated, service_role;
 -- Secuencias (6):
 REVOKE ALL ON SEQUENCE public.zonas_id_zona_seq,
@@ -6874,10 +7241,12 @@ REVOKE ALL ON SEQUENCE public.zonas_id_zona_seq,
                        public.movimientos_socio_id_movimiento_seq,
                        public.revaluaciones_id_revaluacion_seq
   FROM PUBLIC, anon, authenticated, service_role;
--- Funciones (23, incluye trg_9h_inmutable y abortar_si_falla):
+-- Funciones (27, incluye trg_9h_inmutable y abortar_si_falla):
 REVOKE EXECUTE ON FUNCTION public.abortar_si_falla(resultado jsonb) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.cascada_periodo(p_periodo date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_detalle(p_mes date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_historico(p_mes date) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_historico_acumulados() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_viva(p_hasta_fecha date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.pct_operativo_vigente() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.detalle_participacion(p_periodo date) FROM PUBLIC, anon, authenticated, service_role;
@@ -6969,7 +7338,7 @@ WHERE NOT EXISTS (SELECT 1 FROM activaciones_operativas a WHERE a.id_cabana = c.
 
 ## BLOQUE C14 — Verificación de seeds y consistencia
 
-**Descripción:** Verificación de seeds y consistencia (no modifica): conteos, seam 5/5, pool de matriz (julio=378 / noviembre=456), reparto exacto e inexistencia de exposición a Data API/PUBLIC en tablas, secuencias y funciones. Aborta con detalle si algo no cuadra. **Nota (v1.11.0):** la lista `proname IN (...)` de este barrido no es exhaustiva (histórica); la verificación **fuerte** de las funciones nuevas del retiro (`registrar_retiro_desde_saldo_vivo`, `portal_registrar_retiro`) vive en el **D5** de la PARTE D.
+**Descripción:** Verificación de seeds y consistencia (no modifica): conteos, seam 5/5, pool de matriz (julio=378 / noviembre=456), reparto exacto e inexistencia de exposición a Data API/PUBLIC en tablas, secuencias y funciones. Aborta con detalle si algo no cuadra. **Nota (v1.12.0):** la lista `proname IN (...)` de este barrido es histórica/no exhaustiva (no se extiende para cubrir todas las funciones CC); el **hardening canónico** de las funciones de cuenta corriente agregadas en v1.10.0–v1.12.0 —`cuenta_corriente_viva`/`cuenta_corriente_detalle`, `pct_operativo_vigente`, `registrar_retiro_desde_saldo_vivo` y las lecturas históricas `cuenta_corriente_historico`/`cuenta_corriente_historico_acumulados`— es su `REVOKE EXECUTE` en el **C12**. La verificación **fuerte** de las funciones del retiro (`registrar_retiro_desde_saldo_vivo`, `portal_registrar_retiro`) vive además en el **D5** de la PARTE D. El chequeo de **tablas** de este barrido sí cubre las **12 tablas** del Carril B (incluidas las 3 de detalle fino de v1.12.0).
 
 ```sql
 -- ── C14. Verificación de seeds y consistencia (asserts; no modifica) ──
@@ -7004,7 +7373,7 @@ BEGIN
   SELECT count(*) INTO v_tab_grants FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
     CROSS JOIN LATERAL aclexplode(c.relacl) a
     WHERE n.nspname='public' AND c.relkind='r'
-      AND c.relname IN ('zonas','cabana_zona','activaciones_operativas','gastos_internos','liquidaciones_periodo','liquidacion_cascada','liquidacion_socio','movimientos_socio','revaluaciones')
+      AND c.relname IN ('zonas','cabana_zona','activaciones_operativas','gastos_internos','liquidaciones_periodo','liquidacion_cascada','liquidacion_socio','movimientos_socio','revaluaciones','liquidacion_participacion','liquidacion_gasto','liquidacion_incidencia')
       AND (a.grantee=0 OR pg_get_userbyid(a.grantee) IN ('anon','authenticated','service_role'));
   IF v_tab_grants <> 0 THEN RAISE EXCEPTION 'C14 hardening tablas: % grants Data API/PUBLIC (esperado 0)', v_tab_grants; END IF;
 
