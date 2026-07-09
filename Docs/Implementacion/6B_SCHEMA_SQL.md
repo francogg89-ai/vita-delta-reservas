@@ -8251,13 +8251,12 @@ $verif_portal$;
 
 # FIN DEL DOCUMENTO
 
-**Estado:** Canónico vigente `6B_SCHEMA_SQL.md v1.11.0` — cierre documental del frente Cuenta Corriente / retiro desde saldo vivo. Apto como fuente de verdad para bootstrap de entorno nuevo siguiendo los planes/runsheets correspondientes. No ejecutar completo sobre entornos existentes sin plan de migración específico.
+**Estado:** Canónico vigente `6B_SCHEMA_SQL.md v1.12.0` — v1.12.0 cierra estructuralmente el frente Cuenta Corriente: **snapshot mensual con detalle fino congelado + lecturas históricas L3** (aditivo, desplegado y verde TEST+OPS, promovido 2026-07-06/07). Apto como fuente de verdad para bootstrap de entorno nuevo siguiendo los planes/runsheets correspondientes. No ejecutar completo sobre entornos existentes sin plan de migración específico.
 
 **Próximos pasos sugeridos:**
 
-1. Cerrar el frente retiro desde saldo vivo con `CIERRE_RETIRO_SALDO_VIVO_OPS.md`.
-2. Mantener el bootstrap kit `bootstrap_entorno_nuevo_v1.9.0/` como deuda consciente `P-CC-4`; no regenerarlo en este cierre porque el próximo frente backend será snapshot mensual/congelado + L3.
-3. Abrir el próximo frente backend contable: snapshot mensual/congelado + L3 histórico.
-4. Regenerar bootstrap kit recién al cierre del frente completo de cuenta corriente.
+1. Regenerar el bootstrap kit a v1.12.0 (deuda consciente `P-CC-4`, Bloque C): carpeta `bootstrap_entorno_nuevo_v1.12.0/`, retirando `bootstrap_entorno_nuevo_v1.9.0/` del árbol (queda en git).
+2. Primera foto real en OPS + cierre asistido (`P-L3-01`/`P-L3-02`): congelar un mes concreto con su detalle fino sobre datos de producción ("IA propone, humanos aprueban") — frente backend contable posterior.
+3. Exponer la capa de cuenta corriente / L3 en el portal operativo — frente posterior.
 
-**Trazabilidad de versión:** ver los bloques `RESUMEN DE CAMBIOS` al inicio del documento, especialmente `v1.10.1 → v1.11.0`.
+**Trazabilidad de versión:** ver los bloques `RESUMEN DE CAMBIOS` al inicio del documento, especialmente `v1.11.0 → v1.12.0`.
