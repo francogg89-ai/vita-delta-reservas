@@ -1,24 +1,13 @@
 -- ============================================================================
--- BOOTSTRAP ENTORNO NUEVO v1.9.0 — 02: PARTE C (CARRIL B) · DDL EJECUTABLE
--- Fuente: 6B_SCHEMA_SQL.md v1.9.0, PARTE C, Bloques C0→C14 (EXTRACCIÓN LITERAL).
---   Carril B autocontenido (contabilidad operativa interna 9C→9H + helper 9B):
---   tablas, funciones, triggers de inmutabilidad, hardening (C12) y seeds
---   estructurales (C13). Cierra con C14, un bloque DO de asserts (auto-test):
---   su veredicto sale por el panel de NOTICE, no como fila (L-RDEV-04). La
---   fila-veredicto de la Parte C vive en 02_VERIFY_PARTE_C_CARRIL_B.sql.
--- ----------------------------------------------------------------------------
--- ESTADO DE ENTRADA: 01_VERIFY == PARTE_B_OK. Corre DESPUÉS de la Parte B.
--- USO: SQL Editor del PROYECTO NUEVO (confirmar Project Ref por URL; nunca OPS).
---   Pegar el archivo COMPLETO o por SECCIONES "-- ═══ BLOQUE CN ═══", una a la
---   vez con NADA seleccionado. C13 es un solo bloque con 6 sub-statements
---   (C13.1→C13.6): correrlo ENTERO (el NOT NULL de C13.4 depende del backfill
---   de C13.3).
--- ----------------------------------------------------------------------------
--- VARIANTE DEV: C13.1 siembra configuracion_general('ambiente') = 'dev'.
---   *** PUNTO DE SWAP PARA TEST/OPS: *** para bootstrappear TEST u OPS, cambiar
---   ÚNICAMENTE el literal 'dev' por 'test' / 'ops' en C13.1 (ver el comentario
---   inline marcado en el bloque). No hay otro punto a tocar. (Ver README.)
+-- BOOTSTRAP ENTORNO NUEVO v1.12.0 — 02: PARTE C (CARRIL B) · DDL EJECUTABLE
+-- Fuente: 6B_SCHEMA_SQL.md v1.12.0 (EXTRACCION LITERAL R2 desde PARTE C).
+--   Carril B completo v1.12.0: 12 tablas (9H + 3 de detalle fino), 16 triggers
+--   de inmutabilidad (via trg_9h_inmutable), 27 funciones (motor CC + lecturas
+--   L1/L2 + pct_operativo_vigente + retiro + 2 lecturas historicas L3), seed
+--   pct_operativo, hardening C12 y auto-test C14. Extraccion literal R2.
+-- USO: correr DESPUES de 01. El veredicto vive en 02_VERIFY_PARTE_C_CARRIL_B.sql.
 -- ============================================================================
+
 
 
 -- ══════════════════════════════════════════════════════════════════════════
@@ -304,6 +293,81 @@ CREATE TABLE revaluaciones (
 );
 
 -- ══════════════════════════════════════════════════════════════════════════
+-- BLOQUE C5-bis — Detalle fino 9H (snapshot extendido)
+-- ══════════════════════════════════════════════════════════════════════════
+-- ── C5-bis. Detalle fino 9H (snapshot extendido) — 3 tablas append-only ──
+-- T1: participacion por cabana (ground truth; matriz por socio deriva de aca)
+CREATE TABLE liquidacion_participacion (
+  id_liquidacion        BIGINT   NOT NULL REFERENCES liquidaciones_periodo(id_liquidacion) ON DELETE RESTRICT,
+  id_cabana             BIGINT   NOT NULL REFERENCES cabanas(id_cabana)                     ON DELETE RESTRICT,
+  valor_relativo        NUMERIC  NOT NULL,
+  id_socio_beneficiario BIGINT   NOT NULL REFERENCES socios(id_socio)                       ON DELETE RESTRICT,
+  participa             BOOLEAN  NOT NULL,
+  PRIMARY KEY (id_liquidacion, id_cabana),
+  CONSTRAINT chk_lpart_valor_pos CHECK (valor_relativo > 0)
+);
+
+-- T2: gasto por gasto (foto fiel de gastos_internos; id_gasto COPIADO sin FK, D-CC-30) + sin_incidencia/motivo
+CREATE TABLE liquidacion_gasto (
+  id_liquidacion        BIGINT        NOT NULL REFERENCES liquidaciones_periodo(id_liquidacion) ON DELETE RESTRICT,
+  id_gasto              BIGINT        NOT NULL,
+  fecha                 DATE          NOT NULL,
+  clase                 TEXT          NOT NULL,
+  clase_sugerida        TEXT,
+  etiqueta              TEXT          NOT NULL,
+  monto                 NUMERIC(14,2) NOT NULL,
+  moneda                TEXT          NOT NULL,
+  id_zona               BIGINT        REFERENCES zonas(id_zona)     ON DELETE RESTRICT,
+  id_cabana             BIGINT        REFERENCES cabanas(id_cabana) ON DELETE RESTRICT,
+  pagador_tipo          TEXT          NOT NULL,
+  id_socio_pagador      BIGINT        REFERENCES socios(id_socio)   ON DELETE RESTRICT,
+  medio_pago            TEXT,
+  comentario            TEXT,
+  comprobante_url       TEXT,
+  creado_por            TEXT          NOT NULL,
+  created_at            TIMESTAMPTZ   NOT NULL,
+  sin_incidencia        BOOLEAN       NOT NULL,
+  motivo_sin_incidencia TEXT,
+  PRIMARY KEY (id_liquidacion, id_gasto),
+  CONSTRAINT chk_lgasto_clase         CHECK (clase IN ('A','C','D','E')),
+  CONSTRAINT chk_lgasto_monto_pos     CHECK (monto > 0),
+  CONSTRAINT chk_lgasto_moneda        CHECK (moneda = 'ARS'),
+  CONSTRAINT chk_lgasto_pagador_tipo  CHECK (pagador_tipo IN ('socio','caja')),
+  CONSTRAINT chk_lgasto_pagador_cons  CHECK (
+       (pagador_tipo='socio' AND id_socio_pagador IS NOT NULL)
+    OR (pagador_tipo='caja'  AND id_socio_pagador IS NULL)),
+  CONSTRAINT chk_lgasto_alcance_clase CHECK (
+       (clase='D' AND id_zona IS NOT NULL AND id_cabana IS NULL)
+    OR (clase='E' AND id_cabana IS NOT NULL AND id_zona IS NULL)
+    OR (clase IN ('A','C') AND id_zona IS NULL AND id_cabana IS NULL)),
+  CONSTRAINT chk_lgasto_sin_incidencia_coherente CHECK (
+       sin_incidencia = (motivo_sin_incidencia IS NOT NULL)),
+  CONSTRAINT chk_lgasto_clase_sug     CHECK (clase_sugerida IS NULL OR clase_sugerida IN ('A','C','D','E')),
+  CONSTRAINT chk_lgasto_motivo_dom    CHECK (motivo_sin_incidencia IS NULL
+                                             OR motivo_sin_incidencia IN ('pool_vacio','zona_sin_activas'))
+);
+
+-- T3: incidencia por gasto (regla congelada); FK compuesta a T2 (ambas tablas congeladas)
+CREATE TABLE liquidacion_incidencia (
+  id_liquidacion  BIGINT        NOT NULL,
+  id_gasto        BIGINT        NOT NULL,
+  seq             SMALLINT      NOT NULL,
+  destino         TEXT          NOT NULL,
+  id_socio        BIGINT        REFERENCES socios(id_socio) ON DELETE RESTRICT,
+  monto_incidido  NUMERIC(14,2) NOT NULL,
+  regla           TEXT          NOT NULL,
+  PRIMARY KEY (id_liquidacion, id_gasto, seq),
+  CONSTRAINT fk_linc_gasto FOREIGN KEY (id_liquidacion, id_gasto)
+      REFERENCES liquidacion_gasto (id_liquidacion, id_gasto) ON DELETE RESTRICT,
+  CONSTRAINT chk_linc_seq_pos        CHECK (seq > 0),
+  CONSTRAINT chk_linc_destino        CHECK (destino IN ('pool_pre_operativo','socio')),
+  CONSTRAINT chk_linc_monto_centavos CHECK (monto_incidido = ROUND(monto_incidido, 2)),
+  CONSTRAINT chk_linc_destino_socio  CHECK (
+       (destino='socio' AND id_socio IS NOT NULL)
+    OR (destino='pool_pre_operativo' AND id_socio IS NULL))
+);
+
+-- ══════════════════════════════════════════════════════════════════════════
 -- BLOQUE C6 — Inmutabilidad 9H — trigger y triggers
 -- ══════════════════════════════════════════════════════════════════════════
 -- ── C6. Inmutabilidad 9H — función de trigger + triggers anti UPDATE/DELETE/TRUNCATE ──
@@ -322,7 +386,8 @@ DO $mk_triggers$
 DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY['liquidaciones_periodo','liquidacion_cascada','liquidacion_socio',
-                           'movimientos_socio','revaluaciones'] LOOP
+                           'movimientos_socio','revaluaciones',
+                           'liquidacion_participacion','liquidacion_gasto','liquidacion_incidencia'] LOOP
     EXECUTE format(
       'CREATE TRIGGER trg_%s_no_upd_del BEFORE UPDATE OR DELETE ON %I '
       'FOR EACH ROW EXECUTE FUNCTION trg_9h_inmutable()', t, t);
@@ -889,6 +954,221 @@ AS $function$
 $function$
 ;
 
+-- pct_operativo_vigente -- pct operativo unico vigente desde configuracion_general (clave pct_operativo),
+-- con validacion fuerte y errores parseables; SIN fallback silencioso (D-CC-13/D-CC-14). Lo consumen las
+-- funciones de cuenta corriente (viva/detalle) y el futuro frente de escritura/retiros (P-CC-2).
+CREATE OR REPLACE FUNCTION public.pct_operativo_vigente()
+RETURNS numeric
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+AS $fn$
+DECLARE
+  v_txt text;
+  v_num numeric;
+BEGIN
+  SELECT valor INTO v_txt
+    FROM configuracion_general
+   WHERE clave = 'pct_operativo';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '[pct_config_ausente] falta la clave pct_operativo en configuracion_general';
+  END IF;
+
+  IF v_txt IS NULL THEN
+    RAISE EXCEPTION '[pct_config_invalido] pct_operativo es NULL';
+  END IF;
+
+  v_txt := btrim(v_txt);
+
+  IF v_txt = '' THEN
+    RAISE EXCEPTION '[pct_config_invalido] pct_operativo vacio';
+  END IF;
+
+  -- decimal valido: digitos, opcionalmente punto + digitos ([.] evita depender de
+  -- standard_conforming_strings). Rechaza texto, notacion cientifica, coma, signos.
+  IF v_txt !~ '^[0-9]+([.][0-9]+)?$' THEN
+    RAISE EXCEPTION '[pct_config_invalido] pct_operativo no es decimal valido: %', v_txt;
+  END IF;
+
+  v_num := v_txt::numeric;
+
+  IF v_num < 0 OR v_num > 1 THEN
+    RAISE EXCEPTION '[pct_config_invalido] pct_operativo fuera de [0,1]: %', v_num;
+  END IF;
+
+  RETURN v_num;
+END
+$fn$;
+
+-- cuenta_corriente_viva -- saldo de cuenta corriente ACUMULADO EN VIVO por socio desde el piso
+-- contable 2026-07-01 (frente Cuenta Corriente / L1; lectura socio-only, action cuenta_corriente.al_dia).
+CREATE OR REPLACE FUNCTION public.cuenta_corriente_viva(
+  p_hasta_fecha   date    DEFAULT NULL,   -- NULL = hoy AR (America/Argentina/Buenos_Aires)
+  p_pct_operativo numeric DEFAULT NULL    -- requerido; guard [0,1]
+)
+RETURNS TABLE(
+  id_socio                  bigint,
+  socio                     text,
+  liquidacion_meses_previos numeric,
+  liquidacion_mes_en_curso  numeric,
+  reembolsos_acumulados     numeric,
+  movimientos               numeric,
+  saldo_al_dia              numeric
+)
+LANGUAGE sql
+STABLE
+AS $function$
+  WITH params AS (
+    SELECT
+      DATE '2026-07-01' AS piso_contable,                              -- D-NEG-02
+      COALESCE(p_hasta_fecha,
+               (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date) AS hasta_efectiva,
+      date_trunc('month',
+        COALESCE(p_hasta_fecha,
+                 (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date)
+      )::date AS mes_actual,
+      (p_pct_operativo IS NULL
+       OR p_pct_operativo < 0
+       OR p_pct_operativo > 1) AS pct_invalido
+  ),
+  meses AS (
+    SELECT gs::date AS mes, pr.mes_actual
+    FROM params pr
+    CROSS JOIN LATERAL generate_series(
+      pr.piso_contable::timestamp, pr.mes_actual::timestamp, INTERVAL '1 month'
+    ) AS gs
+    WHERE NOT pr.pct_invalido
+  ),
+  por_mes AS (
+    SELECT m.mes,
+           (m.mes = m.mes_actual) AS es_en_curso,
+           s.id_socio,
+           s.saldo_final,
+           s.desembolsado_periodo
+    FROM meses m
+    CROSS JOIN LATERAL saldo_socios_periodo(m.mes, p_pct_operativo) s
+    WHERE s.id_socio IS NOT NULL
+  ),
+  agg AS (
+    SELECT id_socio,
+           COALESCE(SUM(saldo_final) FILTER (WHERE NOT es_en_curso), 0) AS liq_previos,
+           COALESCE(SUM(saldo_final) FILTER (WHERE es_en_curso), 0)     AS liq_en_curso,
+           COALESCE(SUM(desembolsado_periodo), 0)                       AS reembolsos
+    FROM por_mes
+    GROUP BY id_socio
+  ),
+  mov AS (
+    -- ventana as-of: solo movimientos dentro del rango contable [piso, hasta_efectiva].
+    -- Coincide con "todos" en el caso de produccion (hasta = hoy) y da vacio limpio si hasta < piso.
+    SELECT m.id_socio, COALESCE(SUM(m.monto), 0) AS movimientos
+    FROM movimientos_socio m
+    CROSS JOIN params pr
+    WHERE NOT pr.pct_invalido
+      AND m.fecha >= pr.piso_contable
+      AND m.fecha <= pr.hasta_efectiva
+    GROUP BY m.id_socio
+  ),
+  universo AS (
+    SELECT id_socio FROM agg
+    UNION
+    SELECT id_socio FROM mov
+  )
+  -- Guard pct invalido: fila marcadora unica (id_socio NULL)
+  SELECT NULL::bigint,
+         'PARAMETRO_INVALIDO_PCT_OPERATIVO'::text,
+         NULL::numeric, NULL::numeric, NULL::numeric, NULL::numeric, NULL::numeric
+  FROM params pr
+  WHERE pr.pct_invalido
+
+  UNION ALL
+
+  SELECT u.id_socio,
+         s.nombre,
+         COALESCE(a.liq_previos, 0),
+         COALESCE(a.liq_en_curso, 0),
+         COALESCE(a.reembolsos, 0),
+         COALESCE(mv.movimientos, 0),
+         COALESCE(a.liq_previos, 0)
+           + COALESCE(a.liq_en_curso, 0)
+           + COALESCE(a.reembolsos, 0)
+           + COALESCE(mv.movimientos, 0)
+  FROM universo u
+  JOIN socios s    ON s.id_socio = u.id_socio
+  LEFT JOIN agg a  ON a.id_socio = u.id_socio
+  LEFT JOIN mov mv ON mv.id_socio = u.id_socio
+  CROSS JOIN params pr
+  WHERE NOT pr.pct_invalido
+
+  ORDER BY 1 NULLS FIRST;   -- posicional: evita colision con el parametro OUT id_socio en el UNION
+$function$
+;
+
+-- cuenta_corriente_detalle -- drill-down de un mes: jsonb con cascada, matriz, incidencias por gasto
+-- (frente Cuenta Corriente / L2; lectura socio-only, action cuenta_corriente.detalle).
+CREATE OR REPLACE FUNCTION public.cuenta_corriente_detalle(
+  p_mes           date    DEFAULT NULL,
+  p_pct_operativo numeric DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+AS $function$
+  WITH params AS (
+    SELECT date_trunc('month',
+             COALESCE(p_mes, (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date)
+           )::date AS mes,
+           (p_pct_operativo IS NULL
+            OR p_pct_operativo < 0
+            OR p_pct_operativo > 1) AS pct_invalido
+  )
+  SELECT CASE WHEN pr.pct_invalido THEN
+      jsonb_build_object('mes', pr.mes, 'error', 'PARAMETRO_INVALIDO_PCT_OPERATIVO')
+    ELSE
+      jsonb_build_object(
+        'mes', pr.mes,
+        'cascada', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'paso', c.paso, 'concepto', c.concepto,
+                   'id_socio', c.id_socio, 'socio', c.socio, 'monto', c.monto)
+                 ORDER BY c.paso, c.id_socio NULLS FIRST)
+          FROM cascada_periodo(pr.mes, p_pct_operativo) c), '[]'::jsonb),
+        'matriz', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_socio', m.id_socio, 'socio', s.nombre,
+                   'valor_socio', m.valor_socio, 'valor_pool', m.valor_pool,
+                   'participacion', m.participacion)
+                 ORDER BY m.participacion DESC, m.id_socio)
+          FROM matriz_participacion(pr.mes) m
+          JOIN socios s ON s.id_socio = m.id_socio), '[]'::jsonb),
+        'matriz_cabanas', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_cabana', d.id_cabana, 'cabana', d.cabana,
+                   'valor_relativo', d.valor_relativo, 'id_socio', d.id_socio,
+                   'beneficiario', d.beneficiario, 'participa', d.participa)
+                 ORDER BY d.id_cabana)
+          FROM detalle_participacion(pr.mes) d), '[]'::jsonb),
+        'incidencias', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_gasto', g.id_gasto, 'clase', g.clase, 'etiqueta', g.etiqueta,
+                   'monto', g.monto, 'destino', i.destino, 'id_socio', i.id_socio,
+                   'socio', i.socio, 'monto_incidido', i.monto, 'regla', i.regla)
+                 ORDER BY g.id_gasto, i.id_socio NULLS FIRST)
+          FROM gastos_internos g
+          CROSS JOIN LATERAL incidencia_gasto(g.id_gasto) i
+          WHERE g.periodo = pr.mes), '[]'::jsonb),
+        'gastos_sin_incidencia', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_gasto', x.id_gasto, 'clase', x.clase, 'etiqueta', x.etiqueta,
+                   'monto', x.monto, 'motivo', x.motivo)
+                 ORDER BY x.id_gasto)
+          FROM gastos_sin_incidencia_periodo(pr.mes) x), '[]'::jsonb)
+      )
+  END
+  FROM params pr;
+$function$
+;
+
 CREATE OR REPLACE FUNCTION public.mayor_socio(p_id_socio bigint)
  RETURNS TABLE(fecha date, tipo text, referencia text, monto numeric, saldo_acumulado numeric)
  LANGUAGE sql
@@ -947,14 +1227,236 @@ AS $function$
 $function$
 ;
 
+-- cuenta_corriente_historico -- L3: foto congelada de UN mes (detalle fino); resuelve la vigente via liquidacion_vigente. Casos: foto con detalle / foto pre-extension (secciones []) / sin foto.
+CREATE OR REPLACE FUNCTION public.cuenta_corriente_historico(p_mes date)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $function$
+  WITH resolved AS (
+    SELECT date_trunc('month', p_mes)::date AS mes,
+           liquidacion_vigente(date_trunc('month', p_mes)::date) AS id_liq
+  ),
+  info AS (
+    SELECT r.mes, r.id_liq,
+           (r.id_liq IS NULL) AS sin_foto,
+           COALESCE((SELECT count(*) FROM liquidacion_participacion pa
+                     WHERE pa.id_liquidacion = r.id_liq), 0) AS n_part
+    FROM resolved r
+  )
+  SELECT CASE
+    WHEN i.sin_foto THEN
+      jsonb_build_object(
+        'sin_foto', true,
+        'detalle_disponible', false,
+        'detalle_motivo', 'sin_foto_vigente',
+        'periodo', i.mes,
+        'cabecera', NULL,
+        'cascada', '[]'::jsonb,
+        'socios', '[]'::jsonb,
+        'participacion', '[]'::jsonb,
+        'gastos', '[]'::jsonb,
+        'incidencias', '[]'::jsonb,
+        'movimientos', '[]'::jsonb,
+        'matriz_por_socio', '[]'::jsonb,
+        'gastos_sin_incidencia', '[]'::jsonb,
+        'retribucion_operativo', NULL
+      )
+    ELSE
+      jsonb_build_object(
+        'sin_foto', false,
+        'detalle_disponible', (i.n_part > 0),
+        'detalle_motivo', CASE WHEN i.n_part > 0 THEN NULL ELSE 'foto_pre_extension' END,
+        'periodo', i.mes,
+        'cabecera', (
+          SELECT jsonb_build_object(
+                   'id_liquidacion', lp.id_liquidacion,
+                   'periodo', lp.periodo,
+                   'pct_operativo', lp.pct_operativo,
+                   'creado_por', lp.creado_por,
+                   'created_at', lp.created_at,
+                   'comentario', lp.comentario,
+                   'linaje', jsonb_build_object(
+                     'es_raiz', (lp.id_liquidacion_supersede IS NULL),
+                     'id_liquidacion_supersede', lp.id_liquidacion_supersede))
+          FROM liquidaciones_periodo lp WHERE lp.id_liquidacion = i.id_liq),
+        -- cascada: presente para toda foto (tabla original 9G/9H)
+        'cascada', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object('paso', c.paso, 'concepto', c.concepto, 'monto', c.monto)
+                 ORDER BY c.paso)
+          FROM liquidacion_cascada c WHERE c.id_liquidacion = i.id_liq), '[]'::jsonb),
+        -- socios: presente para toda foto (tabla original 9H)
+        'socios', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_socio', ls.id_socio, 'socio', s.nombre,
+                   'saldo_bruto', ls.saldo_bruto, 'gastos_d', ls.gastos_d, 'gastos_e', ls.gastos_e,
+                   'saldo_final', ls.saldo_final, 'desembolsado_periodo', ls.desembolsado_periodo)
+                 ORDER BY ls.id_socio)
+          FROM liquidacion_socio ls JOIN socios s ON s.id_socio = ls.id_socio
+          WHERE ls.id_liquidacion = i.id_liq), '[]'::jsonb),
+        -- participacion (detalle fino): [] si pre-extension
+        'participacion', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_cabana', pa.id_cabana, 'cabana', cb.nombre,
+                   'valor_relativo', pa.valor_relativo, 'id_socio_beneficiario', pa.id_socio_beneficiario,
+                   'beneficiario', sb.nombre, 'participa', pa.participa)
+                 ORDER BY pa.id_cabana)
+          FROM liquidacion_participacion pa
+          JOIN cabanas cb ON cb.id_cabana = pa.id_cabana
+          JOIN socios sb ON sb.id_socio = pa.id_socio_beneficiario
+          WHERE pa.id_liquidacion = i.id_liq), '[]'::jsonb),
+        -- gastos (detalle fino): [] si pre-extension
+        'gastos', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_gasto', g.id_gasto, 'fecha', g.fecha, 'clase', g.clase,
+                   'clase_sugerida', g.clase_sugerida, 'etiqueta', g.etiqueta, 'monto', g.monto,
+                   'moneda', g.moneda, 'id_zona', g.id_zona, 'id_cabana', g.id_cabana,
+                   'pagador_tipo', g.pagador_tipo, 'id_socio_pagador', g.id_socio_pagador,
+                   'medio_pago', g.medio_pago, 'comentario', g.comentario, 'comprobante_url', g.comprobante_url,
+                   'creado_por', g.creado_por, 'created_at', g.created_at,
+                   'sin_incidencia', g.sin_incidencia, 'motivo_sin_incidencia', g.motivo_sin_incidencia)
+                 ORDER BY g.id_gasto)
+          FROM liquidacion_gasto g WHERE g.id_liquidacion = i.id_liq), '[]'::jsonb),
+        -- incidencias (detalle fino): respeta seq congelado
+        'incidencias', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_gasto', ic.id_gasto, 'seq', ic.seq, 'destino', ic.destino,
+                   'id_socio', ic.id_socio, 'socio', si.nombre,
+                   'monto_incidido', ic.monto_incidido, 'regla', ic.regla)
+                 ORDER BY ic.id_gasto, ic.seq)
+          FROM liquidacion_incidencia ic LEFT JOIN socios si ON si.id_socio = ic.id_socio
+          WHERE ic.id_liquidacion = i.id_liq), '[]'::jsonb),
+        -- movimientos del mes: LECTURA VIVA del mayor, ventaneada por fecha
+        -- [mes, mes+1 mes); NO forma parte de la foto congelada (mayor aparte).
+        'movimientos', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_movimiento', m.id_movimiento, 'id_socio', m.id_socio, 'socio', sm.nombre,
+                   'fecha', m.fecha, 'tipo', m.tipo, 'monto', m.monto,
+                   'medio_pago', m.medio_pago, 'comentario', m.comentario, 'periodo', m.periodo)
+                 ORDER BY m.fecha, m.id_movimiento)
+          FROM movimientos_socio m JOIN socios sm ON sm.id_socio = m.id_socio
+          WHERE m.fecha >= i.mes AND m.fecha < (i.mes + INTERVAL '1 month')), '[]'::jsonb),
+        -- matriz_por_socio: DERIVADA de participacion (no reimplementa vivas)
+        'matriz_por_socio', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_socio', x.id_socio, 'socio', s.nombre,
+                   'valor_socio', x.valor_socio, 'valor_pool', x.pool,
+                   'participacion', CASE WHEN x.pool > 0 THEN round(x.valor_socio / x.pool, 4) ELSE 0 END)
+                 ORDER BY x.valor_socio DESC, x.id_socio)
+          FROM (
+            SELECT pa.id_socio_beneficiario AS id_socio,
+                   SUM(pa.valor_relativo) AS valor_socio,
+                   SUM(SUM(pa.valor_relativo)) OVER () AS pool
+            FROM liquidacion_participacion pa
+            WHERE pa.id_liquidacion = i.id_liq AND pa.participa = true
+            GROUP BY pa.id_socio_beneficiario
+          ) x
+          JOIN socios s ON s.id_socio = x.id_socio), '[]'::jsonb),
+        -- gastos_sin_incidencia: DERIVADO (filtro sobre liquidacion_gasto)
+        'gastos_sin_incidencia', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+                   'id_gasto', g.id_gasto, 'clase', g.clase, 'etiqueta', g.etiqueta,
+                   'monto', g.monto, 'motivo', g.motivo_sin_incidencia)
+                 ORDER BY g.id_gasto)
+          FROM liquidacion_gasto g WHERE g.id_liquidacion = i.id_liq AND g.sin_incidencia = true), '[]'::jsonb),
+        -- retribucion_operativo: conciliacion del paso 4 (presente en A y B)
+        'retribucion_operativo', (
+          SELECT jsonb_build_object(
+                   'periodo', rr.periodo, 'calculado', rr.calculado, 'asignado', rr.asignado,
+                   'diferencia', rr.diferencia, 'estado', rr.estado)
+          FROM reporte_retribucion_operativo_periodo(i.mes) rr)
+      )
+  END
+  FROM info i;
+$function$;
+
+-- cuenta_corriente_historico_acumulados -- L3: agregados globales sobre TODAS las fotos vigentes + mayor (reusa saldo_corriente_socio).
+CREATE OR REPLACE FUNCTION public.cuenta_corriente_historico_acumulados()
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $function$
+  WITH piso AS (SELECT DATE '2026-07-01' AS d),   -- D-NEG-02 (piso contable)
+  vig AS (
+    SELECT lp.id_liquidacion, lp.periodo
+    FROM liquidaciones_periodo lp
+    WHERE NOT EXISTS (SELECT 1 FROM liquidaciones_periodo s
+                      WHERE s.id_liquidacion_supersede = lp.id_liquidacion)
+  ),
+  casc AS (SELECT v.id_liquidacion, c.paso, c.monto
+           FROM vig v JOIN liquidacion_cascada c ON c.id_liquidacion = v.id_liquidacion),
+  soc AS (SELECT v.id_liquidacion, ls.saldo_bruto, ls.gastos_d, ls.gastos_e
+          FROM vig v JOIN liquidacion_socio ls ON ls.id_liquidacion = v.id_liquidacion),
+  evo AS (
+    SELECT v.periodo, v.id_liquidacion,
+      COALESCE((SELECT SUM(c.monto) FROM casc c WHERE c.id_liquidacion = v.id_liquidacion AND c.paso IN (1,6)),0) AS ingresos,
+      COALESCE((SELECT SUM(c.monto) FROM casc c WHERE c.id_liquidacion = v.id_liquidacion AND c.paso IN (2,7)),0)
+        + COALESCE((SELECT SUM(x.gastos_d + x.gastos_e) FROM soc x WHERE x.id_liquidacion = v.id_liquidacion),0) AS gastos,
+      COALESCE((SELECT SUM(c.monto) FROM casc c WHERE c.id_liquidacion = v.id_liquidacion AND c.paso = 8),0) AS utilidad,
+      COALESCE((SELECT SUM(x.saldo_bruto) FROM soc x WHERE x.id_liquidacion = v.id_liquidacion),0) AS repartos,
+      COALESCE((SELECT SUM(m.monto) FROM movimientos_socio m
+                WHERE m.tipo = 'retiro' AND m.fecha >= v.periodo AND m.fecha < (v.periodo + INTERVAL '1 month')),0) AS retiros_mes
+    FROM vig v
+  )
+  SELECT jsonb_build_object(
+    'sin_datos', (SELECT count(*) FROM vig) = 0,
+    'piso', (SELECT d FROM piso),
+    'totales', jsonb_build_object(
+      'ingresos_acumulados', COALESCE((SELECT SUM(ingresos) FROM evo),0),
+      'gastos_acumulados',
+        COALESCE((SELECT SUM(monto) FROM casc WHERE paso IN (2,7)),0)
+        + COALESCE((SELECT SUM(gastos_d + gastos_e) FROM soc),0),
+      'gastos_desglose', jsonb_build_object(
+        'a_paso2',    COALESCE((SELECT SUM(monto) FROM casc WHERE paso = 2),0),
+        'c_paso7',    COALESCE((SELECT SUM(monto) FROM casc WHERE paso = 7),0),
+        'd_e_socios', COALESCE((SELECT SUM(gastos_d + gastos_e) FROM soc),0)
+      ),
+      'utilidad_acumulada',  COALESCE((SELECT SUM(monto) FROM casc WHERE paso = 8),0),
+      'repartos_acumulados', COALESCE((SELECT SUM(saldo_bruto) FROM soc),0),
+      'retiros_acumulados',  COALESCE((SELECT SUM(monto) FROM movimientos_socio WHERE tipo = 'retiro'),0)
+    ),
+    'evolucion', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+               'periodo', e.periodo, 'id_liquidacion', e.id_liquidacion,
+               'ingresos', e.ingresos, 'gastos', e.gastos, 'utilidad', e.utilidad,
+               'repartos', e.repartos, 'retiros_mes', e.retiros_mes)
+             ORDER BY e.periodo)
+      FROM evo e), '[]'::jsonb),
+    'saldos_por_socio', COALESCE((
+      SELECT jsonb_agg(x.obj ORDER BY x.id_socio)
+      FROM (
+        SELECT s.id_socio,
+          jsonb_build_object(
+            'id_socio', s.id_socio, 'socio', s.nombre,
+            'resultado_liquidacion', MAX(sc.monto) FILTER (WHERE sc.orden = 1),
+            'reembolso_desembolso',  MAX(sc.monto) FILTER (WHERE sc.orden = 2),
+            'movimientos',           MAX(sc.monto) FILTER (WHERE sc.orden = 3),
+            'saldo_vivo',            MAX(sc.monto) FILTER (WHERE sc.orden = 4)) AS obj
+        FROM socios s
+        CROSS JOIN LATERAL saldo_corriente_socio(s.id_socio) sc
+        GROUP BY s.id_socio, s.nombre
+      ) x), '[]'::jsonb),
+    'meta', jsonb_build_object(
+      'fotos_vigentes', (SELECT count(*) FROM vig),
+      'fotos_pre_piso', (SELECT count(*) FROM vig WHERE periodo < (SELECT d FROM piso)),
+      'movimientos_pre_piso', (SELECT count(*) FROM movimientos_socio WHERE fecha < (SELECT d FROM piso))
+    )
+  );
+$function$;
+
 CREATE OR REPLACE FUNCTION public.registrar_snapshot_periodo(p_periodo date, p_pct numeric, p_creado_por text, p_supersede_id bigint DEFAULT NULL::bigint, p_comentario text DEFAULT NULL::text)
  RETURNS bigint
  LANGUAGE plpgsql
 AS $function$
 DECLARE v_periodo DATE := date_trunc('month', p_periodo)::date;
         v_cola BIGINT; v_id BIGINT; v_n_cascada INTEGER; v_n_socios INTEGER; v_socios_total INTEGER;
+        v_n_part INTEGER; v_cabanas_total INTEGER; v_n_gasto INTEGER; v_gastos_total INTEGER;
 BEGIN
-  PERFORM pg_advisory_xact_lock(919001, hashtext(v_periodo::text));  -- lock por período
+  PERFORM pg_advisory_xact_lock(919001, hashtext(v_periodo::text));  -- lock por periodo
   IF p_pct IS NULL OR p_pct < 0 OR p_pct > 1 THEN
     RAISE EXCEPTION '9H snapshot: pct_operativo invalido (% fuera de [0,1])', p_pct;
   END IF;
@@ -964,11 +1466,11 @@ BEGIN
   v_cola := liquidacion_vigente(v_periodo);
   IF v_cola IS NULL THEN
     IF p_supersede_id IS NOT NULL THEN
-      RAISE EXCEPTION '9H snapshot: el período % no tiene foto vigente; p_supersede_id debe ser NULL', v_periodo;
+      RAISE EXCEPTION '9H snapshot: el periodo % no tiene foto vigente; p_supersede_id debe ser NULL', v_periodo;
     END IF;
   ELSE
     IF p_supersede_id IS NULL OR p_supersede_id <> v_cola THEN
-      RAISE EXCEPTION '9H snapshot: el período % ya tiene foto vigente (id=%); para re-snapshot pasar p_supersede_id=% (la cola actual)', v_periodo, v_cola, v_cola;
+      RAISE EXCEPTION '9H snapshot: el periodo % ya tiene foto vigente (id=%); para re-snapshot pasar p_supersede_id=% (la cola actual)', v_periodo, v_cola, v_cola;
     END IF;
     IF p_comentario IS NULL OR btrim(p_comentario) = '' THEN
       RAISE EXCEPTION '9H snapshot: re-snapshot exige comentario (D-9H-24)';
@@ -997,6 +1499,47 @@ BEGIN
     RAISE EXCEPTION '9H snapshot: liquidacion_socio incompleta para % (% filas, esperadas 0 o %)',
       v_periodo, v_n_socios, v_socios_total;
   END IF;
+
+  -- ===================== EXTENSION P-CC-2: detalle fino congelado (D-CC-23..30) =====================
+  -- T1: participacion por cabana <- detalle_participacion (ground truth; matriz por socio deriva de aca)
+  INSERT INTO liquidacion_participacion (id_liquidacion, id_cabana, valor_relativo, id_socio_beneficiario, participa)
+  SELECT v_id, dp.id_cabana, dp.valor_relativo, dp.id_socio, dp.participa
+  FROM detalle_participacion(v_periodo) dp;
+  GET DIAGNOSTICS v_n_part = ROW_COUNT;
+  SELECT COUNT(*) INTO v_cabanas_total FROM cabanas;
+  IF v_n_part <> v_cabanas_total THEN
+    RAISE EXCEPTION '9H snapshot: liquidacion_participacion incompleta para % (% filas, esperadas %)',
+      v_periodo, v_n_part, v_cabanas_total;
+  END IF;
+
+  -- T2: gasto por gasto <- gastos_internos + LEFT JOIN gastos_sin_incidencia (sin_incidencia/motivo CONGELADOS)
+  INSERT INTO liquidacion_gasto (id_liquidacion, id_gasto, fecha, clase, clase_sugerida, etiqueta, monto, moneda,
+                                 id_zona, id_cabana, pagador_tipo, id_socio_pagador, medio_pago, comentario,
+                                 comprobante_url, creado_por, created_at, sin_incidencia, motivo_sin_incidencia)
+  SELECT v_id, g.id_gasto, g.fecha, g.clase, g.clase_sugerida, g.etiqueta, g.monto, g.moneda,
+         g.id_zona, g.id_cabana, g.pagador_tipo, g.id_socio_pagador, g.medio_pago, g.comentario,
+         g.comprobante_url, g.creado_por, g.created_at,
+         (sic.id_gasto IS NOT NULL) AS sin_incidencia, sic.motivo
+  FROM gastos_internos g
+  LEFT JOIN gastos_sin_incidencia_periodo(v_periodo) sic ON sic.id_gasto = g.id_gasto
+  WHERE g.periodo = v_periodo;
+  GET DIAGNOSTICS v_n_gasto = ROW_COUNT;
+  SELECT COUNT(*) INTO v_gastos_total FROM gastos_internos WHERE periodo = v_periodo;
+  IF v_n_gasto <> v_gastos_total THEN
+    RAISE EXCEPTION '9H snapshot: liquidacion_gasto incompleta para % (% filas, esperadas %)',
+      v_periodo, v_n_gasto, v_gastos_total;
+  END IF;
+
+  -- T3: incidencia por gasto <- incidencia_gasto (regla CONGELADA); seq por gasto; sin-incidencia => 0 filas
+  INSERT INTO liquidacion_incidencia (id_liquidacion, id_gasto, seq, destino, id_socio, monto_incidido, regla)
+  SELECT v_id, g.id_gasto,
+         (ROW_NUMBER() OVER (PARTITION BY g.id_gasto ORDER BY i.id_socio NULLS FIRST))::smallint AS seq,
+         i.destino, i.id_socio, i.monto, i.regla
+  FROM gastos_internos g
+  CROSS JOIN LATERAL incidencia_gasto(g.id_gasto) i
+  WHERE g.periodo = v_periodo;
+  -- (T3 sin guard de cantidad fija: varia por clase; la coherencia sin_incidencia<->vacuidad se valida aparte)
+  -- ==================================================================================================
 
   RETURN v_id;
 END $function$
@@ -1110,6 +1653,78 @@ END $function$
 ;
 
 -- ══════════════════════════════════════════════════════════════════════════
+-- BLOQUE C10-bis — Cuenta corriente: retiro desde saldo vivo (v1.11.0)
+-- ══════════════════════════════════════════════════════════════════════════
+-- ── C10-bis (v1.11.0). Cuenta corriente: retiro desde saldo vivo ──
+CREATE OR REPLACE FUNCTION public.registrar_retiro_desde_saldo_vivo(
+  p_id_socio    bigint,
+  p_monto       numeric,
+  p_medio_pago  text,
+  p_creado_por  text,
+  p_comentario  text DEFAULT NULL
+)
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $fn$
+DECLARE
+  v_saldo numeric;
+  v_id    bigint;
+  v_hoy   date := (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+BEGIN
+  -- Validaciones defensivas de negocio (VD002 = argumento invalido).
+  IF p_id_socio IS NULL THEN
+    RAISE EXCEPTION 'retiro: p_id_socio nulo' USING ERRCODE = 'VD002';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.socios WHERE id_socio = p_id_socio) THEN
+    RAISE EXCEPTION 'retiro: socio % inexistente', p_id_socio USING ERRCODE = 'VD002';
+  END IF;
+  IF p_monto IS NULL THEN
+    RAISE EXCEPTION 'retiro: p_monto nulo' USING ERRCODE = 'VD002';
+  END IF;
+  IF p_monto <= 0 THEN
+    RAISE EXCEPTION 'retiro: monto debe ser positivo (magnitud), recibido %', p_monto USING ERRCODE = 'VD002';
+  END IF;
+  IF p_monto <> ROUND(p_monto, 2) THEN
+    RAISE EXCEPTION 'retiro: monto excede 2 decimales (%)', p_monto USING ERRCODE = 'VD002';
+  END IF;
+  IF p_medio_pago IS NULL OR p_medio_pago NOT IN ('efectivo','transferencia_bancaria') THEN
+    RAISE EXCEPTION 'retiro: medio_pago invalido (%)', COALESCE(p_medio_pago, '(null)') USING ERRCODE = 'VD002';
+  END IF;
+  IF p_creado_por IS NULL OR btrim(p_creado_por) = '' THEN
+    RAISE EXCEPTION 'retiro: creado_por vacio' USING ERRCODE = 'VD002';
+  END IF;
+
+  -- Lock por socio (mismo namespace que las escrituras 9H).
+  PERFORM pg_advisory_xact_lock(919002, p_id_socio::int);
+
+  -- Saldo VIVO: identico a L1/A27 (misma fuente de pct, mismo hasta = hoy AR).
+  SELECT saldo_al_dia INTO v_saldo
+    FROM public.cuenta_corriente_viva(NULL, public.pct_operativo_vigente())
+   WHERE id_socio = p_id_socio;
+
+  IF NOT FOUND THEN
+    -- Controlado: socio sin actividad contable => saldo 0 => no puede retirar.
+    RAISE EXCEPTION 'saldo insuficiente (vivo=0, retiro=%)', p_monto USING ERRCODE = 'VD001';
+  END IF;
+  IF v_saldo - p_monto < 0 THEN
+    RAISE EXCEPTION 'saldo insuficiente (vivo=%, retiro=%)', v_saldo, p_monto USING ERRCODE = 'VD001';
+  END IF;
+
+  -- Asiento append-only: entra magnitud positiva, se guarda NEGATIVA (chk_mov_signo_debe).
+  INSERT INTO public.movimientos_socio (id_socio, fecha, tipo, monto, medio_pago, comentario, creado_por)
+  VALUES (p_id_socio, v_hoy, 'retiro', -p_monto, p_medio_pago, p_comentario, p_creado_por)
+  RETURNING id_movimiento INTO v_id;
+
+  RETURN v_id;
+END
+$fn$;
+
+COMMENT ON FUNCTION public.registrar_retiro_desde_saldo_vivo(bigint, numeric, text, text, text) IS
+  'Cuenta Corriente / retiro desde saldo VIVO. Lock por socio (919002), valida contra cuenta_corriente_viva(NULL, pct_operativo_vigente()) (identico a L1), inserta retiro append-only con monto NEGATIVO. Errores de dominio: VD001=saldo insuficiente, VD002=argumento invalido. NO reemplaza registrar_retiro (que valida snapshots congelados).';
+
+-- ══════════════════════════════════════════════════════════════════════════
 -- BLOQUE C11 — Helper de cobranza atómica (9B)
 -- ══════════════════════════════════════════════════════════════════════════
 -- ── C11. Helper de cobranza atómica (9B, D-9B-19) ──
@@ -1139,11 +1754,13 @@ $function$
 -- BLOQUE C12 — Hardening — REVOKE
 -- ══════════════════════════════════════════════════════════════════════════
 -- ── C12. Hardening — REVOKE total a PUBLIC/anon/authenticated/service_role ──
--- Tablas (9):
+-- Tablas (12):
 REVOKE ALL ON TABLE public.zonas, public.cabana_zona, public.activaciones_operativas,
                     public.gastos_internos, public.liquidaciones_periodo,
                     public.liquidacion_cascada, public.liquidacion_socio,
-                    public.movimientos_socio, public.revaluaciones
+                    public.movimientos_socio, public.revaluaciones,
+                    public.liquidacion_participacion, public.liquidacion_gasto,
+                    public.liquidacion_incidencia
   FROM PUBLIC, anon, authenticated, service_role;
 -- Secuencias (6):
 REVOKE ALL ON SEQUENCE public.zonas_id_zona_seq,
@@ -1153,9 +1770,14 @@ REVOKE ALL ON SEQUENCE public.zonas_id_zona_seq,
                        public.movimientos_socio_id_movimiento_seq,
                        public.revaluaciones_id_revaluacion_seq
   FROM PUBLIC, anon, authenticated, service_role;
--- Funciones (21, incluye trg_9h_inmutable y abortar_si_falla):
+-- Funciones (27, incluye trg_9h_inmutable y abortar_si_falla):
 REVOKE EXECUTE ON FUNCTION public.abortar_si_falla(resultado jsonb) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.cascada_periodo(p_periodo date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_detalle(p_mes date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_historico(p_mes date) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_historico_acumulados() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.cuenta_corriente_viva(p_hasta_fecha date, p_pct_operativo numeric) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.pct_operativo_vigente() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.detalle_participacion(p_periodo date) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.gastos_sin_incidencia_periodo(p_periodo date) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.incidencia_gasto(p_id_gasto bigint) FROM PUBLIC, anon, authenticated, service_role;
@@ -1164,6 +1786,7 @@ REVOKE EXECUTE ON FUNCTION public.matriz_participacion(p_periodo date) FROM PUBL
 REVOKE EXECUTE ON FUNCTION public.mayor_socio(p_id_socio bigint) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.registrar_movimiento_manual(p_id_socio bigint, p_fecha date, p_tipo text, p_monto numeric, p_creado_por text, p_comentario text, p_periodo date, p_medio_pago text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.registrar_retiro(p_id_socio bigint, p_fecha date, p_monto numeric, p_medio_pago text, p_creado_por text, p_comentario text) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.registrar_retiro_desde_saldo_vivo(p_id_socio bigint, p_monto numeric, p_medio_pago text, p_creado_por text, p_comentario text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.registrar_revaluacion(p_id_socio bigint, p_fecha date, p_tipo_cambio numeric, p_monto_ars numeric, p_alcance text, p_creado_por text, p_id_movimiento_origen bigint, p_comentario text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.registrar_reversa(p_id_movimiento_revertido bigint, p_fecha date, p_creado_por text, p_comentario text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.registrar_snapshot_periodo(p_periodo date, p_pct numeric, p_creado_por text, p_supersede_id bigint, p_comentario text) FROM PUBLIC, anon, authenticated, service_role;
@@ -1184,6 +1807,14 @@ REVOKE EXECUTE ON FUNCTION public.trg_9h_inmutable() FROM PUBLIC, anon, authenti
 INSERT INTO configuracion_general (clave, valor, descripcion, categoria, editable)
 VALUES ('ambiente', 'dev',
         'Marcador de entorno para identidad de Carril B. Valor por-entorno: dev/test/ops. Default dev para bootstrap del canónico.', 'infra', FALSE)
+ON CONFLICT (clave) DO NOTHING;
+-- C13.1-bis pct operativo (contabilidad, D-NEG-01); tipada + no editable (D-CC-13; guardrail hasta P-CC-5)
+INSERT INTO configuracion_general (clave, valor, tipo_valor, descripcion, categoria, editable)
+VALUES ('pct_operativo', '0.25', 'numeric',
+        'Porcentaje operativo sobre ingreso cobrado neto de gastos operativos (D-NEG-01); '
+        'usado en el reparto de la cuenta corriente (L1/L2/retiro) y persistido en cada snapshot. '
+        'editable=false: no cambiar en operacion hasta el bloque de pct_operativo periodizado / vigencia futura.',
+        'contabilidad', FALSE)
 ON CONFLICT (clave) DO NOTHING;
 
 -- C13.2 Zonas (estructural: grandes/chicas)
@@ -1265,7 +1896,7 @@ BEGIN
   SELECT count(*) INTO v_tab_grants FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
     CROSS JOIN LATERAL aclexplode(c.relacl) a
     WHERE n.nspname='public' AND c.relkind='r'
-      AND c.relname IN ('zonas','cabana_zona','activaciones_operativas','gastos_internos','liquidaciones_periodo','liquidacion_cascada','liquidacion_socio','movimientos_socio','revaluaciones')
+      AND c.relname IN ('zonas','cabana_zona','activaciones_operativas','gastos_internos','liquidaciones_periodo','liquidacion_cascada','liquidacion_socio','movimientos_socio','revaluaciones','liquidacion_participacion','liquidacion_gasto','liquidacion_incidencia')
       AND (a.grantee=0 OR pg_get_userbyid(a.grantee) IN ('anon','authenticated','service_role'));
   IF v_tab_grants <> 0 THEN RAISE EXCEPTION 'C14 hardening tablas: % grants Data API/PUBLIC (esperado 0)', v_tab_grants; END IF;
 

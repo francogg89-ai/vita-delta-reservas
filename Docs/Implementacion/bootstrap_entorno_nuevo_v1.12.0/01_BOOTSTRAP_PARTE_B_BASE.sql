@@ -1,23 +1,14 @@
 -- ============================================================================
--- BOOTSTRAP ENTORNO NUEVO v1.9.0 — 01: PARTE B (SCHEMA BASE) · DDL EJECUTABLE
--- Fuente: 6B_SCHEMA_SQL.md v1.9.0, PARTE B, Bloques 1→23 (EXTRACCIÓN LITERAL).
---   Solo el DDL de cada bloque. NO incluye los fences de "Verificación post-
---   ejecución", "Test funcional", "Monitoreo" ni "Rollback" del canónico (esos
---   no se ejecutan en bootstrap). La verificación de cierre vive en
---   01_VERIFY_PARTE_B_BASE.sql (fila-veredicto).
--- ----------------------------------------------------------------------------
--- ESTADO DE ENTRADA: 00_PRECHECK == BASE_VACIA_OK (proyecto nuevo/vacío).
+-- BOOTSTRAP ENTORNO NUEVO v1.12.0 — 01: PARTE B (SCHEMA BASE) · DDL EJECUTABLE
+-- Fuente: 6B_SCHEMA_SQL.md v1.12.0 (EXTRACCION LITERAL R2 desde PARTE B).
+--   Solo el DDL de cada bloque (primer fence sql). NO incluye "Verificacion
+--   post-ejecucion", "Test funcional", "Monitoreo" ni "Rollback" del canonico.
+--   PARTE B es INMUTABLE entre v1.9.0 y v1.12.0: este cuerpo es byte-identico
+--   al del kit v1.9.0 (verificado por el generador). El cierre vive en
+--   01_VERIFY_PARTE_B_BASE.sql.
 -- USO: SQL Editor del PROYECTO NUEVO (confirmar Project Ref por URL; nunca OPS).
---   Se puede pegar el archivo COMPLETO, o por SECCIONES delimitadas con
---   "-- ═══ BLOQUE N ═══", una a la vez con NADA seleccionado (L-8A-01).
--- ALCANCE: NO toca el Carril B (zonas, activaciones, 9H, seam, matriz, cascada,
---   ni el marcador ambiente='dev'). Todo eso es 02_BOOTSTRAP_PARTE_C_CARRIL_B.sql.
--- HARDENING: el Bloque 23 (REVOKE EXECUTE sobre las 13 funciones del motor) cierra
---   el gap por el que un bootstrap fresco las dejaba PUBLIC-ejecutables (NULL-acl).
---   Es REVOKE directo por firma, sin gate de ambiente: en Parte B el marcador
---   'ambiente' todavía no existe (lo siembra C13.1). Idempotente DENTRO del flujo
---   de bootstrap nuevo/vacío; NO habilita a correr este archivo sobre OPS existente.
 -- ============================================================================
+
 
 
 -- ══════════════════════════════════════════════════════════════════════════

@@ -1,6 +1,6 @@
 -- ============================================================================
--- BOOTSTRAP ENTORNO NUEVO v1.9.0 — 00: PRECHECKS READ-ONLY
--- Canónico de referencia: 6B_SCHEMA_SQL.md v1.9.0 (PARTE B Bloques 1→23 +
+-- BOOTSTRAP ENTORNO NUEVO v1.12.0 — 00: PRECHECKS READ-ONLY
+-- Canónico de referencia: 6B_SCHEMA_SQL.md v1.12.0 (PARTE B Bloques 1→23 +
 --   PARTE C Bloques C0→C14). El canónico es la fuente; esta carpeta lo referencia.
 -- ----------------------------------------------------------------------------
 -- USO: correr en el SQL Editor del PROYECTO NUEVO, cada bloque por separado,
@@ -17,7 +17,7 @@
 --        (b) SQL Editor del proyecto nuevo
 --        (c) base vacía            -> P1 == BASE_VACIA_OK
 --      No avanzar a 01_BOOTSTRAP_PARTE_B_BASE.sql si P1 no da BASE_VACIA_OK.
---      NUNCA correr sobre OPS (ref lpiatqztudxiwdlcoasv).
+--      NUNCA correr sobre OPS (ref __REF_SANITIZADO__).
 -- ============================================================================
 
 
@@ -27,7 +27,7 @@
 -- El Project Ref NO es legible de forma confiable por SQL: current_database()
 -- siempre = 'postgres' (L-7B-01) y en el SQL Editor current_user = 'postgres'
 -- (L-7E-01). Confirmá el ref por la URL del navegador: debe ser el PROYECTO
--- NUEVO, nunca lpiatqztudxiwdlcoasv (OPS).
+-- NUEVO, nunca __REF_SANITIZADO__ (OPS).
 -- ────────────────────────────────────────────────────────────────────────────
 SELECT
   current_database()                AS db,
