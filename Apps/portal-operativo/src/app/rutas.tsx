@@ -17,6 +17,7 @@ import { CargarGasto } from '../screens/CargarGasto';
 import { RegistrarCobro } from '../screens/RegistrarCobro';
 import { CuentaCorriente } from '../screens/CuentaCorriente';
 import { CuentaCorrienteDetalle } from '../screens/CuentaCorrienteDetalle';
+import { RetirarSaldo } from '../screens/RetirarSaldo';
 
 /**
  * Pantallas reales ya implementadas (action -> componente). Los placeholders se reemplazan
@@ -39,6 +40,7 @@ const PANTALLAS: Record<string, ComponentType> = {
   'cargar.gasto_interno': CargarGasto,
   'cuenta_corriente.al_dia': CuentaCorriente,
   'cuenta_corriente.detalle': CuentaCorrienteDetalle,
+  'cuenta_corriente.retirar': RetirarSaldo,
 };
 
 /**

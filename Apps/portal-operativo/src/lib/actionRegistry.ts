@@ -132,6 +132,15 @@ export const ACTION_REGISTRY: Record<string, ActionMeta> = {
     orden: 20,
     ruta: '/socios/cuenta-corriente-detalle',
   },
+  // A29 -- retiro socio contra saldo vivo (ESCRITURA). Socio-only via A02/CATALOG (roles:['socio']);
+  // A02 ya la expone en `acciones`, el registry solo aporta presentacion (label/grupo/orden/ruta).
+  'cuenta_corriente.retirar': {
+    action: 'cuenta_corriente.retirar',
+    label: 'Retirar saldo',
+    grupo: 'socios',
+    orden: 30,
+    ruta: '/socios/retirar',
+  },
 };
 
 export interface GrupoMenu {

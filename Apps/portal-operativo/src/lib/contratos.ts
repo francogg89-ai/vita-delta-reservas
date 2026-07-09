@@ -325,6 +325,16 @@ export interface CargarGastoData {
   idempotente: boolean;
 }
 
+/**
+ * A29 cuenta_corriente.retirar (retiro socio contra saldo vivo). Forma EXACTA del `data` de exito
+ * de portal_registrar_retiro: { id_movimiento, idempotente } (espeja CargarGastoData: la clave es
+ * `idempotente`). El saldo nuevo NO viene aca: se reconsulta L1 (cuenta_corriente.al_dia).
+ */
+export interface RegistrarRetiroData {
+  id_movimiento: number;
+  idempotente: boolean;
+}
+
 // ----- A26 disponibilidad.cabana (lectura preventiva, UX de A07/A08) -----
 // data:{ dias } con UNA fila por NOCHE en [fecha_desde, fecha_hasta) (excluye fecha_hasta).
 // Cabana inexistente/inactiva -> error no_encontrado. Payload invalido -> payload_invalido.
