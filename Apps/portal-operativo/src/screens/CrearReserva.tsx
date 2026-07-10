@@ -129,6 +129,12 @@ function Encabezado() {
 // mensaje curado del backend (mensajeUsuario). conflicto conserva su caso especial.
 function textoErrorReserva(error: PortalApiError): string {
   if (error.code === 'conflicto') {
+    if (error.message.startsWith('gap_checkin:')) {
+      return error.message.slice('gap_checkin:'.length).trim();
+    }
+    if (error.message.startsWith('gap_checkout:')) {
+      return error.message.slice('gap_checkout:'.length).trim();
+    }
     return 'Sin disponibilidad en ese rango (se solapa con una reserva, pre-reserva o bloqueo).';
   }
   if (error.code === 'payload_invalido' && error.message.includes('fecha_in_pasada')) {
