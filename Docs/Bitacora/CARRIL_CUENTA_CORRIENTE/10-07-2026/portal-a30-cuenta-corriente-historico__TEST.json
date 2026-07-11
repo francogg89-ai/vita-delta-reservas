@@ -1,0 +1,254 @@
+{
+  "name": "portal-a30-cuenta-corriente-historico__TEST",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "portal-a30-cuenta-corriente-historico__TEST",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "19dc8377-708a-43ec-80ae-56947752b110",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a30-cuenta-corriente-historico__TEST — validar_firma_ts_rol.\n// Recomputa HMAC-SHA256 sobre los bytes EXACTOS (D-C-29). Revalida ts (300s), rol (allowlist,\n// D-C-39), action binding (D-C-41) y -A30- el payload { mes } (2da defensa): YMD real, dia == '01'\n// (foto mensual), >= piso 2026-07-01. ESPEJO del gateway payloadCuentaCorrienteHistorico.\nconst crypto = require('crypto');\n\nconst SECRET = (typeof $vars !== 'undefined' && $vars && $vars.VITA_HMAC_SECRET)\n  ? $vars.VITA_HMAC_SECRET\n  : '__PEGAR_SECRETO_O_USAR_VARIABLE__';\nif (!SECRET || SECRET.startsWith('__PEGAR_')) {\n  throw new Error('VITA_HMAC_SECRET no configurado en n8n Variables; abortando (assert duro).');\n}\n\nconst item = $input.first();\nconst wh = item.json;\n\nfunction rej(motivo, b) {\n  return [{ json: { ok_firma: false, motivo,\n    ambiente_esperado: (b && b.ambiente_esperado) ?? null,\n    rol: (b && b.rol) ?? null, action: (b && b.action) ?? null,\n    ts: (b && b.ts) ?? null, payload_norm: null } }];\n}\n\n// 1) Raw body como Buffer EXACTO. Prioridad: binario 'data'. Fallback: wh.rawBody (L-C-05).\nlet buf = null;\ntry {\n  if (item.binary && item.binary.data) {\n    buf = await this.helpers.getBinaryDataBuffer(0, 'data');\n  }\n} catch (e) {\n  buf = null;\n}\nif (!buf) {\n  const rawField = wh.rawBody;\n  if (Buffer.isBuffer(rawField)) buf = rawField;\n  else if (rawField && rawField.type === 'Buffer' && Array.isArray(rawField.data)) buf = Buffer.from(rawField.data);\n  else if (typeof rawField === 'string') buf = Buffer.from(rawField, 'utf8');\n}\nif (!buf) return rej('raw_body_ausente', null);\n\n// 2) Firma del header.\nconst headers = wh.headers || {};\nconst sigHeader = headers['x-vita-signature'] || headers['X-Vita-Signature'] || '';\n\n// 3) HMAC recomputado sobre los MISMOS bytes.\nconst expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(buf).digest('hex');\n\n// 4) Comparacion timing-safe.\nlet firmaOk = false;\ntry {\n  const a = Buffer.from(sigHeader);\n  const b = Buffer.from(expected);\n  firmaOk = a.length === b.length && crypto.timingSafeEqual(a, b);\n} catch (e) {\n  firmaOk = false;\n}\nif (!firmaOk) return rej('firma_invalida', null);\n\n// 5) Parseo (firma ya validada sobre bytes crudos).\nlet body;\ntry {\n  body = JSON.parse(buf.toString('utf8'));\n} catch (e) {\n  return rej('payload_invalido', null);\n}\n\n// 6) Ventana de ts (D-C-29): |now - ts| <= 300s.\nconst ts = Number(body.ts);\nif (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 300000) {\n  return rej('ts_fuera_de_ventana', { ...body, ts: body.ts });\n}\nbody.ts = ts;\n\n// 7) Allowlist de rol (D-C-39). A30 = socio unicamente (cuenta corriente de socios).\nconst ROLES_OK = ['socio'];\nif (!ROLES_OK.includes(body.rol)) return rej('rol_no_permitido', body);\n\n// 8) Action binding (D-C-41): EXPECTED_ACTION = cuenta_corriente.historico (A30).\nconst EXPECTED_ACTION = 'cuenta_corriente.historico';\nif (body.action !== EXPECTED_ACTION) return rej('accion_desconocida', body);\n\n// 9) Payload A30: { mes } obligatorio. Reject-unknown + YMD + dia==01 + floor 2026-07-01. Reenvia\n//    solo { mes } normalizado (2da defensa; el gateway ya valido con payloadCuentaCorrienteHistorico).\nconst FLOOR = '2026-07-01';\nconst PERMITIDAS = ['mes'];\n\nlet pl = {};\nif (body.payload === undefined || body.payload === null) {\n  pl = {};\n} else if (typeof body.payload === 'object' && !Array.isArray(body.payload)) {\n  pl = body.payload;\n} else {\n  return rej('payload_invalido', body);\n}\nfor (const k of Object.keys(pl)) {\n  if (!PERMITIDAS.includes(k)) return rej('payload_invalido', body);\n}\n\nfunction isYMD(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const Y = +s.slice(0, 4), M = +s.slice(5, 7), D = +s.slice(8, 10);\n  if (M < 1 || M > 12 || D < 1 || D > 31) return false;\n  const dt = new Date(Date.UTC(Y, M - 1, D));\n  return dt.getUTCFullYear() === Y && dt.getUTCMonth() === M - 1 && dt.getUTCDate() === D;\n}\n\nif (pl.mes === undefined || pl.mes === null) return rej('payload_invalido', body);\nif (!isYMD(pl.mes)) return rej('payload_invalido', body);\nif (pl.mes.slice(8, 10) !== '01') return rej('payload_invalido', body);\nif (pl.mes < FLOOR) return rej('payload_invalido', body);\n\nconst payload_norm = { mes: pl.mes };\n\nreturn [{ json: { ok_firma: true, motivo: null,\n  ambiente_esperado: body.ambiente_esperado ?? null, rol: body.rol ?? null,\n  action: body.action ?? null, ts, payload_norm } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "056c5cbb-966f-4b13-b4fb-73b110e9156c",
+      "name": "validar_firma_ts_rol"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT valor FROM configuracion_general WHERE clave = 'ambiente'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "id": "c7c3cb52-4c23-4ec0-89c4-9fbe62dba06f",
+      "name": "leer_ambiente",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// portal-a30-cuenta-corriente-historico__TEST — verificar_acceso. Compara ambiente y arma el envelope de rechazo\n// (D-C-18/35). En exito marca {ok:true}; el envelope final de exito lo arma el render.\nconst v = $('validar_firma_ts_rol').first().json;\nconst ambItem = $('leer_ambiente').first();\nconst real = (ambItem && ambItem.json) ? (ambItem.json.valor ?? null) : null;\n\nfunction envErr(code, message, detail) {\n  return [{ json: { ok: false, error: { code, message, detail: detail ?? null } } }];\n}\n\nif (!v.ok_firma) {\n  const msgs = {\n    firma_invalida: 'firma HMAC invalida o ausente',\n    ts_fuera_de_ventana: 'timestamp fuera de la ventana permitida (300s)',\n    payload_invalido: 'payload invalido (mes mal formado, anterior al piso contable, o clave no permitida)',\n    raw_body_ausente: 'no llego el raw body (activa Raw Body en el Webhook)',\n    rol_no_permitido: 'rol no habilitado para esta accion',\n    accion_desconocida: 'accion no corresponde a este endpoint'\n  };\n  return envErr(v.motivo, msgs[v.motivo] || 'rechazado', null);\n}\n\nif (v.ambiente_esperado !== real) {\n  return envErr('ambiente_incorrecto', 'el sobre no corresponde a este entorno', { esperado: v.ambiente_esperado, real });\n}\n\nreturn [{ json: { ok: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "5fdc4387-dc34-4490-a6f2-61f0071e2777",
+      "name": "verificar_acceso"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1cd8471-2010-47a4-9e87-f17d55a6bf5a",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "9ffde6fb-b534-41f8-9471-8a71b7488f84",
+      "name": "IF acceso"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- portal-a30: foto congelada L3 del mes (passthrough del jsonb). El mes viene normalizado en\n-- payload_norm ($1::jsonb->>'mes'). La funcion resuelve la vigente via liquidacion_vigente; sin_foto/\n-- detalle_disponible los decide la funcion (no el wrapper).\nSELECT cuenta_corriente_historico(($1::jsonb ->> 'mes')::date) AS historico;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($('validar_firma_ts_rol').first().json.payload_norm) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -150
+      ],
+      "id": "48a5d3ea-9783-4f25-8f5c-da1af53c06cc",
+      "name": "PG: leer historico",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_POR_CRED_TEST",
+          "name": "vita_supabase_test (reemplazar al importar)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== portal-a30-cuenta-corriente-historico__TEST — render JSON (foto congelada L3) =====\n// Passthrough del jsonb de cuenta_corriente_historico (14 claves top-level: sin_foto, detalle_disponible,\n// detalle_motivo, periodo, cabecera, cascada, socios, participacion, gastos, incidencias, movimientos,\n// matriz_por_socio, gastos_sin_incidencia, retribucion_operativo). Read-only. Estados sin_foto:true /\n// detalle_disponible:false son ok:true (NUNCA no_encontrado, D-C-47); solo un jsonb con 'error' se\n// surfacea como payload_invalido (defensivo; el validador + el cast ::date lo previenen). No se inventan\n// defaults ni se renombran claves.\nfunction safeAll(nodeName) {\n  try {\n    const items = $(nodeName).all();\n    const failed = items.some(it => it && it.json && (it.json.error || it.error));\n    if (failed) return { ok: false, rows: [] };\n    return { ok: true, rows: items.map(it => it.json) };\n  } catch (e) { return { ok: false, rows: [] }; }\n}\n\nconst r = safeAll('PG: leer historico');\nif (!r.ok || r.rows.length === 0) {\n  return [{ json: { ok: false, error: { code: 'error_interno', message: 'no se pudo cargar el historico', detail: null } } }];\n}\n\nconst historico = r.rows[0].historico;\nif (historico && historico.error) {\n  return [{ json: { ok: false, error: { code: 'payload_invalido', message: String(historico.error), detail: null } } }];\n}\n\nreturn [{ json: { ok: true, data: historico } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -150
+      ],
+      "id": "df64d34f-751b-4f8f-b0f6-1dc7ab7db92a",
+      "name": "Code: render envelope"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        0
+      ],
+      "id": "93fc2e4b-04fe-4aa3-aa4f-1c850b58cc28",
+      "name": "Respond"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "validar_firma_ts_rol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "validar_firma_ts_rol": {
+      "main": [
+        [
+          {
+            "node": "leer_ambiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "leer_ambiente": {
+      "main": [
+        [
+          {
+            "node": "verificar_acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_acceso": {
+      "main": [
+        [
+          {
+            "node": "IF acceso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF acceso": {
+      "main": [
+        [
+          {
+            "node": "PG: leer historico",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: render envelope": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG: leer historico": {
+      "main": [
+        [
+          {
+            "node": "Code: render envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
