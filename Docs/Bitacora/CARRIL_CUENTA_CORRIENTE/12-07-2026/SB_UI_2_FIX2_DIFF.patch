@@ -1,0 +1,264 @@
+--- a/src/screens/HistoricoCuentaCorriente.tsx
++++ b/src/screens/HistoricoCuentaCorriente.tsx
+@@ -4,6 +4,7 @@
+ import { primerDiaMes } from '../lib/periodo';
+ import type { HistoricoAcumuladosData, HistoricoMesData } from '../lib/contratos';
+ import { HistoricoVista } from './historico/HistoricoVista';
++import type { EstadoLectura } from './historico/HistoricoVista';
+ import { construirPlanSelector } from './historico/planSelector';
+ 
+ // =============================================================================================
+@@ -97,6 +98,20 @@
+    */
+   const interactuado = useRef(false);
+ 
++  /**
++   * Contador MONOTONICO de peticiones A30. Es un ref independiente y NO se deriva de
++   * `peticion?.seq`: al invalidar la peticion por piso, `peticion` pasa a null y derivar de ella
++   * reiniciaria el contador en 1. Un `seq` repetido dejaria que una `servida` VIEJA declarara
++   * servida una peticion creada DESPUES de la invalidacion -> el frame stale volveria a colarse.
++   * Con un contador monotonico, ningun token se repite durante la vida del componente, y
++   * `servida.mes === peticion.mes && servida.seq === peticion.seq` implica que son LA MISMA.
++   */
++  const siguienteSeq = useRef(0);
++  const crearPeticion = useCallback(
++    (mes: string): PeticionFoto => ({ mes, seq: ++siguienteSeq.current }),
++    [],
++  );
++
+   // --- Lecturas (estados y retries INDEPENDIENTES por seccion) -------------------------------
+   const acum = useAction<HistoricoAcumuladosData>(ACTION_A31, SIN_PAYLOAD, { enabled: ambas });
+ 
+@@ -130,6 +145,33 @@
+    */
+   const fotoPendiente = peticion !== null && (!peticionServida || foto.loading);
+ 
++  // --- Retry A30: UNICA puerta de entrada ----------------------------------------------------
++  /**
++   * Todo reintento de A30 pasa por aca: el ErrorCard de error real, el ErrorCard de INCONSISTENTE
++   * y el "Consultar" sobre el mismo mes. Genera un token NUEVO, con lo cual el pendiente se activa
++   * SINCRONICAMENTE en el mismo render (`!peticionServida`), y recien despues fuerza el ciclo real
++   * del hook.
++   *
++   * `refetchFoto()` es imprescindible: el mes no cambia, asi que el `payloadKey` de useAction
++   * tampoco, y el hook no re-dispararia solo. Y es UNA sola llamada -> UN solo request.
++   */
++  const onRetryFoto = useCallback(() => {
++    if (peticion === null) return; // no hay mes aplicado: no hay nada que reintentar
++    if (fotoPendiente) return; // ya hay una consulta en vuelo
++    setPeticion(crearPeticion(peticion.mes));
++    refetchFoto();
++  }, [peticion, fotoPendiente, crearPeticion, refetchFoto]);
++
++  /**
++   * La lectura A30 TAL COMO LA VE LA VISTA: mismo estado, pero con el `refetch` REEMPLAZADO por el
++   * callback tokenizado. La vista no recibe `foto.refetch` crudo, asi que ningun ErrorCard puede
++   * saltearse el token, el pendiente sincronico ni la compuerta anti-doble-request.
++   */
++  const fotoVista = useMemo<EstadoLectura<HistoricoMesData>>(
++    () => ({ data: foto.data, loading: foto.loading, error: foto.error, refetch: onRetryFoto }),
++    [foto.data, foto.loading, foto.error, onRetryFoto],
++  );
++
+   // --- Plan del selector ---------------------------------------------------------------------
+   // Precedencia error-antes-de-data: useAction conserva el `data` viejo cuando falla un refetch.
+   // Si no se anulara aca, un retry fallido de A31 seguiria alimentando el selector con datos stale
+@@ -145,6 +187,24 @@
+   const anclas = useMemo(() => [mesDraft, mesApplied], [mesDraft, mesApplied]);
+   const plan = useMemo(() => construirPlanSelector(acumParaPlan, anclas), [acumParaPlan, anclas]);
+ 
++  // --- Reconciliacion SINCRONICA del piso (D-FE-49) -------------------------------------------
++  /**
++   * El efecto de abajo normaliza el ESTADO PERSISTIDO, pero corre DESPUES del render. En el frame
++   * en que A31 devuelve un piso mas alto, `mesDraft` y `peticion` todavia apuntan a un mes que ya
++   * NO esta en `plan.opciones` (los anclas por debajo del piso no se preservan: fail-closed).
++   * Sin esta compuerta, ese unico frame mostraria las cuatro cosas prohibidas a la vez:
++   *   - un <select value> sin su <option>  -> el browser salta en silencio a la primera opcion;
++   *   - la foto vieja, ya FUERA del piso;
++   *   - el boton Consultar habilitado para un mes invalido;
++   *   - ningun aviso.
++   * El efecto no puede ser la unica defensa. Este derivado bloquea el selector y Consultar, evita
++   * que se renderice la foto vieja, dispara el aviso y hace que el <select> use un `value` que SI
++   * existe entre las opciones -- todo en el MISMO render en que aparece el piso nuevo.
++   */
++  const seleccionFueraDePiso =
++    (mesDraft !== null && mesDraft < plan.pisoMes) ||
++    (mesApplied !== null && mesApplied < plan.pisoMes);
++
+   // --- Aplicacion inicial + reconciliacion contra el piso seguro (D-FE-49) --------------------
+   useEffect(() => {
+     if (!ambas) return;
+@@ -160,7 +220,7 @@
+     if (resueltoOk && !inicializado.current && !interactuado.current) {
+       inicializado.current = true;
+       setMesDraft(porDefecto);
+-      setPeticion({ mes: porDefecto, seq: 1 });
++      setPeticion(crearPeticion(porDefecto));
+       setReiniciadoPorPiso(false);
+       return;
+     }
+@@ -180,7 +240,7 @@
+       setPeticion(null);
+       setReiniciadoPorPiso(true);
+     }
+-  }, [ambas, acum.loading, acum.error, acum.data, plan, mesDraft, peticion]);
++  }, [ambas, acum.loading, acum.error, acum.data, plan, mesDraft, peticion, crearPeticion]);
+ 
+   // --- Handlers ------------------------------------------------------------------------------
+   const onMesDraftChange = useCallback((ym: string) => {
+@@ -194,25 +254,28 @@
+     // pendiente LOCAL: `foto.loading` no cambia sincronicamente en el primer render posterior al
+     // click, asi que mirarlo solo dejaria pasar un segundo request.
+     if (fotoPendiente) return;
++    // El estado todavia no fue normalizado contra un piso nuevo: no se consulta un mes invalido.
++    if (seleccionFueraDePiso) return;
+ 
+     interactuado.current = true;
+     setReiniciadoPorPiso(false);
+ 
+     const mismoMes = peticion !== null && peticion.mes === mesDraft;
+-    setPeticion({ mes: mesDraft, seq: (peticion?.seq ?? 0) + 1 });
++    setPeticion(crearPeticion(mesDraft));
+ 
+     // Mismo mes => el `payloadKey` de useAction NO cambia => el hook no re-dispara por si solo.
+     // Hay que forzarlo. Con un mes DISTINTO no se llama: el cambio de payloadKey ya dispara, y
+     // llamar refetch ademas produciria DOS requests.
+     if (mismoMes) refetchFoto();
+-  }, [mesDraft, peticion, fotoPendiente, refetchFoto]);
++  }, [mesDraft, peticion, fotoPendiente, seleccionFueraDePiso, crearPeticion, refetchFoto]);
+ 
+   return (
+     <HistoricoVista
+       faltaAccion={faltaAccion}
+       acum={acum}
+-      foto={foto}
++      foto={fotoVista}
+       fotoPendiente={fotoPendiente}
++      seleccionFueraDePiso={seleccionFueraDePiso}
+       plan={plan}
+       mesDraft={mesDraft}
+       mesApplied={mesApplied}
+--- a/src/screens/historico/HistoricoVista.tsx
++++ b/src/screens/historico/HistoricoVista.tsx
+@@ -46,6 +46,13 @@
+    *   2. el boton Consultar queda deshabilitado (anti-doble-request).
+    */
+   fotoPendiente: boolean;
++  /**
++   * El piso seguro subio y la seleccion actual quedo por debajo, pero el efecto que normaliza el
++   * estado todavia no corrio. En este render: se bloquean selector y Consultar, NO se renderiza la
++   * foto vieja (quedo fuera del piso), se muestra el aviso, y el <select> usa `plan.porDefecto`
++   * como `value` -- que siempre existe entre las opciones.
++   */
++  seleccionFueraDePiso: boolean;
+   plan: PlanSelector;
+   mesDraft: string | null;
+   mesApplied: string | null;
+@@ -114,6 +121,7 @@
+   mesDraft,
+   cargandoAcum,
+   fotoPendiente,
++  seleccionFueraDePiso,
+   reiniciadoPorPiso,
+   onMesDraftChange,
+   onConsultar,
+@@ -122,14 +130,21 @@
+   mesDraft: string | null;
+   cargandoAcum: boolean;
+   fotoPendiente: boolean;
++  seleccionFueraDePiso: boolean;
+   reiniciadoPorPiso: boolean;
+   onMesDraftChange: (ym: string) => void;
+   onConsultar: () => void;
+ }) {
+   const listo = !cargandoAcum && mesDraft !== null;
+   // Defensa 1 de 2 contra el doble request (la 2 es el early-return de `onConsultar`). El select
+-  // queda habilitado a proposito: cambiar el draft no dispara nada.
+-  const puedeConsultar = listo && !fotoPendiente;
++  // queda habilitado a proposito mientras A30 esta en vuelo: cambiar el draft no dispara nada.
++  const puedeConsultar = listo && !fotoPendiente && !seleccionFueraDePiso;
++
++  // Con la seleccion fuera del piso, el `value` NO puede ser `mesDraft` (ya no tiene <option>: el
++  // browser saltaria en silencio a la primera opcion). `plan.porDefecto` siempre esta entre las
++  // opciones, por construccion de `construirPlanSelector`.
++  const valorSelect = seleccionFueraDePiso ? plan.porDefecto : (mesDraft ?? '');
++  const selectHabilitado = listo && !seleccionFueraDePiso && plan.opciones.length > 0;
+ 
+   return (
+     <div className="space-y-3">
+@@ -142,12 +157,13 @@
+ 
+       {plan.degradado && !cargandoAcum && (
+         <Banner tono="aviso">
+-          No se pudieron cargar los acumulados. El listado de meses puede estar incompleto: no se
+-          muestran meses posteriores al actual ni la marca de qué meses tienen foto.
++          No se pudieron cargar los acumulados. El listado puede estar incompleto y no se puede
++          verificar qué meses tienen foto. Los meses que ya habías seleccionado o consultado se
++          conservan.
+         </Banner>
+       )}
+ 
+-      {reiniciadoPorPiso && (
++      {(seleccionFueraDePiso || reiniciadoPorPiso) && (
+         <Banner tono="aviso">
+           El piso contable del servidor cambió y es posterior al mes que estabas consultando. Se
+           reinició la selección: elegí un mes y tocá Consultar.
+@@ -165,8 +181,8 @@
+           <select
+             id="mes-historico"
+             className={controlClass}
+-            value={mesDraft ?? ''}
+-            disabled={!listo}
++            value={valorSelect}
++            disabled={!selectHabilitado}
+             onChange={(e) => onMesDraftChange(e.target.value)}
+           >
+             {mesDraft === null && <option value="">Cargando meses...</option>}
+@@ -198,14 +214,19 @@
+ function SeccionFotoMes({
+   foto,
+   fotoPendiente,
++  seleccionFueraDePiso,
+   mesApplied,
+ }: {
+   foto: EstadoLectura<HistoricoMesData>;
+   fotoPendiente: boolean;
++  seleccionFueraDePiso: boolean;
+   mesApplied: string | null;
+ }) {
+   // Inactivo: sin mes aplicado el hook va con enabled:false -> CERO request.
+-  if (mesApplied === null) {
++  // `seleccionFueraDePiso` entra por la misma puerta: el piso subio y el mes que teniamos aplicado
++  // quedo por debajo. La foto vieja NO se renderiza aunque el `data` siga en mano y su T1 pase: ese
++  // mes ya no es consultable. El aviso de reinicio, arriba, da el contexto.
++  if (seleccionFueraDePiso || mesApplied === null) {
+     return (
+       <Tarjeta titulo="Foto del mes">
+         <p className="text-sm text-reed">Elegí un mes y tocá Consultar.</p>
+@@ -263,6 +284,7 @@
+   acum,
+   foto,
+   fotoPendiente,
++  seleccionFueraDePiso,
+   plan,
+   mesDraft,
+   mesApplied,
+@@ -296,11 +318,17 @@
+         mesDraft={mesDraft}
+         cargandoAcum={acum.loading}
+         fotoPendiente={fotoPendiente}
++        seleccionFueraDePiso={seleccionFueraDePiso}
+         reiniciadoPorPiso={reiniciadoPorPiso}
+         onMesDraftChange={onMesDraftChange}
+         onConsultar={onConsultar}
+       />
+-      <SeccionFotoMes foto={foto} fotoPendiente={fotoPendiente} mesApplied={mesApplied} />
++      <SeccionFotoMes
++        foto={foto}
++        fotoPendiente={fotoPendiente}
++        seleccionFueraDePiso={seleccionFueraDePiso}
++        mesApplied={mesApplied}
++      />
+     </div>
+   );
+ }
