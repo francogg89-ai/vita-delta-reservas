@@ -24,3 +24,78 @@ export function mesActualOFloor(floorMes: string): string {
   const actual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
   return actual < floorMes ? floorMes : actual;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Helpers de periodo del historico L3 (A30/A31). ADITIVOS: no tocan los helpers de arriba (A25/A13)
+// ni CuentaCorrienteDetalle.tsx (pantalla cerrada, D-FE-55), que conserva sus copias locales de
+// `etiquetaMes` / `mesesDisponibles`. Deuda cosmetica registrada: `etiquetaMes` queda duplicado.
+//
+// Todas las comparaciones de 'YYYY-MM' y 'YYYY-MM-DD' son LEXICAS: para estos formatos, el orden
+// lexicografico coincide con el cronologico. Nunca se construye un Date para comparar.
+// ---------------------------------------------------------------------------------------------
+
+const MESES_ES = [
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
+];
+
+/** 'YYYY-MM' -> 'julio 2026'. Sin Date (no corre zona horaria). */
+export function etiquetaMes(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  const nombre = MESES_ES[m - 1];
+  return nombre !== undefined ? `${nombre} ${y}` : ym;
+}
+
+/** 'YYYY-MM-DD' -> 'YYYY-MM'. Puramente lexico: los `date` del jsonb llegan como string ISO. */
+export function ymDeFecha(ymd: string): string {
+  return ymd.slice(0, 7);
+}
+
+/**
+ * Mes actual en 'YYYY-MM', en horario de Argentina.
+ *
+ * Usa Intl con `timeZone` explicito en vez de `getFullYear()`/`getMonth()` (hora local del
+ * navegador) para que el mes no dependa del huso del cliente. `mesActualOFloor` (A25/A13) conserva
+ * el criterio viejo y NO se toca: divergencia deliberada, sin efecto practico para usuarios en AR.
+ */
+export function mesActualYM(): string {
+  const ymd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  return ymd.slice(0, 7);
+}
+
+/** El mayor de dos 'YYYY-MM' (comparacion lexica === cronologica). */
+export function maxYM(a: string, b: string): string {
+  return a >= b ? a : b;
+}
+
+/** Lista ASCENDENTE de meses 'YYYY-MM' en [desde, hasta] inclusive. Vacia si hasta < desde. */
+export function rangoMesesYM(desde: string, hasta: string): string[] {
+  const out: string[] = [];
+  if (hasta < desde) return out;
+  let [y, m] = desde.split('-').map(Number);
+  const [hy, hm] = hasta.split('-').map(Number);
+  while (y < hy || (y === hy && m <= hm)) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return out;
+}

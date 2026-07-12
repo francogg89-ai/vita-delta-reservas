@@ -18,6 +18,7 @@ import { RegistrarCobro } from '../screens/RegistrarCobro';
 import { CuentaCorriente } from '../screens/CuentaCorriente';
 import { CuentaCorrienteDetalle } from '../screens/CuentaCorrienteDetalle';
 import { RetirarSaldo } from '../screens/RetirarSaldo';
+import { HistoricoCuentaCorriente } from '../screens/HistoricoCuentaCorriente';
 
 /**
  * Pantallas reales ya implementadas (action -> componente). Los placeholders se reemplazan
@@ -41,6 +42,9 @@ const PANTALLAS: Record<string, ComponentType> = {
   'cuenta_corriente.al_dia': CuentaCorriente,
   'cuenta_corriente.detalle': CuentaCorrienteDetalle,
   'cuenta_corriente.retirar': RetirarSaldo,
+  // A30 + A31 combinadas (D-FE-46). La ruta y el guard salen de la entrada A30 del registry;
+  // A31 no tiene entrada, la consume la propia pantalla.
+  'cuenta_corriente.historico': HistoricoCuentaCorriente,
 };
 
 /**

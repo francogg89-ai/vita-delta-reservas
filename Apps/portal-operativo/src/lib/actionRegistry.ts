@@ -141,6 +141,20 @@ export const ACTION_REGISTRY: Record<string, ActionMeta> = {
     orden: 30,
     ruta: '/socios/retirar',
   },
+  // A30 (L3) -- Historico y acumulados de cuenta corriente. Socio-only via A02/CATALOG.
+  // PANTALLA COMBINADA (D-FE-46): esta UNICA entrada gobierna el item de menu, la ruta y el guard
+  // de RutaProtegida. A31 ('cuenta_corriente.historico_acumulados') NO tiene entrada propia: llega
+  // en `acciones` y la pantalla la consume por TOLERANCIA FORWARD (D-FE-01/09), asi que no genera
+  // item de menu ni ruta. El guard fail-closed conjunto (A30 && A31) vive en la pantalla.
+  // Label sin tilde por consistencia con el resto del registry ('Historico de reservas', grupo
+  // 'Economico'): el archivo es ASCII. El TITULO de la pantalla si lleva acentos.
+  'cuenta_corriente.historico': {
+    action: 'cuenta_corriente.historico',
+    label: 'Historico y acumulados',
+    grupo: 'socios',
+    orden: 40,
+    ruta: '/socios/historico',
+  },
 };
 
 export interface GrupoMenu {
