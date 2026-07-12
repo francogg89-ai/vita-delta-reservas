@@ -32,12 +32,12 @@ BEGIN;
 DO $cleanup$
 DECLARE
   ---------------------------------------------------------------- PARAMETROS
-  c_runid   CONSTANT text := 'qagap_20260712_01';
-  c_cabana  CONSTANT text := 'Tokio';
-  c_mail_vA CONSTANT text := 'qagap+qagap_20260712_01.vecinoa@example.invalid';
-  c_mail_vB CONSTANT text := 'qagap+qagap_20260712_01.vecinob@example.invalid';
-  c_mail_cA CONSTANT text := 'qagap+qagap_20260712_01.candidataa@example.invalid';
-  c_mail_cB CONSTANT text := 'qagap+qagap_20260712_01.candidatab@example.invalid';
+  c_runid   CONSTANT text := '<RUNID>';
+  c_cabana  CONSTANT text := '<CABANA>';
+  c_mail_vA CONSTANT text := 'qagap+<RUNID>.vecinoa@example.invalid';
+  c_mail_vB CONSTANT text := 'qagap+<RUNID>.vecinob@example.invalid';
+  c_mail_cA CONSTANT text := 'qagap+<RUNID>.candidataa@example.invalid';
+  c_mail_cB CONSTANT text := 'qagap+<RUNID>.candidatab@example.invalid';
   -- 2 = corriste los casos A y B (default).  0 = abortaste antes de tocar el portal.
   c_candidatas_esperadas CONSTANT int := 2;
   ---------------------------------------------------------------- ESTADO
@@ -227,10 +227,10 @@ COMMIT;
 
 -- Residuo cero (read-only, post-commit). Debe dar 0 / 0 / 0.
 SELECT
-  (SELECT count(*) FROM public.reservas  WHERE source_event = 'qagap_20260712_01')                 AS reservas_runid,
-  (SELECT count(*) FROM public.huespedes WHERE notas_internas = 'qagap_20260712_01')               AS huespedes_tag,
+  (SELECT count(*) FROM public.reservas  WHERE source_event = '<RUNID>')                 AS reservas_runid,
+  (SELECT count(*) FROM public.huespedes WHERE notas_internas = '<RUNID>')               AS huespedes_tag,
   (SELECT count(*) FROM public.huespedes WHERE LOWER(email) IN (
-      LOWER('qagap+qagap_20260712_01.vecinoa@example.invalid'),
-      LOWER('qagap+qagap_20260712_01.vecinob@example.invalid'),
-      LOWER('qagap+qagap_20260712_01.candidataa@example.invalid'),
-      LOWER('qagap+qagap_20260712_01.candidatab@example.invalid')))                                AS huespedes_qa_email;
+      LOWER('qagap+<RUNID>.vecinoa@example.invalid'),
+      LOWER('qagap+<RUNID>.vecinob@example.invalid'),
+      LOWER('qagap+<RUNID>.candidataa@example.invalid'),
+      LOWER('qagap+<RUNID>.candidatab@example.invalid')))                                AS huespedes_qa_email;

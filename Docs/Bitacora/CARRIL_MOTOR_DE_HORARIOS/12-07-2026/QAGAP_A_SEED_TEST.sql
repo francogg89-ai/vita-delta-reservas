@@ -29,16 +29,16 @@ BEGIN;
 DO $seed$
 DECLARE
   ---------------------------------------------------------------- PARAMETROS
-  c_runid   CONSTANT text := 'qagap_20260712_01';        -- ej: qagap_20260712_01  (solo [a-z0-9_])
-  c_cabana  CONSTANT text := 'Tokio';       -- ej: Tokio  (la MISMA que usas en la UI)
-  c_dA      CONSTANT date := DATE '2026-08-03';      -- check-in de la candidata A
-  c_dB      CONSTANT date := DATE '2026-08-12';      -- check-in de la candidata B
+  c_runid   CONSTANT text := '<RUNID>';        -- ej: qagap_20260712_01  (solo [a-z0-9_])
+  c_cabana  CONSTANT text := '<CABANA>';       -- ej: Tokio  (la MISMA que usas en la UI)
+  c_dA      CONSTANT date := DATE '<dA>';      -- check-in de la candidata A
+  c_dB      CONSTANT date := DATE '<dB>';      -- check-in de la candidata B
   -- Identidades QA: email-only (telefono NULL => upsert_huesped matchea SOLO por
   -- lower(email); sin ambiguedad de normalizacion telefonica). example.invalid = RFC 2606.
-  c_mail_vA CONSTANT text := 'qagap+qagap_20260712_01.vecinoa@example.invalid';
-  c_mail_vB CONSTANT text := 'qagap+qagap_20260712_01.vecinob@example.invalid';
-  c_mail_cA CONSTANT text := 'qagap+qagap_20260712_01.candidataa@example.invalid';
-  c_mail_cB CONSTANT text := 'qagap+qagap_20260712_01.candidatab@example.invalid';
+  c_mail_vA CONSTANT text := 'qagap+<RUNID>.vecinoa@example.invalid';
+  c_mail_vB CONSTANT text := 'qagap+<RUNID>.vecinob@example.invalid';
+  c_mail_cA CONSTANT text := 'qagap+<RUNID>.candidataa@example.invalid';
+  c_mail_cB CONSTANT text := 'qagap+<RUNID>.candidatab@example.invalid';
   ---------------------------------------------------------------- ESTADO
   v_amb text; v_cab bigint; v_rh jsonb;
   v_bciA time;   -- hora check-in base de la candidata A (dia dA)
@@ -305,5 +305,5 @@ SELECT r.id_reserva, h.nombre, h.email, r.fecha_checkin, r.fecha_checkout,
        r.hora_checkin, r.hora_checkout, r.estado, r.source_event
   FROM public.reservas r
   JOIN public.huespedes h USING (id_huesped)
- WHERE r.source_event = 'qagap_20260712_01'
+ WHERE r.source_event = '<RUNID>'
  ORDER BY r.fecha_checkin;
