@@ -5,6 +5,7 @@ import { Cargando } from '../../ui/Cargando';
 import { ErrorCard } from '../../ui/ErrorCard';
 import { Tarjeta } from '../../ui/Tarjeta';
 import { controlClass, botonPrimario } from '../../ui/estilos';
+import { ContenidoAcumulados } from './ContenidoAcumulados';
 import { clasificarFoto } from './estadoFoto';
 import type { PlanSelector } from './planSelector';
 
@@ -102,14 +103,9 @@ function SeccionAcumulados({ acum }: { acum: EstadoLectura<HistoricoAcumuladosDa
   if (acum.error) return <ErrorCard error={acum.error} onRetry={acum.refetch} />;
   if (!acum.data) return null;
 
-  return (
-    <Tarjeta titulo="Acumulados históricos">
-      <p className="text-sm text-reed">
-        Pendiente SB-UI-3: totales acumulados (con desglose de gastos), evolución por período
-        (ordenada) y saldos por socio, más los avisos de integridad (I1, I2, orden, pre-piso).
-      </p>
-    </Tarjeta>
-  );
+  // SB-UI-3. El ciclo loading -> error -> data y el retry independiente de A31 quedan ACA, tal como
+  // se aprobaron; `ContenidoAcumulados` recibe el `data` ya resuelto y es puro (sin hooks, sin red).
+  return <ContenidoAcumulados data={acum.data} />;
 }
 
 // --------------------------------------------------------------------------------------------
