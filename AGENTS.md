@@ -74,6 +74,25 @@ Severidades recomendadas:
 - **BAJO:** precisión, mantenibilidad o documentación.
 - **OBSERVACIÓN:** mejora o riesgo no demostrado.
 
+## Auditoría del cumplimiento de Claude
+
+Además de auditar el resultado técnico, ChatGPT/Codex debe verificar si Claude respetó:
+
+1. `Docs/Operacional/PROTOCOLO_ORQUESTACION_FRENTES_Y_BLOQUES.md`;
+2. `.claude/rules/00-orquestacion.md`;
+3. el kickoff vigente del bloque;
+4. el alcance incluido y excluido;
+5. los entornos permitidos y prohibidos;
+6. las decisiones no reabrir;
+7. las reglas de freno y separación de bloques;
+8. la prohibición de ejecutar escrituras externas sin autorización de Franco;
+9. la obligación de distinguir comprobado, inferido, decidido, pendiente y fuera de alcance;
+10. la obligación de producir un paquete de auditoría y frenar antes del cierre formal.
+
+Toda desviación metodológica debe informarse como hallazgo, aunque el resultado técnico parezca correcto.
+
+El cumplimiento técnico no compensa una violación de alcance, autorización, separación de roles, trazabilidad o reglas de freno.
+
 ## Resultado obligatorio
 
 Toda auditoría debe terminar con uno de estos veredictos:
