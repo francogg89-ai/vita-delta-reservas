@@ -1,0 +1,6 @@
+package.json -- unico cambio de SB-UI-6-FIX2
+
+scripts AGREGADOS:
+  + "qa:mutacion": "node qa/mutacion.mjs"
+
+dependencias: SIN CAMBIOS (por eso package-lock.json no se entrega)

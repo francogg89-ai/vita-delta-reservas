@@ -1,0 +1,12 @@
+# requirements.txt   (v4 -- post-auditoria 4)
+# Dependencias del harness y los smokes de B4-0A.
+# Instalar en un venv:  python3 -m pip install -r requirements.txt   (v4 -- post-auditoria 4)
+#
+# pgserver levanta un PostgreSQL real embebido (trae plpgsql y vector; NO trae
+# btree_gist ni pg_cron). El harness registra un stub compatible de pg_cron.
+# psycopg[binary] es el driver.
+#
+# Versiones probadas en el harness que genero los smokes:
+pgserver==0.1.4
+psycopg[binary]==3.3.4
+pglast==8.2

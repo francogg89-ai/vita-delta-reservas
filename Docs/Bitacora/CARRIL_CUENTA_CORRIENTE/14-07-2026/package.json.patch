@@ -1,0 +1,25 @@
+--- a/package.json
++++ b/package.json
+@@ -11,10 +11,11 @@
+     "typecheck": "tsc --noEmit",
+     "qa": "vite --config vite.qa.config.ts",
+     "qa:build": "vite build --config vite.qa.config.ts --outDir ../dist-qa",
+-    "qa:probes": "esbuild qa/probes.tsx --bundle --platform=node --format=cjs --jsx=automatic --outfile=node_modules/.qa/probes.cjs --log-level=error --external:react --external:react-dom --external:node:* && node node_modules/.qa/probes.cjs",
++    "qa:probes": "node qa/run-probes.mjs",
+     "qa:responsive": "node qa/responsive.mjs",
+     "qa:higiene": "node qa/higiene.mjs",
+-    "typecheck:qa": "tsc --noEmit -p tsconfig.qa.json"
++    "typecheck:qa": "tsc --noEmit -p tsconfig.qa.json",
++    "qa:estructural": "node qa/estructural.mjs"
+   },
+   "dependencies": {
+     "@supabase/supabase-js": "^2.45.0",
+@@ -27,6 +28,8 @@
+     "@types/react-dom": "^18.3.0",
+     "@vitejs/plugin-react": "^4.3.1",
+     "autoprefixer": "^10.4.19",
++    "esbuild": "^0.28.1",
++    "playwright": "^1.61.1",
+     "postcss": "^8.4.39",
+     "tailwindcss": "^3.4.6",
+     "typescript": "^5.5.3",

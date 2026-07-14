@@ -1,0 +1,59 @@
+--- a/ContenidoFoto.tsx
++++ b/ContenidoFoto.tsx
+@@ -36,6 +36,8 @@
+   pagadorGasto,
+   textoLinaje,
+ } from './foto';
++import { Nat, NATURALEZA } from './naturaleza';
++import type { Naturaleza } from './naturaleza';
+ 
+ // =============================================================================================
+ // Contenido de la seccion Foto del mes (A30). Componente PURO: sin hooks, sin red, sin auth.
+@@ -57,47 +59,6 @@
+ // mantiene este modulo sin estado (mas facil de montar en el harness de SB-UI-6).
+ // =============================================================================================
+ 
+-type Naturaleza = 'congelado' | 'vivo' | 'mixto';
+-
+-const NATURALEZA: Record<Naturaleza, { sigla: string; texto: string; clase: string }> = {
+-  congelado: {
+-    sigla: 'F',
+-    texto: 'Congelado en la foto del cierre',
+-    clase: 'border-sand bg-mist text-reed',
+-  },
+-  vivo: {
+-    sigla: 'V',
+-    texto: 'En vivo al momento de consultar',
+-    clase: 'border-river/30 bg-river-light text-river-dark',
+-  },
+-  mixto: {
+-    sigla: 'M',
+-    texto: 'Mixto: parte congelada, parte en vivo',
+-    clase: 'border-amber-200 bg-amber-50 text-amber-800',
+-  },
+-};
+-
+-// Deuda cosmetica declarada: `Nat` / `NATURALEZA` estan duplicados en `ContenidoAcumulados.tsx`,
+-// que quedo CERRADO en SB-UI-3. Consolidar en un modulo compartido cuando A31 se abra (SB-UI-5,
+-// que toca ambos para responsive). Las dos copias son identicas.
+-function Nat({ n }: { n: Naturaleza }) {
+-  const c = NATURALEZA[n];
+-  return (
+-    <span
+-      role="img"
+-      aria-label={c.texto}
+-      title={c.texto}
+-      className={
+-        'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ' +
+-        'text-[10px] font-semibold leading-none ' +
+-        c.clase
+-      }
+-    >
+-      {c.sigla}
+-    </span>
+-  );
+-}
+-
+ /**
+  * Entidad de la foto: ID CONGELADO + nombre VIVO.
+  *

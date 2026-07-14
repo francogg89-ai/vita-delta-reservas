@@ -1,0 +1,98 @@
+--- a/src/screens/historico/acumulados.ts
++++ b/src/screens/historico/acumulados.ts
+@@ -1,6 +1,6 @@
+ import type { EvolucionAcum, HistoricoAcumuladosData } from '../../lib/contratos';
+ import { FLOOR_CONTABLE } from '../../lib/constantes';
+-import { formatARS, formatFecha } from '../../lib/formato';
++import { formatARS } from '../../lib/formato';
+ 
+ // =============================================================================================
+ // Logica pura de la seccion Acumulados (A31). Sin hooks, sin red, sin JSX.
+@@ -85,9 +85,9 @@
+     anomalias.push({
+       codigo: 'piso_divergente',
+       mensaje:
+-        `Los acumulados se computan desde el piso contable del servidor (${formatFecha(data.piso)}), ` +
+-        `que no coincide con el del portal (${formatFecha(FLOOR_CONTABLE)}). Las cifras de abajo son ` +
+-        'las que devolvió el servidor: la pantalla no las recalcula.',
++        'El servidor informa un piso contable distinto del configurado en el portal. Los ' +
++        'acumulados incluyen todas las fotos vigentes y los movimientos devueltos por A31; la ' +
++        'pantalla no filtra ni recalcula las cifras por piso.',
+     });
+   }
+ 
+@@ -129,9 +129,17 @@
+     });
+   }
+ 
+-  // D-CC-37: el piso NO se doble-filtra. Estas fotos y movimientos SI estan incluidos en la
+-  // evolucion, en los totales y en los componentes congelados de los saldos. La UI avisa, pero no
+-  // filtra ni recalcula: hacerlo produciria cifras que no existen en ningun lado del backend.
++  // SEMANTICA REAL DEL PISO (verificada contra el canonico v1.12.0):
++  //   - `vig` (las fotos que alimentan casc/soc/evo y TODOS los totales) se arma con un unico
++  //     WHERE: el de supersesion. NO hay filtro de piso.
++  //   - `retiros_acumulados` = SUM(monto) FROM movimientos_socio WHERE tipo='retiro'. Filtra TIPO,
++  //     sin ventana de fecha ni de piso.
++  //   - `saldo_corriente_socio` arma su propio `vig` igual (sin piso) y su `mov` suma TODOS los
++  //     movimientos del socio, sin filtrar tipo ni fecha.
++  //   - El `piso` viaja SOLO como dato informado y como base de estos dos contadores.
++  // Por eso los avisos dicen "estan INCLUIDOS": no piden una accion, explican por que las cifras
++  // contienen periodos que el selector no ofrece consultar. Filtrarlos en la UI produciria numeros
++  // que no existen en ningun lado del backend (D-CC-37).
+   if (meta.fotos_pre_piso > 0) {
+     anomalias.push({
+       codigo: 'fotos_pre_piso',
+@@ -146,9 +154,10 @@
+     anomalias.push({
+       codigo: 'movimientos_pre_piso',
+       mensaje:
+-        `Hay ${meta.movimientos_pre_piso} movimiento(s) del mayor anteriores al piso contable. ` +
+-        'Están INCLUIDOS en los retiros acumulados y en los saldos por socio. La pantalla no filtra ' +
+-        'ni recalcula el dato.',
++        `Hay ${meta.movimientos_pre_piso} movimientos del mayor anteriores al piso contable. Están ` +
++        'incluidos en los movimientos y el saldo vivo de los socios; los que son de tipo retiro ' +
++        'también están incluidos en los retiros acumulados. La pantalla no filtra ni recalcula el ' +
++        'dato.',
+     });
+   }
+ 
+--- a/src/screens/historico/ContenidoAcumulados.tsx
++++ b/src/screens/historico/ContenidoAcumulados.tsx
+@@ -262,7 +262,7 @@
+ 
+       <Tarjeta titulo="Totales acumulados">
+         <p className="-mt-1 mb-1 text-xs text-reed">
+-          Desde el piso contable ({formatFecha(data.piso)}).
++          Piso contable informado por el servidor: {formatFecha(data.piso)}.
+         </p>
+         <dl className="divide-y divide-sand">
+           <FilaTotal label="Ingresos" nat="congelado" monto={t.ingresos_acumulados} />
+@@ -292,14 +292,26 @@
+         </dl>
+       </Tarjeta>
+ 
+-      <Tarjeta titulo="Evolución por período">
++      <Tarjeta
++        titulo="Evolución por período"
++        acciones={
++          /* Dato INFORMADO por el servidor. No gobierna el vacío, no limita ni trunca la tabla, y
++             se muestra igual si I2 está rota (ahí, además, sube el banner de cardinalidad y la
++             discrepancia con la cantidad de filas queda a la vista). */
++          <span className="text-xs text-reed">
++            Fotos vigentes informadas:{' '}
++            <span className="font-medium tabular-nums text-ink">{data.meta.fotos_vigentes}</span>
++          </span>
++        }
++      >
+         <MapaNaturaleza
+           grupos={[
+             { n: 'congelado', cols: 'Ingresos · Gastos · Utilidad · Repartos' },
+             { n: 'vivo', cols: 'Retiros del mes' },
+           ]}
+         />
+-        {/* El vacío lo decide `evolucion.length`, NUNCA `sin_datos`. */}
++        {/* El vacío lo decide `evolucionOrdenada.length`, NUNCA `sin_datos` ni `meta`. La tabla
++            sale EXCLUSIVAMENTE de `evolucionOrdenada`: se muestran todas las filas que llegaron. */}
+         {filasEvolucion.length === 0 ? (
+           <Vacio mensaje="Todavía no hay ninguna foto de cierre vigente." />
+         ) : (

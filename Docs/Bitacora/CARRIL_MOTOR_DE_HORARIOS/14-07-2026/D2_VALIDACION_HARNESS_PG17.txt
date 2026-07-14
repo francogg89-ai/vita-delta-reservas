@@ -1,0 +1,471 @@
+==============================================================================
+D2 -- VALIDACION EN HARNESS PostgreSQL 17.10
+==============================================================================
+
+$ /opt/pg17/bin/postgres --version
+postgres (PostgreSQL) 17.10
+
+Compilado desde github.com/postgres/postgres, rama REL_17_STABLE, commit 885dc83.
+(apt.postgresql.org no esta en la allowlist de red de este entorno.)
+
+METODO. Cada escenario parte de un FIXTURE LIMPIO. El setup se aplica por ARCHIVO
+con -v ON_ERROR_STOP=1, y NUNCA se descarta stderr. Antes de cada corrida de Q7 se
+ejecuta una SONDA (to_regprocedure) que prueba el estado real de la base.
+
+NOTA SOBRE LA VERSION ANTERIOR DE ESTE LOG. Estaba corrupta: el setup se pasaba con
+psql -c dentro de su -c "...", y bash expandia $fn$ como variable vacia. El SQL
+llegaba invalido, psql fallaba, y el error se descartaba con 2>/dev/null. El setup
+nunca se aplicaba y Q7 corria contra el fixture sano: por eso ESC C y ESC D salian
+verdes y contradecian el relato. Corregido: setup por archivo, stderr siempre visible.
+
+==============================================================================
+PARTE 1 -- FIXTURE LIMPIO. LINEA DE BASE.
+==============================================================================
+
+SETUP (aplicado desde /tmp/fixture_limpio.sql):
+  7 funciones + tabla overrides_operativos + trg_ov_guard (constraint, AFTER I/U/D,
+  FOR EACH ROW, DEFERRABLE INITIALLY DEFERRED) + roles anon/authenticated/service_role.
+  validar_estado_horario_final tiene CUERPO CON CRLF.
+  Solo crear_bloqueo(jsonb) tiene REVOKE; las otras 6 quedan con EXECUTE a PUBLIC.
+
+$ psql -x -v ON_ERROR_STOP=1 -f sonda_estado.sql
+--- stdout ---
+-[ RECORD 1 ]--------------+---------------------
+crear_bloqueo_jsonb        | crear_bloqueo(jsonb)
+crear_bloqueo_text         | <AUSENTE>
+firmas_vivas_crear_bloqueo | 1
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+$ psql -x -v ON_ERROR_STOP=1 -f D2_Q7_VEREDICTO.sql
+--- stdout ---
+BEGIN
+SET
+SET
+DO
+-[ RECORD 1 ]-----------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+bloque                              | D2_Q7_VEREDICTO
+ambiente                            | test
+transaction_read_only               | on
+objetos_nombre_presentes            | 7
+firmas_esperadas_presentes          | 7
+firmas_esperadas_ausentes           | 0
+detalle_firmas_esperadas_ausentes   | <ninguna>
+firmas_distintas_de_esperada        | 0
+detalle_firmas_distintas            | <ninguna>
+overloads_extra                     | 0
+detalle_overloads                   | <ninguno>
+firmas_vivas_totales                | 7
+execute_a_public                    | 6
+detalle_execute_public              | public.crear_override_horario(p_payload jsonb) | public.fecha_hoy_ar() | public.trg_guard_overrides() | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) | public.validar_estado_override(p_id_cabana bigint, p_fecha date) | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date)
+priv_efectivos_data_api             | 18
+detalle_priv_efectivos              | public.crear_override_horario(p_payload jsonb) -> anon | public.crear_override_horario(p_payload jsonb) -> authenticated | public.crear_override_horario(p_payload jsonb) -> service_role | public.fecha_hoy_ar() -> anon | public.fecha_hoy_ar() -> authenticated | public.fecha_hoy_ar() -> service_role | public.trg_guard_overrides() -> anon | public.trg_guard_overrides() -> authenticated | public.trg_guard_overrides() -> service_role | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> anon | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> service_role | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> anon | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> service_role | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> anon | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> service_role
+roles_data_api_ausentes             | 0
+detalle_roles_data_api_ausentes     | <ninguno -- los 3 existen>
+trg_ov_guard_filas                  | 1
+trg_ov_guard_ok                     | t
+otros_triggers_en_overrides         | 0
+detalle_otros_triggers              | <ninguno>
+fingerprint_triggerdef_trg_ov_guard | f6a5394751129110617e9c7ce22e5cab
+objetos_con_cr                      | 1
+cr_totales                          | 3
+detalle_cr                          | validar_estado_horario_final=3
+observaciones                       | EXECUTE A PUBLIC en 6 objeto(s) || PRIVILEGIOS EFECTIVOS data API: 18
+
+COMMIT
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+==============================================================================
+PARTE 2 -- ESC C: crear_bloqueo(TEXT) vivo, crear_bloqueo(JSONB) AUSENTE
+==============================================================================
+
+Este es el FALSO VERDE #1 de Q7 v1. La v1 calculaba presencia por PRONAME:
+  objetos_presentes = 7 | objetos_ausentes = 0 | overloads_extra = 0
+Verde completo sobre una firma que NO existe.
+
+SETUP:
+--------------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.crear_bloqueo(jsonb);
+CREATE FUNCTION public.crear_bloqueo(payload text)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$ BEGIN RETURN '{}'::jsonb; END $fn$;
+--------------------------------------------------------------------------------
+
+$ psql -x -v ON_ERROR_STOP=1 -f esc_c_setup.sql
+--- stdout ---
+DROP FUNCTION
+CREATE FUNCTION
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+$ psql -x -v ON_ERROR_STOP=1 -f sonda_estado.sql
+--- stdout ---
+-[ RECORD 1 ]--------------+--------------------
+crear_bloqueo_jsonb        | <AUSENTE>
+crear_bloqueo_text         | crear_bloqueo(text)
+firmas_vivas_crear_bloqueo | 1
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+$ psql -x -v ON_ERROR_STOP=1 -f D2_Q7_VEREDICTO.sql
+--- stdout ---
+BEGIN
+SET
+SET
+DO
+-[ RECORD 1 ]-----------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+bloque                              | D2_Q7_VEREDICTO
+ambiente                            | test
+transaction_read_only               | on
+objetos_nombre_presentes            | 7
+firmas_esperadas_presentes          | 6
+firmas_esperadas_ausentes           | 1
+detalle_firmas_esperadas_ausentes   | public.crear_bloqueo(jsonb)
+firmas_distintas_de_esperada        | 1
+detalle_firmas_distintas            | public.crear_bloqueo(payload text)
+overloads_extra                     | 0
+detalle_overloads                   | <ninguno>
+firmas_vivas_totales                | 7
+execute_a_public                    | 7
+detalle_execute_public              | public.crear_bloqueo(payload text) | public.crear_override_horario(p_payload jsonb) | public.fecha_hoy_ar() | public.trg_guard_overrides() | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) | public.validar_estado_override(p_id_cabana bigint, p_fecha date) | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date)
+priv_efectivos_data_api             | 21
+detalle_priv_efectivos              | public.crear_bloqueo(payload text) -> anon | public.crear_bloqueo(payload text) -> authenticated | public.crear_bloqueo(payload text) -> service_role | public.crear_override_horario(p_payload jsonb) -> anon | public.crear_override_horario(p_payload jsonb) -> authenticated | public.crear_override_horario(p_payload jsonb) -> service_role | public.fecha_hoy_ar() -> anon | public.fecha_hoy_ar() -> authenticated | public.fecha_hoy_ar() -> service_role | public.trg_guard_overrides() -> anon | public.trg_guard_overrides() -> authenticated | public.trg_guard_overrides() -> service_role | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> anon | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> service_role | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> anon | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> service_role | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> anon | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> service_role
+roles_data_api_ausentes             | 0
+detalle_roles_data_api_ausentes     | <ninguno -- los 3 existen>
+trg_ov_guard_filas                  | 1
+trg_ov_guard_ok                     | t
+otros_triggers_en_overrides         | 0
+detalle_otros_triggers              | <ninguno>
+fingerprint_triggerdef_trg_ov_guard | f6a5394751129110617e9c7ce22e5cab
+objetos_con_cr                      | 1
+cr_totales                          | 3
+detalle_cr                          | validar_estado_horario_final=3
+observaciones                       | FIRMAS ESPERADAS AUSENTES (1): public.crear_bloqueo(jsonb) || FIRMAS VIVAS DISTINTAS DE LA ESPERADA (1): public.crear_bloqueo(payload text) || EXECUTE A PUBLIC en 7 objeto(s) || PRIVILEGIOS EFECTIVOS data API: 21
+
+COMMIT
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+==============================================================================
+PARTE 3 -- ESC D: crear_bloqueo(JSONB) Y crear_bloqueo(TEXT) COEXISTIENDO
+==============================================================================
+
+Overload. La v1 informaba overloads_extra = 0.
+
+SETUP (el fixture limpio ya trae crear_bloqueo(jsonb); se AGREGA la de text):
+--------------------------------------------------------------------------------
+CREATE FUNCTION public.crear_bloqueo(payload text)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$ BEGIN RETURN '{}'::jsonb; END $fn$;
+--------------------------------------------------------------------------------
+
+$ psql -x -v ON_ERROR_STOP=1 -f esc_d_setup.sql
+--- stdout ---
+CREATE FUNCTION
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+$ psql -x -v ON_ERROR_STOP=1 -f sonda_estado.sql
+--- stdout ---
+-[ RECORD 1 ]--------------+---------------------
+crear_bloqueo_jsonb        | crear_bloqueo(jsonb)
+crear_bloqueo_text         | crear_bloqueo(text)
+firmas_vivas_crear_bloqueo | 2
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+$ psql -x -v ON_ERROR_STOP=1 -f D2_Q7_VEREDICTO.sql
+--- stdout ---
+BEGIN
+SET
+SET
+DO
+-[ RECORD 1 ]-----------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+bloque                              | D2_Q7_VEREDICTO
+ambiente                            | test
+transaction_read_only               | on
+objetos_nombre_presentes            | 7
+firmas_esperadas_presentes          | 7
+firmas_esperadas_ausentes           | 0
+detalle_firmas_esperadas_ausentes   | <ninguna>
+firmas_distintas_de_esperada        | 1
+detalle_firmas_distintas            | public.crear_bloqueo(payload text)
+overloads_extra                     | 1
+detalle_overloads                   | crear_bloqueo [2]: public.crear_bloqueo(payload jsonb) , public.crear_bloqueo(payload text)
+firmas_vivas_totales                | 8
+execute_a_public                    | 7
+detalle_execute_public              | public.crear_bloqueo(payload text) | public.crear_override_horario(p_payload jsonb) | public.fecha_hoy_ar() | public.trg_guard_overrides() | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) | public.validar_estado_override(p_id_cabana bigint, p_fecha date) | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date)
+priv_efectivos_data_api             | 21
+detalle_priv_efectivos              | public.crear_bloqueo(payload text) -> anon | public.crear_bloqueo(payload text) -> authenticated | public.crear_bloqueo(payload text) -> service_role | public.crear_override_horario(p_payload jsonb) -> anon | public.crear_override_horario(p_payload jsonb) -> authenticated | public.crear_override_horario(p_payload jsonb) -> service_role | public.fecha_hoy_ar() -> anon | public.fecha_hoy_ar() -> authenticated | public.fecha_hoy_ar() -> service_role | public.trg_guard_overrides() -> anon | public.trg_guard_overrides() -> authenticated | public.trg_guard_overrides() -> service_role | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> anon | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> service_role | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> anon | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> service_role | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> anon | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> service_role
+roles_data_api_ausentes             | 0
+detalle_roles_data_api_ausentes     | <ninguno -- los 3 existen>
+trg_ov_guard_filas                  | 1
+trg_ov_guard_ok                     | t
+otros_triggers_en_overrides         | 0
+detalle_otros_triggers              | <ninguno>
+fingerprint_triggerdef_trg_ov_guard | f6a5394751129110617e9c7ce22e5cab
+objetos_con_cr                      | 1
+cr_totales                          | 3
+detalle_cr                          | validar_estado_horario_final=3
+observaciones                       | FIRMAS VIVAS DISTINTAS DE LA ESPERADA (1): public.crear_bloqueo(payload text) || OVERLOADS EXTRA (1): crear_bloqueo || EXECUTE A PUBLIC en 7 objeto(s) || PRIVILEGIOS EFECTIVOS data API: 21
+
+COMMIT
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+==============================================================================
+PARTE 4 -- ESC E: trg_ov_guard SOLO responde a INSERT
+==============================================================================
+
+FALSO VERDE #2 de Q7 v1: informaba trg_ov_guard_ok = t.
+
+SETUP:
+--------------------------------------------------------------------------------
+DROP TRIGGER IF EXISTS trg_ov_guard ON overrides_operativos;
+CREATE CONSTRAINT TRIGGER trg_ov_guard
+  AFTER INSERT ON overrides_operativos
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+  EXECUTE FUNCTION public.trg_guard_overrides();
+--------------------------------------------------------------------------------
+
+$ psql -x -v ON_ERROR_STOP=1 -f esc_e_setup.sql
+--- stdout ---
+DROP TRIGGER
+CREATE TRIGGER
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+$ psql -x -v ON_ERROR_STOP=1 -f D2_Q4_TRIGGER_OV_GUARD.sql
+--- stdout ---
+BEGIN
+SET
+SET
+DO
+-[ RECORD 1 ]-------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+bloque                    | D2_Q4_TRIGGER_OV_GUARD
+ambiente                  | test
+transaction_read_only     | on
+trigger_oid               | 41218
+trigger_name              | trg_ov_guard
+schema                    | public
+tabla                     | overrides_operativos
+trigger_fn                | public.trg_guard_overrides()
+fn_es_trg_guard_overrides | t
+on_insert                 | t
+on_delete                 | f
+on_update                 | f
+on_truncate               | f
+for_each_row              | t
+momento                   | AFTER
+es_constraint_trigger     | t
+es_deferrable             | t
+initially_deferred        | t
+tgenabled_raw             | O
+enabled_origin            | t
+triggerdef                | CREATE CONSTRAINT TRIGGER trg_ov_guard AFTER INSERT ON overrides_operativos DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION trg_guard_overrides()
+fingerprint_triggerdef    | c576cd92400422abb83f6aada7263b0f
+comentario                | <sin comentario>
+veredicto                 | >>> NOMBRE ESPERADO PERO CONFIGURACION DISTINTA -- revisar columnas <<<
+
+COMMIT
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+$ psql -x -v ON_ERROR_STOP=1 -f D2_Q7_VEREDICTO.sql
+--- stdout ---
+BEGIN
+SET
+SET
+DO
+-[ RECORD 1 ]-----------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+bloque                              | D2_Q7_VEREDICTO
+ambiente                            | test
+transaction_read_only               | on
+objetos_nombre_presentes            | 7
+firmas_esperadas_presentes          | 7
+firmas_esperadas_ausentes           | 0
+detalle_firmas_esperadas_ausentes   | <ninguna>
+firmas_distintas_de_esperada        | 0
+detalle_firmas_distintas            | <ninguna>
+overloads_extra                     | 0
+detalle_overloads                   | <ninguno>
+firmas_vivas_totales                | 7
+execute_a_public                    | 6
+detalle_execute_public              | public.crear_override_horario(p_payload jsonb) | public.fecha_hoy_ar() | public.trg_guard_overrides() | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) | public.validar_estado_override(p_id_cabana bigint, p_fecha date) | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date)
+priv_efectivos_data_api             | 18
+detalle_priv_efectivos              | public.crear_override_horario(p_payload jsonb) -> anon | public.crear_override_horario(p_payload jsonb) -> authenticated | public.crear_override_horario(p_payload jsonb) -> service_role | public.fecha_hoy_ar() -> anon | public.fecha_hoy_ar() -> authenticated | public.fecha_hoy_ar() -> service_role | public.trg_guard_overrides() -> anon | public.trg_guard_overrides() -> authenticated | public.trg_guard_overrides() -> service_role | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> anon | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> service_role | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> anon | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> service_role | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> anon | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> service_role
+roles_data_api_ausentes             | 0
+detalle_roles_data_api_ausentes     | <ninguno -- los 3 existen>
+trg_ov_guard_filas                  | 1
+trg_ov_guard_ok                     | f
+otros_triggers_en_overrides         | 0
+detalle_otros_triggers              | <ninguno>
+fingerprint_triggerdef_trg_ov_guard | c576cd92400422abb83f6aada7263b0f
+objetos_con_cr                      | 1
+cr_totales                          | 3
+detalle_cr                          | validar_estado_horario_final=3
+observaciones                       | EXECUTE A PUBLIC en 6 objeto(s) || PRIVILEGIOS EFECTIVOS data API: 18 || trg_ov_guard PRESENTE PERO MAL CONFIGURADO -- ver Q4: eventos / momento / nivel / constraint / deferrable / enabled
+
+COMMIT
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+==============================================================================
+PARTE 5 -- ESC H: rol 'anon' INEXISTENTE + trigger intruso
+==============================================================================
+
+Q7 v1 NO omitia el rol en silencio: ABORTABA con
+  ERROR:  role "anon" does not exist
+Causa: has_function_privilege(NOMBRE,...) lanza ERROR si el rol no existe, y el guard
+  WHERE EXISTS (SELECT 1 FROM pg_roles ...) AND has_function_privilege(...)
+NO protege: Postgres no garantiza el orden de evaluacion de los predicados de un WHERE.
+FIX: JOIN contra pg_roles y pasar el OID.
+
+SETUP:
+--------------------------------------------------------------------------------
+CREATE TRIGGER trg_intruso
+  AFTER INSERT ON overrides_operativos
+  FOR EACH ROW EXECUTE FUNCTION public.trg_guard_overrides();
+REASSIGN OWNED BY anon TO postgres;
+DROP OWNED BY anon;
+DROP ROLE anon;
+--------------------------------------------------------------------------------
+
+$ psql -x -v ON_ERROR_STOP=1 -f esc_h_setup.sql
+--- stdout ---
+CREATE TRIGGER
+REASSIGN OWNED
+DROP OWNED
+DROP ROLE
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+$ psql -x -v ON_ERROR_STOP=1 -f D2_Q7_VEREDICTO.sql
+--- stdout ---
+BEGIN
+SET
+SET
+DO
+-[ RECORD 1 ]-----------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+bloque                              | D2_Q7_VEREDICTO
+ambiente                            | test
+transaction_read_only               | on
+objetos_nombre_presentes            | 7
+firmas_esperadas_presentes          | 7
+firmas_esperadas_ausentes           | 0
+detalle_firmas_esperadas_ausentes   | <ninguna>
+firmas_distintas_de_esperada        | 0
+detalle_firmas_distintas            | <ninguna>
+overloads_extra                     | 0
+detalle_overloads                   | <ninguno>
+firmas_vivas_totales                | 7
+execute_a_public                    | 6
+detalle_execute_public              | public.crear_override_horario(p_payload jsonb) | public.fecha_hoy_ar() | public.trg_guard_overrides() | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) | public.validar_estado_override(p_id_cabana bigint, p_fecha date) | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date)
+priv_efectivos_data_api             | 12
+detalle_priv_efectivos              | public.crear_override_horario(p_payload jsonb) -> authenticated | public.crear_override_horario(p_payload jsonb) -> service_role | public.fecha_hoy_ar() -> authenticated | public.fecha_hoy_ar() -> service_role | public.trg_guard_overrides() -> authenticated | public.trg_guard_overrides() -> service_role | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_estado_horario_final(p_id_cabana bigint, p_fecha date) -> service_role | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_estado_override(p_id_cabana bigint, p_fecha date) -> service_role | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> authenticated | public.validar_no_eventos_comprometidos(p_id_cabana bigint, p_fecha date) -> service_role
+roles_data_api_ausentes             | 1
+detalle_roles_data_api_ausentes     | anon
+trg_ov_guard_filas                  | 1
+trg_ov_guard_ok                     | t
+otros_triggers_en_overrides         | 1
+detalle_otros_triggers              | trg_intruso -> public.trg_guard_overrides()
+fingerprint_triggerdef_trg_ov_guard | f6a5394751129110617e9c7ce22e5cab
+objetos_con_cr                      | 1
+cr_totales                          | 3
+detalle_cr                          | validar_estado_horario_final=3
+observaciones                       | EXECUTE A PUBLIC en 6 objeto(s) || PRIVILEGIOS EFECTIVOS data API: 12 || ROLES DATA API AUSENTES (1): anon -- los privilegios efectivos NO los cubren || OTROS TRIGGERS en overrides_operativos (1): trg_intruso
+
+COMMIT
+--- stderr ---
+(vacio)
+--- exit code: 0
+
+==============================================================================
+PARTE 6 -- Q4: EL ESCENARIO TRUNCATE. INCONSTRUCTIBLE EN POSTGRESQL 17.
+==============================================================================
+
+Pedido: 'agrega un escenario Q4 con I/U/D + TRUNCATE y demostra que el veredicto
+deja de ser OK'.
+
+HALLAZGO: ese trigger NO SE PUEDE CREAR. TRUNCATE es incompatible con FOR EACH ROW,
+y Q4 v1 ya exigia FOR EACH ROW (bit 1) y CONSTRAINT (tgconstraint <> 0). El falso
+verde por TRUNCATE era TEORICO, no realizable. Las tres pruebas:
+
+--- INTENTO 1 ---
+CREATE CONSTRAINT TRIGGER trg_ov_guard
+  AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON overrides_operativos
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+  EXECUTE FUNCTION public.trg_guard_overrides();
+
+$ psql -v ON_ERROR_STOP=1 -f intento_1.sql
+--- stdout ---
+
+--- stderr ---
+psql:/tmp/t1.sql:4: ERROR:  TRUNCATE FOR EACH ROW triggers are not supported
+--- exit code: 3
+
+--- INTENTO 2 ---
+CREATE TRIGGER trg_ov_guard
+  AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON overrides_operativos
+  FOR EACH ROW EXECUTE FUNCTION public.trg_guard_overrides();
+
+$ psql -v ON_ERROR_STOP=1 -f intento_2.sql
+--- stdout ---
+
+--- stderr ---
+psql:/tmp/t2.sql:3: ERROR:  TRUNCATE FOR EACH ROW triggers are not supported
+--- exit code: 3
+
+--- INTENTO 3 ---
+DROP TRIGGER IF EXISTS trg_ov_guard ON overrides_operativos;
+CREATE TRIGGER trg_ov_guard
+  AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON overrides_operativos
+  FOR EACH STATEMENT EXECUTE FUNCTION public.trg_guard_overrides();
+
+$ psql -v ON_ERROR_STOP=1 -f intento_3.sql
+--- stdout ---
+DROP TRIGGER
+CREATE TRIGGER
+--- stderr ---
+--- exit code: 0
+
+El intento 3 SI se crea, pero con tgtype=60: constraint=false, bit1(FOR EACH ROW)=false.
+Q4 v1 ya lo rechazaba -- por CONSTRAINT y por ROW, no por TRUNCATE.
+
+DEMOSTRACION SOBRE EL PREDICADO AISLADO (tgtype sinteticos):
+El bit 32 SI discrimina. La correccion de Q4 tiene efecto, aunque PostgreSQL no
+permita construir el trigger que lo dispararia.
+
+$ psql -f predicado_aislado.sql
+--- stdout ---
+                  descr                   | tgtype | q4_v1 | q4_v2_y_q7 |          nota           
+------------------------------------------+--------+-------+------------+-------------------------
+ AFTER solo INSERT, FOR EACH ROW          |      5 | f     | f          | 
+ AFTER I/U/D, FOR EACH STATEMENT          |     28 | f     | f          | 
+ AFTER I/U/D, FOR EACH ROW  (el correcto) |     29 | t     | t          | 
+ BEFORE I/U/D, FOR EACH ROW               |     31 | f     | f          | 
+ AFTER I/U/D + TRUNCATE, FOR EACH ROW     |     61 | t     | f          | <<< v1 DABA FALSO VERDE
+ INSTEAD OF I/U/D, FOR EACH ROW           |     93 | t     | f          | <<< v1 DABA FALSO VERDE
+(6 rows)
+
+
+==============================================================================
+PARTE 7 -- FIXTURE SANO Y GATE ANTI-OPS SOBRE LOS 9 ARCHIVOS
+==============================================================================
+
+  ambiente = 'test'  ->  9 / 9 archivos con exit 0
+  ambiente = 'ops'   ->  9 / 9 archivos ABORTAN con: GATE D2: ambiente=ops (esperado test). Abortando.
+
+  pglast:   9/9 PARSE OK, 0 statements de escritura
+  encoding: 9/9 ASCII puro, LF-only

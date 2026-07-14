@@ -1,0 +1,48 @@
+--- a/src/screens/historico/HistoricoVista.tsx
++++ b/src/screens/historico/HistoricoVista.tsx
+@@ -6,6 +6,7 @@
+ import { Tarjeta } from '../../ui/Tarjeta';
+ import { controlClass, botonPrimario } from '../../ui/estilos';
+ import { ContenidoAcumulados } from './ContenidoAcumulados';
++import { ContenidoFoto } from './ContenidoFoto';
+ import { clasificarFoto } from './estadoFoto';
+ import type { PlanSelector } from './planSelector';
+ 
+@@ -246,33 +247,10 @@
+     return <ErrorCard error={errorRespuestaInconsistente()} onRetry={foto.refetch} />;
+   }
+ 
+-  return (
+-    <div className="space-y-4">
+-      {estado === 'E2' && (
+-        <Banner tono="info" titulo="Foto anterior a la extensión del detalle fino">
+-          La cascada y el resultado por socio están completos. El desglose gasto por gasto no se
+-          congeló para este período.
+-        </Banner>
+-      )}
+-
+-      {estado === 'E3' && (
+-        <Banner tono="info" titulo="Este mes todavía no tiene foto congelada">
+-          Todavía no se corrió el cierre del período.
+-        </Banner>
+-      )}
+-
+-      <Tarjeta titulo="Foto del mes">
+-        <p className="text-sm text-reed">
+-          Estado <span className="font-medium text-ink">{estado}</span> · período{' '}
+-          <span className="font-medium text-ink">{foto.data.periodo}</span>.
+-        </p>
+-        <p className="mt-2 text-sm text-reed">
+-          Pendiente SB-UI-4: cabecera de la foto, cascada, resultado por socio, retribución
+-          operativa (mixta), movimientos del mes (en vivo) y detalle fino colapsable.
+-        </p>
+-      </Tarjeta>
+-    </div>
+-  );
++  // SB-UI-4. `estado` ya quedo estrechado a 'E1' | 'E2' | 'E3' por el early return de arriba.
++  // `ContenidoFoto` recibe el `data` YA clasificado y validado contra T1-T7, y es puro (sin hooks,
++  // sin red). Los banners de E2 y E3 viven ahora ahi, junto al contenido que gobiernan.
++  return <ContenidoFoto data={foto.data} estado={estado} />;
+ }
+ 
+ export function HistoricoVista({

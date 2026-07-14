@@ -1,0 +1,1255 @@
+--- /mnt/user-data/outputs/D1_FINGERPRINTS_INVENTARIO_TEST.sql	2026-07-12 21:24:38.007415000 +0000
++++ /tmp/nuevo_concat.sql	2026-07-13 01:59:39.908947415 +0000
+@@ -1,82 +1,83 @@
+--- =====================================================================================
+--- D1_FINGERPRINTS_INVENTARIO_TEST.sql
+--- Bloque: B1.3-consolidacion-canonica  *  Paso 2 + 3 del orden de trabajo (S9)
+--- Entorno: TEST unicamente. Gate anti-OPS transaccional en Q0-GATE.
+--- Naturaleza: 100% LECTURA. BEGIN TRANSACTION READ ONLY. Cero DDL, cero DML, cero temp tables.
+--- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9 (main, tree limpio)
+---
+--- OBJETIVO
+---   (a) Re-medir los 11 objetos de S8 contra el vivo con la receta canonica del carril:
+---         md5(pg_get_functiondef('<obj>'::regprocedure))   -- sin normalizacion previa
+---   (b) Inventariar firma, owner, security, search_path, grants, dependencias y callers.
+---   (c) Discriminar cual de las dos variantes de B1_3_D (08-07 vs 09-07) esta desplegada (H4).
+---   (d) Verificar la ausencia de S3 (crear_paquete_dia_especial) por cuatro vias.
+---   (e) Detectar overloads residuales (firmas viejas que un DROP no barrio).
+---
+--- COMO EJECUTAR
+---   El SQL Editor de Supabase devuelve SOLO el resultset del ultimo statement.
+---   => Ejecutar BLOQUE POR BLOQUE (Q0 .. Q9), pegando cada salida completa.
+---   => Q8 (cuerpos completos) conviene exportarlo a CSV desde el editor, no copiarlo a mano.
+---   => Si tu cliente ya abre una transaccion implicita, la linea BEGIN puede emitir el warning
+---      "there is already a transaction in progress". Es inocuo. Alternativa equivalente:
+---      reemplazar `BEGIN TRANSACTION READ ONLY;` por `SET TRANSACTION READ ONLY;`.
+---
+--- QUE NO HACE ESTE ARTEFACTO
+---   No escribe. No crea objetos. No toca OPS. No consolida nada en el canonico.
+---   No decide H1 ni H3: solo produce la evidencia.
+--- =====================================================================================
++-- ====================================================================================
++-- D1_Q0_CONTEXTO.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * contexto de ejecucion
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
+ 
+ BEGIN TRANSACTION READ ONLY;
+-
+ SET LOCAL statement_timeout = '180s';
+-SET LOCAL search_path = public, pg_catalog;
++SET LOCAL search_path = pg_catalog, public;
+ 
+-
+--- =====================================================================================
+--- Q0-GATE -- GATE ANTI-OPS (transaccional). Aborta la transaccion si el ambiente no es TEST.
+---            Aunque el script sea read-only, el gate evita el riesgo REAL de recolectar
+---            evidencia contra OPS y consolidarla como si fuera TEST.
+--- =====================================================================================
+ DO $gate$
+ DECLARE
+-  v_amb text := (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente');
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
+ BEGIN
+   IF v_amb IS DISTINCT FROM 'test' THEN
+-    RAISE EXCEPTION 'GATE D1: ambiente=% (esperado test). Abortando la recoleccion.',
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
+       COALESCE(v_amb, '<null>');
+   END IF;
+-  RAISE NOTICE 'GATE D1 OK: ambiente=test.';
+ END
+ $gate$;
+ 
+-
+--- =====================================================================================
+--- Q0 -- CONTEXTO DE EJECUCION (1 fila). Evidencia de donde y como se corrio.
+--- =====================================================================================
++-- Q0 -- CONTEXTO DE EJECUCION (1 fila).
+ SELECT
+   'Q0_CONTEXTO'                                                              AS bloque,
+-  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente')  AS ambiente,
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
+   current_database()                                                         AS database,
+-  current_user                                                               AS current_user,
+-  session_user                                                               AS session_user,
++  current_user                                                               AS usuario_actual,
++  session_user                                                               AS usuario_sesion,
+   version()                                                                  AS pg_version,
+   current_setting('server_version_num')                                      AS pg_version_num,
+   current_setting('search_path')                                             AS search_path,
+   current_setting('TimeZone')                                                AS timezone,
+   now()                                                                      AS txn_start_ts,
+   clock_timestamp()                                                          AS wall_clock_ts,
+-  current_setting('transaction_read_only')                                   AS txn_read_only,
+   inet_server_addr()::text                                                   AS server_addr;
+ 
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q1_FINGERPRINTS.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * los 11 objetos de S8
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
++
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
++
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
+ 
+--- =====================================================================================
+--- Q1 -- LOS 11 OBJETOS DE S8: identidad completa + fingerprint + baseline + veredicto (11 filas)
+---      Receta de fingerprint: md5(pg_get_functiondef(oid)). Sin normalizacion.
+---      NOTA sobre el objeto #5: b4e48e49123a4c189609d0adc21730f5 es el hash de la FUNCION
+---      TRIGGER public.trg_guard_vigencias(), NO de una definicion de trigger. Las dos
+---      instancias de trigger (trg_vig_guard / trg_vig_guard_detalle) se miden aparte en Q4
+---      con pg_get_triggerdef(), que no tiene baseline en S8.
+--- =====================================================================================
++-- Q1 -- LOS 11 OBJETOS DE S8 (11 filas).
++--   Receta canonica: md5(pg_get_functiondef(oid)). Sin normalizacion previa.
++--   OBJETO #5: b4e48e49123a4c189609d0adc21730f5 es el hash de la FUNCION TRIGGER
++--   public.trg_guard_vigencias(), NO de una definicion de trigger. Las dos instancias
++--   (trg_vig_guard / trg_vig_guard_detalle) se miden en Q4 con pg_get_triggerdef();
++--   esas definiciones NO tienen baseline en S8.
+ WITH baseline(n, sig, rol_en_b13, fp_base) AS (
+   VALUES
+     ( 1, 'public.resolver_horario(bigint,date)',                                            'wrapper - INTACTO',           '1bd96c89e587b15582fd7b2e29ae7e18'),
+@@ -91,19 +92,21 @@
+     (10, 'public.crear_override_horario_puntual(jsonb)',                                    'nuevo (F) - DB-only',         '33d7ac8ad5f80b72a0266fb4eb4f7f4d'),
+     (11, 'public.obtener_disponibilidad_rango(date,date,bigint)',                           'ODR - INTACTO (pin)',         '37009a32154f93b80520500c0f15b46b')
+ ),
+-res AS (
+-  SELECT b.*, to_regprocedure(b.sig) AS oid FROM baseline b
+-)
++res AS (SELECT b.*, to_regprocedure(b.sig) AS rp FROM baseline b)
+ SELECT
+   'Q1_FINGERPRINTS'                                             AS bloque,
+-  r.n                                                           AS "#",
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
++  r.n                                                           AS nro,
+   r.sig                                                         AS firma_esperada,
+   r.rol_en_b13                                                  AS rol,
+-  r.oid::oid                                                    AS oid,
+-  r.oid::text                                                   AS firma_resuelta,
+-  pg_get_function_identity_arguments(r.oid)                     AS args_identidad,
+-  pg_get_function_arguments(r.oid)                              AS args_completos,
+-  pg_get_function_result(r.oid)                                 AS retorno,
++  r.rp::oid                                                     AS oid,
++  CASE WHEN r.rp IS NULL THEN NULL
++       ELSE format('%I.%I(%s)', ns.nspname, p.proname,
++                   pg_get_function_identity_arguments(p.oid)) END AS firma_resuelta,
++  pg_get_function_identity_arguments(r.rp)                      AS args_identidad,
++  pg_get_function_arguments(r.rp)                               AS args_completos,
++  pg_get_function_result(r.rp)                                  AS retorno,
+   pg_get_userbyid(p.proowner)                                   AS owner,
+   l.lanname                                                     AS lenguaje,
+   p.prokind                                                     AS prokind,
+@@ -118,33 +121,71 @@
+   CASE p.proparallel WHEN 's' THEN 'SAFE'
+                      WHEN 'r' THEN 'RESTRICTED'
+                      WHEN 'u' THEN 'UNSAFE' END                 AS parallel,
+-  COALESCE(array_to_string(p.proconfig, ' | '), '<null>')       AS proconfig_search_path,
+-  COALESCE(p.proacl::text, '<null> (= default: EXECUTE a PUBLIC)') AS proacl,
+-  COALESCE(obj_description(r.oid::oid, 'pg_proc'), '<sin comentario>') AS comentario,
++  COALESCE(array_to_string(p.proconfig, ' | '), '<null>')       AS proconfig,
++  COALESCE(p.proacl::text,
++           '<null> (= ACL por defecto: EXECUTE a PUBLIC)')      AS proacl,
++  COALESCE(obj_description(r.rp::oid, 'pg_proc'), '<sin comentario>') AS comentario,
+   r.fp_base                                                     AS fingerprint_baseline_s8,
+-  md5(pg_get_functiondef(r.oid))                                AS fingerprint_actual,
+-  length(pg_get_functiondef(r.oid))                             AS len_functiondef,
++  md5(pg_get_functiondef(r.rp))                                 AS fingerprint_actual,
++  octet_length(pg_get_functiondef(r.rp))                        AS bytes_functiondef,
+   CASE
+-    WHEN r.oid IS NULL                                        THEN 'AUSENTE'
+-    WHEN md5(pg_get_functiondef(r.oid)) = r.fp_base           THEN 'COINCIDE'
++    WHEN r.rp IS NULL                                   THEN 'AUSENTE'
++    WHEN md5(pg_get_functiondef(r.rp)) = r.fp_base      THEN 'COINCIDE'
+     ELSE 'DIFIERE'
+   END                                                           AS veredicto
+ FROM res r
+-LEFT JOIN pg_proc     p ON p.oid  = r.oid
+-LEFT JOIN pg_language l ON l.oid  = p.prolang
++LEFT JOIN pg_proc      p  ON p.oid  = r.rp::oid
++LEFT JOIN pg_language  l  ON l.oid  = p.prolang
++LEFT JOIN pg_namespace ns ON ns.oid = p.pronamespace
+ ORDER BY r.n;
+ 
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q2_OVERLOADS.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * overloads residuales
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
++
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
++
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
+ 
+--- =====================================================================================
+ -- Q2 -- OVERLOADS RESIDUALES (N filas).
+---      Busca por proname TODAS las firmas vivas de los objetos del carril, sin asumir
+---      argumentos. Motivo: B1_3_A ejecuta
+---        DROP FUNCTION public.vigencias_conflictos_comprometidos(date,date,boolean,time,time,time,time)
+---      (firma B1.1). Si ese DROP no corrio, habria DOS helpers vivos y el resolver podria
+---      estar llamando al viejo. Cualquier firma no listada en Q1 es un SOBRANTE.
+--- =====================================================================================
++--   Busca por proname TODAS las firmas vivas del carril, sin asumir argumentos.
++--   Motivo: B1_3_A ejecuta
++--     DROP FUNCTION public.vigencias_conflictos_comprometidos(date,date,boolean,time,time,time,time)
++--   (la firma de siete argumentos, de B1.1).
++--
++--   Si ese DROP no corrio, queda un overload historico residual. Los callers B1.3 que
++--   pasan jsonb resuelven inequivocamente la firma nueva; deben buscarse callers legacy
++--   que todavia invoquen la firma de siete argumentos.
++--
++--   La comparacion es por OID, no por texto: regprocedure::text OMITE el schema cuando
++--   el objeto es visible en el search_path, y cualquier match textual contra 'public.x(...)'
++--   fallaria siempre.
+ SELECT
+   'Q2_OVERLOADS'                                       AS bloque,
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
+   p.oid                                                AS oid,
+   n.nspname                                            AS schema,
+   p.proname                                            AS nombre,
+@@ -154,11 +195,9 @@
+   pg_get_userbyid(p.proowner)                          AS owner,
+   p.prokind                                            AS prokind,
+   md5(pg_get_functiondef(p.oid))                       AS fingerprint,
+-  -- Comparacion por OID, no por texto: regprocedure::text OMITE el schema cuando el objeto
+-  -- es visible en el search_path, lo que haria fallar cualquier match textual con 'public.x(...)'.
+   CASE WHEN EXISTS (
+          SELECT 1 FROM unnest(ARRAY[
+-           to_regprocedure('public.resolver_horario(bigint,date)'),
++    to_regprocedure('public.resolver_horario(bigint,date)'),
+            to_regprocedure('public._resolver_horario(bigint,date,boolean)'),
+            to_regprocedure('public.vigencias_conflictos_comprometidos(date,date,boolean,jsonb)'),
+            to_regprocedure('public.crear_vigencia_horario(jsonb)'),
+@@ -183,18 +222,45 @@
+     'crear_vigencia_horario', 'trg_guard_vigencias', 'validar_gap_bordes_congelados',
+     'crear_prereserva', 'confirmar_reserva', 'crear_reserva_con_horario_pactado',
+     'crear_override_horario_puntual', 'obtener_disponibilidad_rango',
+-    'crear_paquete_dia_especial'   -- S3: debe dar CERO filas
++    'crear_paquete_dia_especial'
+   )
+ ORDER BY p.proname, p.oid;
+ 
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q3_ACL.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * ACL expandida
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
++
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
++
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
+ 
+--- =====================================================================================
+--- Q3 -- ACL EXPANDIDA + PRIVILEGIOS EFECTIVOS (N filas).
+---      aclexplode(COALESCE(proacl, acldefault('f', proowner))) segun lo exigido:
+---      cuando proacl IS NULL, PostgreSQL aplica el ACL por defecto (EXECUTE a PUBLIC),
+---      que es exactamente lo que el hardening del proyecto REVOKEa. Sin el COALESCE,
+---      un objeto sin hardening se veria como "sin grants" y seria un falso verde.
+--- =====================================================================================
++-- Q3 -- ACL EXPANDIDA (N filas).
++--   aclexplode(COALESCE(proacl, acldefault('f', proowner))): cuando proacl IS NULL,
++--   PostgreSQL aplica el ACL por defecto (EXECUTE a PUBLIC), que es exactamente lo que
++--   el hardening REVOKEa. Sin el COALESCE, un objeto sin hardening se veria como
++--   "sin grants" -> falso verde.
+ WITH objs(n, sig) AS (
+   VALUES
+     ( 1,'public.resolver_horario(bigint,date)'),
+@@ -209,38 +275,64 @@
+     (10,'public.crear_override_horario_puntual(jsonb)'),
+     (11,'public.obtener_disponibilidad_rango(date,date,bigint)')
+ ),
+-r AS (SELECT o.n, o.sig, to_regprocedure(o.sig) AS oid FROM objs o),
+-acl AS (
+-  SELECT
+-    r.n, r.sig, r.oid,
+-    a.grantee, a.grantor, a.privilege_type, a.is_grantable
+-  FROM r
+-  JOIN pg_proc p ON p.oid = r.oid
+-  CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+-)
++r AS (SELECT o.n, o.sig, to_regprocedure(o.sig) AS rp FROM objs o)
+ SELECT
+   'Q3_ACL'                                                            AS bloque,
+-  acl.n                                                               AS "#",
+-  acl.sig                                                             AS firma,
+-  CASE WHEN acl.grantee = 0 THEN 'PUBLIC'
+-       ELSE COALESCE(pg_get_userbyid(acl.grantee), '<oid ' || acl.grantee || '>') END AS grantee,
+-  pg_get_userbyid(acl.grantor)                                        AS grantor,
+-  acl.privilege_type                                                  AS privilegio,
+-  acl.is_grantable                                                    AS grantable,
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
++  r.n                                                                 AS nro,
++  r.sig                                                               AS firma,
++  CASE WHEN a.grantee = 0 THEN 'PUBLIC'
++       ELSE COALESCE(pg_get_userbyid(a.grantee), '<oid ' || a.grantee || '>') END AS grantee,
++  pg_get_userbyid(a.grantor)                                          AS grantor,
++  a.privilege_type                                                    AS privilegio,
++  a.is_grantable                                                      AS grantable,
+   CASE
+-    WHEN acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
++    WHEN a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+       THEN '>>> EXECUTE A PUBLIC -- REVISAR HARDENING <<<'
+-    WHEN COALESCE(pg_get_userbyid(acl.grantee),'') IN ('anon','authenticated','service_role')
+-         AND acl.privilege_type = 'EXECUTE'
++    WHEN COALESCE(pg_get_userbyid(a.grantee),'') IN ('anon','authenticated','service_role')
++         AND a.privilege_type = 'EXECUTE'
+       THEN '>>> EXECUTE A ROL DATA API -- REVISAR HARDENING <<<'
+     ELSE 'ok'
+   END                                                                 AS veredicto
+-FROM acl
+-ORDER BY acl.n, grantee, acl.privilege_type;
++FROM r
++JOIN pg_proc p ON p.oid = r.rp::oid
++CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
++ORDER BY r.n, grantee, a.privilege_type;
++
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q3B_PRIV_EFECTIVOS.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * privilegios efectivos anon/authenticated/service_role
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
+ 
+--- Q3-BIS -- Privilegios EFECTIVOS de los 3 roles de la Data API (11 x 3 = 33 filas).
+---          has_function_privilege resuelve herencia y PUBLIC; es la verdad operativa,
+---          mas fuerte que leer proacl a ojo.
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
++
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
++
++-- Q3-BIS -- PRIVILEGIOS EFECTIVOS de los 3 roles de la Data API (11 x 3 = 33 filas).
++--   has_function_privilege resuelve herencia y PUBLIC: es la verdad operativa,
++--   mas fuerte que leer proacl a ojo.
+ WITH objs(n, sig) AS (
+   VALUES
+     ( 1,'public.resolver_horario(bigint,date)'),
+@@ -257,8 +349,10 @@
+ ),
+ roles(rolname) AS (VALUES ('anon'),('authenticated'),('service_role'))
+ SELECT
+-  'Q3BIS_PRIV_EFECTIVOS'                                    AS bloque,
+-  o.n                                                       AS "#",
++  'Q3B_PRIV_EFECTIVOS'                                      AS bloque,
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
++  o.n                                                       AS nro,
+   o.sig                                                     AS firma,
+   ro.rolname                                                AS rol,
+   CASE
+@@ -276,53 +370,131 @@
+ FROM objs o CROSS JOIN roles ro
+ ORDER BY o.n, ro.rolname;
+ 
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q4_TRIGGERS.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * triggers trg_vig_guard / trg_vig_guard_detalle
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
++
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
++
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
+ 
+--- =====================================================================================
+--- Q4 -- TRIGGERS (N filas). El baseline b4e48e... de S8 es de la FUNCION trg_guard_vigencias().
+---      Las DEFINICIONES de trigger no tienen baseline en S8: se miden aca por primera vez.
+---      Instancias esperadas (segun B1_3_A_MIGRACION_SEMANAL_TEST.sql):
+---        trg_vig_guard          -> public.vigencias_horario_base     (CONSTRAINT, DEFERRABLE INITIALLY DEFERRED)
+---        trg_vig_guard_detalle  -> public.vigencias_horario_detalle  (CONSTRAINT)
+---      Ambos comparten la trigger-fn public.trg_guard_vigencias().
+--- =====================================================================================
++-- Q4 -- TRIGGERS (N filas).
++--   El baseline b4e48e... de S8 es de la FUNCION trg_guard_vigencias(), no de estas
++--   definiciones. Las definiciones de trigger NO tienen baseline en S8: se miden aca
++--   por primera vez con pg_get_triggerdef().
++--
++--   Esperado (segun B1_3_A_MIGRACION_SEMANAL_TEST.sql):
++--     trg_vig_guard          -> public.vigencias_horario_base
++--     trg_vig_guard_detalle  -> public.vigencias_horario_detalle
++--   Ambos CONSTRAINT TRIGGER, DEFERRABLE INITIALLY DEFERRED, enabled, compartiendo
++--   la trigger-fn public.trg_guard_vigencias().
+ SELECT
+   'Q4_TRIGGERS'                                        AS bloque,
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
+   t.oid                                                AS trigger_oid,
+   t.tgname                                             AS trigger_name,
++  ns.nspname                                           AS schema,
+   c.relname                                            AS tabla,
+-  n.nspname                                            AS schema,
+-  p.oid::regprocedure::text                            AS trigger_fn,
+-  t.tgconstraint <> 0                                  AS es_constraint_trigger,
+-  t.tgdeferrable                                       AS deferrable,
++  format('%I.%I(%s)', pn.nspname, p.proname,
++         pg_get_function_identity_arguments(p.oid))    AS trigger_fn,
++  (p.oid = to_regprocedure('public.trg_guard_vigencias()')::oid) AS fn_es_trg_guard_vigencias,
++  (t.tgconstraint <> 0)                                AS es_constraint_trigger,
++  t.tgdeferrable                                       AS es_deferrable,
+   t.tginitdeferred                                     AS initially_deferred,
+-  t.tgenabled                                          AS enabled,
++  t.tgenabled                                          AS tgenabled_raw,
++  (t.tgenabled = 'O')                                  AS enabled_origin,
+   pg_get_triggerdef(t.oid, true)                       AS triggerdef,
+   md5(pg_get_triggerdef(t.oid, true))                  AS fingerprint_triggerdef,
+   COALESCE(obj_description(t.oid, 'pg_trigger'), '<sin comentario>') AS comentario,
+-  CASE WHEN t.tgname IN ('trg_vig_guard','trg_vig_guard_detalle')
+-       THEN 'ESPERADO' ELSE '>>> TRIGGER NO ESPERADO <<<' END AS veredicto
++  CASE
++    WHEN t.tgname = 'trg_vig_guard'
++         AND ns.nspname = 'public' AND c.relname = 'vigencias_horario_base'
++         AND p.oid = to_regprocedure('public.trg_guard_vigencias()')::oid
++         AND t.tgconstraint <> 0 AND t.tgdeferrable AND t.tginitdeferred AND t.tgenabled = 'O'
++      THEN 'OK -- exacto y bien configurado'
++    WHEN t.tgname = 'trg_vig_guard_detalle'
++         AND ns.nspname = 'public' AND c.relname = 'vigencias_horario_detalle'
++         AND p.oid = to_regprocedure('public.trg_guard_vigencias()')::oid
++         AND t.tgconstraint <> 0 AND t.tgdeferrable AND t.tginitdeferred AND t.tgenabled = 'O'
++      THEN 'OK -- exacto y bien configurado'
++    WHEN t.tgname IN ('trg_vig_guard','trg_vig_guard_detalle')
++      THEN '>>> NOMBRE ESPERADO PERO CONFIGURACION INCORRECTA <<<'
++    ELSE '>>> TRIGGER NO ESPERADO <<<'
++  END                                                  AS veredicto
+ FROM pg_trigger t
+-JOIN pg_class     c ON c.oid = t.tgrelid
+-JOIN pg_namespace n ON n.oid = c.relnamespace
+-JOIN pg_proc      p ON p.oid = t.tgfoid
++JOIN pg_class     c  ON c.oid  = t.tgrelid
++JOIN pg_namespace ns ON ns.oid = c.relnamespace
++JOIN pg_proc      p  ON p.oid  = t.tgfoid
++JOIN pg_namespace pn ON pn.oid = p.pronamespace
+ WHERE NOT t.tgisinternal
+   AND (
+-        p.oid = to_regprocedure('public.trg_guard_vigencias()')
++        p.oid = to_regprocedure('public.trg_guard_vigencias()')::oid
+      OR t.tgname IN ('trg_vig_guard','trg_vig_guard_detalle')
+       )
+ ORDER BY t.tgname;
+ 
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q5_DEPEND.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * dependencias pg_depend
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
++
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
++
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
+ 
+--- =====================================================================================
+ -- Q5 -- DEPENDENCIAS pg_depend (N filas), en ambas direcciones.
+---      LIMITACION EXPLICITA -- NO ES EXHAUSTIVO:
+---        PostgreSQL NO registra en pg_depend las referencias que ocurren dentro del CUERPO
+---        de una funcion PL/pgSQL, ni las de SQL dinamico (EXECUTE). pg_depend solo captura
+---        dependencias de la SIGNATURA (tipos de argumento, tipo de retorno), del lenguaje,
+---        del schema y de objetos referenciados por funciones SQL con check_function_bodies.
+---        => Para el grafo de llamadas real, la autoridad es Q6 (busqueda por texto).
+---        => Este bloque sirve para detectar dependencias estructurales, no logica de negocio.
+--- =====================================================================================
++--
++--   LIMITACION EXPLICITA -- NO ES EXHAUSTIVO:
++--     PostgreSQL NO registra en pg_depend las referencias que ocurren dentro del CUERPO
++--     de una funcion PL/pgSQL, ni las de SQL dinamico (EXECUTE). pg_depend captura
++--     dependencias de la SIGNATURA (tipos de argumento y de retorno), del lenguaje,
++--     del schema, y de objetos referenciados por funciones SQL parseadas.
++--     => Este bloque sirve para dependencias ESTRUCTURALES, no para logica de negocio.
++--     => Los candidatos de callers estan en Q6 (heuristica por texto), no aca.
+ WITH objs(n, sig) AS (
+   VALUES
+     ( 1,'public.resolver_horario(bigint,date)'),
+@@ -338,41 +510,78 @@
+     (11,'public.obtener_disponibilidad_rango(date,date,bigint)')
+ ),
+ r AS (SELECT o.n, o.sig, to_regprocedure(o.sig)::oid AS oid FROM objs o WHERE to_regprocedure(o.sig) IS NOT NULL)
+--- 5a) De que depende el objeto
+ SELECT
+   'Q5_DEPEND'                                                        AS bloque,
+-  r.n                                                                AS "#",
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
++  r.n                                                                AS nro,
+   r.sig                                                              AS firma,
+   'DEPENDE_DE'                                                       AS direccion,
+   pg_describe_object(d.refclassid, d.refobjid, d.refobjsubid)        AS objeto_relacionado,
+   d.deptype                                                          AS deptype
+ FROM r
+-JOIN pg_depend d
+-  ON d.classid = 'pg_proc'::regclass AND d.objid = r.oid
+-WHERE d.refclassid <> 'pg_type'::regclass OR d.deptype <> 'n'   -- ruido de tipos base
++JOIN pg_depend d ON d.classid = 'pg_proc'::regclass AND d.objid = r.oid
++WHERE d.refclassid <> 'pg_type'::regclass OR d.deptype <> 'n'
+ UNION ALL
+--- 5b) Que depende del objeto
+ SELECT
+   'Q5_DEPEND'                                                        AS bloque,
+-  r.n                                                                AS "#",
+-  r.sig                                                              AS firma,
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente'),
++  current_setting('transaction_read_only'),
++  r.n,
++  r.sig,
+   'ES_USADO_POR'                                                     AS direccion,
+   pg_describe_object(d.classid, d.objid, d.objsubid)                 AS objeto_relacionado,
+   d.deptype                                                          AS deptype
+ FROM r
+-JOIN pg_depend d
+-  ON d.refclassid = 'pg_proc'::regclass AND d.refobjid = r.oid
+-ORDER BY 2, 4, 5;
++JOIN pg_depend d ON d.refclassid = 'pg_proc'::regclass AND d.refobjid = r.oid
++ORDER BY 4, 6, 7;
+ 
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q6_CALLERS_CANDIDATOS.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * candidatos de callers por texto (heuristica)
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
++
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
++
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
+ 
+--- =====================================================================================
+--- Q6 -- CALLERS REALES por TEXTO (N filas). Autoridad del grafo de llamadas.
+---      Se busca sobre pg_get_functiondef() de TODAS las funciones/procedimientos de public
+---      (no sobre prosrc: functiondef incluye header, SET clauses y cuerpo -> superset),
+---      mas pg_views.definition y pg_matviews.definition.
+---      Word-boundary regex (\m ... \M) para no matchear substrings.
+---      Auto-referencias excluidas.
+--- =====================================================================================
++-- Q6 -- CANDIDATOS DE CALLERS POR TEXTO (N filas). HEURISTICA, NO AUTORIDAD.
++--
++--   ADVERTENCIA -- ESTE BLOQUE NO ES UNA AUTORIDAD DEL GRAFO DE LLAMADAS:
++--     * Es una busqueda por TEXTO, no un analisis semantico.
++--     * Puede encontrar COMENTARIOS, STRINGS literales o identificadores casuales que
++--       contengan el nombre sin ser una invocacion.
++--     * NO resuelve overloads por firma: si hay dos funciones con el mismo proname y
++--       distintos argumentos, este bloque no distingue a cual se llama.
++--     * Puede OMITIR invocaciones via SQL dinamico (EXECUTE 'SELECT ' || nombre),
++--       nombres construidos en runtime, o invocaciones indirectas (regprocedure en una
++--       variable, triggers apuntando por oid, etc.).
++--   Cada match viene con su VENTANA DE CONTEXTO. La clasificacion final es manual.
++--
++--   Universo barrido: pg_get_functiondef() de TODAS las funciones/procedimientos de
++--   public (superset de prosrc: incluye header y clausulas SET) + pg_views + pg_matviews.
++--   Word-boundary \m..\M para no matchear substrings. Auto-referencias excluidas.
+ WITH targets(n, nombre, sig) AS (
+   VALUES
+     ( 1,'resolver_horario',                  'public.resolver_horario(bigint,date)'),
+@@ -388,59 +597,103 @@
+     (11,'obtener_disponibilidad_rango',      'public.obtener_disponibilidad_rango(date,date,bigint)')
+ ),
+ funcs AS (
+-  SELECT p.oid, p.oid::regprocedure::text AS caller, pg_get_functiondef(p.oid) AS cuerpo
++  SELECT p.oid AS oid,
++         format('%I.%I(%s)', n.nspname, p.proname,
++                pg_get_function_identity_arguments(p.oid)) AS objeto,
++         'funcion'::text                                   AS tipo,
++         pg_get_functiondef(p.oid)                         AS cuerpo
+   FROM pg_proc p
+   JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public' AND p.prokind IN ('f','p')
+ ),
+ vistas AS (
+-  SELECT NULL::oid AS oid, 'VIEW ' || schemaname || '.' || viewname AS caller, definition AS cuerpo
++  SELECT NULL::oid, format('%I.%I', schemaname, viewname), 'vista'::text, definition
+   FROM pg_views WHERE schemaname = 'public'
+   UNION ALL
+-  SELECT NULL::oid, 'MATVIEW ' || schemaname || '.' || matviewname, definition
++  SELECT NULL::oid, format('%I.%I', schemaname, matviewname), 'matview'::text, definition
+   FROM pg_matviews WHERE schemaname = 'public'
+ ),
+ universo AS (SELECT * FROM funcs UNION ALL SELECT * FROM vistas)
+ SELECT
+-  'Q6_CALLERS'                                                   AS bloque,
+-  t.n                                                            AS "#",
+-  t.sig                                                          AS objeto_llamado,
+-  u.caller                                                       AS caller,
+-  CASE WHEN u.oid IS NULL THEN 'vista' ELSE 'funcion' END        AS tipo_caller,
+-  (SELECT count(*) FROM regexp_matches(u.cuerpo, '\m' || t.nombre || '\M', 'g')) AS ocurrencias
++  'Q6_CALLERS_CANDIDATOS'                                           AS bloque,
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
++  t.n                                                               AS nro,
++  t.sig                                                             AS objeto_buscado,
++  u.objeto                                                          AS candidato,
++  u.tipo                                                            AS tipo_candidato,
++  m.ord                                                             AS ocurrencia,
++  regexp_replace(
++    COALESCE(m.g[1],'') || ' >>>' || m.g[2] || '<<< ' || COALESCE(m.g[3],''),
++    '\s+', ' ', 'g')                                               AS ventana_contexto,
++  CASE
++    WHEN COALESCE(m.g[1],'') ~ '--'      THEN 'pista: posible COMENTARIO'
++    WHEN COALESCE(m.g[3],'') ~ '^\s*\(' THEN 'pista: posible INVOCACION'
++    ELSE 'pista: mencion suelta -- clasificar a mano'
++  END                                                               AS pista_heuristica
+ FROM targets t
+-JOIN universo u
+-  ON u.cuerpo ~ ('\m' || t.nombre || '\M')
+-WHERE u.oid IS DISTINCT FROM to_regprocedure(t.sig)::oid          -- excluir auto-referencia
+-ORDER BY t.n, u.caller;
++JOIN universo u ON u.cuerpo ~ ('\m' || t.nombre || '\M')
++CROSS JOIN LATERAL (
++  SELECT row_number() OVER () AS ord, mm AS g
++  FROM regexp_matches(
++         u.cuerpo,
++         '([^\n]{0,70})(\m' || t.nombre || '\M)([^\n]{0,70})',
++         'g') AS mm
++) m
++WHERE u.oid IS DISTINCT FROM to_regprocedure(t.sig)::oid
++ORDER BY t.n, u.objeto, m.ord;
+ 
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q7_S3_AUSENCIA.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * ausencia de S3 crear_paquete_dia_especial
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
++
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
+ 
+--- =====================================================================================
+--- Q7 -- S3 crear_paquete_dia_especial: VERIFICACION DE AUSENCIA POR CUATRO VIAS (1 fila).
+---      Debe estar AUSENTE: F (crear_override_horario_puntual) la reemplazo.
+--- =====================================================================================
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
++
++-- Q7 -- S3 crear_paquete_dia_especial: AUSENCIA POR CUATRO VIAS (1 fila).
++--   Debe estar AUSENTE: B1_3_F (crear_override_horario_puntual) la reemplazo con
++--   DROP + CREATE, sin coexistencia.
++--   NOTA: la ausencia en repo y en Workflows es un GATE EXTERNO (git grep), fuera de la DB.
+ SELECT
+   'Q7_S3_AUSENCIA'                                                                AS bloque,
+-  -- via 1: to_regprocedure con la firma canonica
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
+   to_regprocedure('public.crear_paquete_dia_especial(jsonb)') IS NULL              AS v1_to_regprocedure_null,
+-  -- via 2: pg_proc por proname, cualquier firma / cualquier schema
+   (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE p.proname = 'crear_paquete_dia_especial')                               AS v2_pg_proc_filas,
+-  -- via 3: dependencias (si no existe el oid, no puede haber ninguna)
+   (SELECT count(*) FROM pg_depend d
+      WHERE d.refclassid = 'pg_proc'::regclass
+        AND d.refobjid = COALESCE(to_regprocedure('public.crear_paquete_dia_especial(jsonb)')::oid, 0)) AS v3_dependencias,
+-  -- via 4: callers por texto en funciones + vistas de public
+   (SELECT count(*) FROM (
+       SELECT pg_get_functiondef(p.oid) AS cuerpo
+         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname='public' AND p.prokind IN ('f','p')
+-      UNION ALL
+-      SELECT definition FROM pg_views    WHERE schemaname='public'
+-      UNION ALL
+-      SELECT definition FROM pg_matviews WHERE schemaname='public'
+-   ) x WHERE x.cuerpo ~ '\mcrear_paquete_dia_especial\M')                          AS v4_callers_por_texto,
+-  -- veredicto agregado
++      UNION ALL SELECT definition FROM pg_views    WHERE schemaname='public'
++      UNION ALL SELECT definition FROM pg_matviews WHERE schemaname='public'
++   ) x WHERE x.cuerpo ~ '\mcrear_paquete_dia_especial\M')                         AS v4_callers_db_por_texto,
+   CASE WHEN to_regprocedure('public.crear_paquete_dia_especial(jsonb)') IS NULL
+         AND (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                WHERE p.proname='crear_paquete_dia_especial') = 0
+@@ -451,18 +704,44 @@
+                 UNION ALL SELECT definition FROM pg_views    WHERE schemaname='public'
+                 UNION ALL SELECT definition FROM pg_matviews WHERE schemaname='public'
+              ) x WHERE x.cuerpo ~ '\mcrear_paquete_dia_especial\M') = 0
+-       THEN 'S3 AUSENTE -- OK'
+-       ELSE '>>> S3 PRESENTE O REFERENCIADA -- INVESTIGAR <<<'
++       THEN 'S3 AUSENTE EN DB -- OK (repo/workflows: gate externo)'
++       ELSE '>>> S3 PRESENTE O REFERENCIADA EN DB -- INVESTIGAR <<<'
+   END                                                                              AS veredicto;
+ 
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q8_CUERPOS.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * cuerpos completos pg_get_functiondef
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
++
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
++
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
+ 
+--- =====================================================================================
+ -- Q8 -- CUERPOS COMPLETOS pg_get_functiondef() de los 11 (11 filas).
+---      EXPORTAR A CSV desde el editor. Necesarios para:
+---        (a) resolver H4 (cual variante de D esta desplegada),
+---        (b) consolidar el canonico v1.13.0 desde el VIVO y no desde los artefactos.
+---      No reconstruir a mano: la autoridad es pg_get_functiondef(), no el .sql del repo.
+--- =====================================================================================
++--   EXPORTAR A CSV desde el editor. No copiar a mano.
++--   Necesarios para (a) resolver H4 y (b) consolidar el canonico v1.13.0 desde el VIVO,
++--   no desde los artefactos del repo.
+ WITH objs(n, sig) AS (
+   VALUES
+     ( 1,'public.resolver_horario(bigint,date)'),
+@@ -478,74 +757,144 @@
+     (11,'public.obtener_disponibilidad_rango(date,date,bigint)')
+ )
+ SELECT
+-  'Q8_CUERPOS'                                  AS bloque,
+-  o.n                                           AS "#",
+-  o.sig                                         AS firma,
+-  md5(pg_get_functiondef(to_regprocedure(o.sig))) AS fingerprint,
+-  length(pg_get_functiondef(to_regprocedure(o.sig))) AS bytes,
+-  pg_get_functiondef(to_regprocedure(o.sig))    AS functiondef_completo
++  'Q8_CUERPOS'                                          AS bloque,
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
++  o.n                                                   AS nro,
++  o.sig                                                 AS firma,
++  md5(pg_get_functiondef(to_regprocedure(o.sig)))       AS fingerprint,
++  octet_length(pg_get_functiondef(to_regprocedure(o.sig))) AS bytes,
++  length(pg_get_functiondef(to_regprocedure(o.sig)))    AS caracteres,
++  pg_get_functiondef(to_regprocedure(o.sig))            AS functiondef_completo
+ FROM objs o
+ WHERE to_regprocedure(o.sig) IS NOT NULL
+ ORDER BY o.n;
+ 
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q8B_H4_VARIANTE_D.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * H4: discriminar variante 08-07 vs 09-07 de B1_3_D
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
+ 
+--- =====================================================================================
+--- Q8-BIS -- H4: DISCRIMINAR CUAL VARIANTE DE B1_3_D ESTA DESPLEGADA (1 fila).
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
++
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
++
++-- Q8-BIS -- H4: CUAL VARIANTE DE B1_3_D ESTA DESPLEGADA (1 fila).
+ --
+ --   Las dos variantes insertan el MISMO bloque [B1.3-D:BEGIN]..[B1.3-D:END] en
+ --   confirmar_reserva(jsonb), pero en POSICIONES DISTINTAS respecto del BEGIN interno:
+ --
+ --     08-07: replace(v_def, c_anchor, v_bloque || c_anchor)
+---            con c_anchor = E'  BEGIN\n    INSERT INTO reservas ('
+---            => el bloque queda ANTES del "BEGIN"  ->  ...[B1.3-D:END]\n  BEGIN\n    INSERT INTO reservas (
++--            c_anchor = E'  BEGIN\n    INSERT INTO reservas ('
++--            => bloque ANTES del BEGIN:   ..[B1.3-D:END]\n  BEGIN\n    INSERT INTO reservas (
+ --
+ --     09-07: regexp_replace(v_def, E'(\n)([ \t]*)(INSERT INTO reservas)', E'\1'||v_bloque||E'\2\3')
+---            => el bloque queda DESPUES del "BEGIN", pegado al INSERT
+---                                     ->  ...BEGIN\n[B1.3-D:BEGIN]..[B1.3-D:END]\n    INSERT INTO reservas (
++--            => bloque DESPUES del BEGIN: ..BEGIN\n[B1.3-D:BEGIN]..[B1.3-D:END]\n    INSERT INTO reservas (
+ --
+ --   No es cosmetico: cambia si el bloque cae DENTRO o FUERA del sub-bloque BEGIN..END.
+---   Este bloque no decide nada por si mismo: emite la ventana de texto cruda para que la
+---   discriminacion se haga sobre evidencia y no sobre inferencia.
+--- =====================================================================================
++--   Este bloque emite la ventana de texto CRUDA: la decision se toma sobre evidencia.
+ WITH d AS (
+-  SELECT pg_get_functiondef(to_regprocedure('public.confirmar_reserva(jsonb)')) AS def
++  SELECT CASE WHEN to_regprocedure('public.confirmar_reserva(jsonb)') IS NULL THEN NULL
++              ELSE pg_get_functiondef(to_regprocedure('public.confirmar_reserva(jsonb)'))
++         END AS def
+ )
+ SELECT
+-  'Q8BIS_H4_VARIANTE_D'                                                   AS bloque,
++  'Q8B_H4_VARIANTE_D'                                                     AS bloque,
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
+   md5(d.def)                                                              AS fingerprint_confirmar_reserva,
+   'e6ac8ddce8a12a9c48ecc1aa128b311c'                                      AS baseline_s8,
+   (md5(d.def) = 'e6ac8ddce8a12a9c48ecc1aa128b311c')                       AS coincide_con_s8,
+   (d.def LIKE '%[B1.3-D:BEGIN]%')                                         AS tiene_bloque_d,
+-  (SELECT count(*) FROM regexp_matches(d.def, '\[B1\.3-D:BEGIN\]', 'g'))  AS ocurrencias_begin_marker,
+-  (SELECT count(*) FROM regexp_matches(d.def, '\[B1\.3-D:END\]',   'g'))  AS ocurrencias_end_marker,
+-  -- firma del 08-07: END-marker seguido (con solo whitespace en medio) de un BEGIN y despues el INSERT
+-  (d.def ~ '(?s)--\s*\[B1\.3-D:END\]\s*\n\s*BEGIN\s*\n\s*INSERT INTO reservas') AS firma_variante_08_07,
+-  -- firma del 09-07: END-marker seguido DIRECTAMENTE del INSERT (sin BEGIN en medio)
+-  (d.def ~ '(?s)--\s*\[B1\.3-D:END\]\s*\n[ \t]*INSERT INTO reservas')          AS firma_variante_09_07,
+-  -- ventana cruda: 400 chars antes del marker BEGIN hasta 900 despues. Autoridad visual.
+-  substring(
+-    d.def
+-    from GREATEST(1, position('[B1.3-D:BEGIN]' in d.def) - 400)
+-    for  1300
+-  )                                                                       AS ventana_cruda_alrededor_del_bloque,
++  (SELECT count(*) FROM regexp_matches(d.def, '\[B1\.3-D:BEGIN\]', 'g')) AS ocurrencias_begin_marker,
++  (SELECT count(*) FROM regexp_matches(d.def, '\[B1\.3-D:END\]',   'g')) AS ocurrencias_end_marker,
++  (d.def ~ '--\s*\[B1\.3-D:END\]\s*\n\s*BEGIN\s*\n\s*INSERT INTO reservas') AS firma_variante_08_07,
++  (d.def ~ '--\s*\[B1\.3-D:END\]\s*\n[ \t]*INSERT INTO reservas')             AS firma_variante_09_07,
++  substring(d.def
++            from GREATEST(1, position('[B1.3-D:BEGIN]' in d.def) - 400)
++            for  1300)                                                    AS ventana_cruda,
+   CASE
++    WHEN d.def IS NULL
++      THEN '>>> confirmar_reserva(jsonb) AUSENTE <<<'
+     WHEN d.def NOT LIKE '%[B1.3-D:BEGIN]%'
+       THEN '>>> BLOQUE D AUSENTE DEL VIVO -- INVESTIGAR <<<'
+-    WHEN     (d.def ~ '(?s)--\s*\[B1\.3-D:END\]\s*\n\s*BEGIN\s*\n\s*INSERT INTO reservas')
+-         AND NOT (d.def ~ '(?s)--\s*\[B1\.3-D:END\]\s*\n[ \t]*INSERT INTO reservas')
++    WHEN     (d.def ~ '--\s*\[B1\.3-D:END\]\s*\n\s*BEGIN\s*\n\s*INSERT INTO reservas')
++         AND NOT (d.def ~ '--\s*\[B1\.3-D:END\]\s*\n[ \t]*INSERT INTO reservas')
+       THEN 'DESPLEGADA = variante 08-07 (anchor literal)'
+-    WHEN     (d.def ~ '(?s)--\s*\[B1\.3-D:END\]\s*\n[ \t]*INSERT INTO reservas')
+-         AND NOT (d.def ~ '(?s)--\s*\[B1\.3-D:END\]\s*\n\s*BEGIN\s*\n\s*INSERT INTO reservas')
++    WHEN     (d.def ~ '--\s*\[B1\.3-D:END\]\s*\n[ \t]*INSERT INTO reservas')
++         AND NOT (d.def ~ '--\s*\[B1\.3-D:END\]\s*\n\s*BEGIN\s*\n\s*INSERT INTO reservas')
+       THEN 'DESPLEGADA = variante 09-07 (anchor regex)'
+-    ELSE '>>> AMBIGUO -- resolver leyendo ventana_cruda_alrededor_del_bloque <<<'
++    ELSE '>>> AMBIGUO -- resolver leyendo ventana_cruda <<<'
+   END                                                                     AS veredicto_h4
+ FROM d;
+ 
++COMMIT;
++
++-- ====================================================================================
++-- D1_Q9_VEREDICTO.sql
++-- Bloque B1.3-consolidacion-canonica * D1 * veredicto integral + apto_para_freeze
++-- TEST unicamente. 100% LECTURA. Autocontenido: trae su propio gate y su propia
++-- transaccion READ ONLY. No se puede ejecutar esta Q sin el gate: el archivo ES la Q.
++-- Repo de referencia: HEAD 07fea85802bc4fccbff1236813593762aefe58d9
++-- ====================================================================================
++
++BEGIN TRANSACTION READ ONLY;
++SET LOCAL statement_timeout = '180s';
++SET LOCAL search_path = pg_catalog, public;
++
++DO $gate$
++DECLARE
++  v_amb text := (
++    SELECT valor
++    FROM public.configuracion_general
++    WHERE clave = 'ambiente'
++  );
++BEGIN
++  IF v_amb IS DISTINCT FROM 'test' THEN
++    RAISE EXCEPTION
++      'GATE D1: ambiente=% (esperado test). Abortando.',
++      COALESCE(v_amb, '<null>');
++  END IF;
++END
++$gate$;
+ 
+--- =====================================================================================
+--- Q9 -- VEREDICTO AGREGADO (1 fila). Fila legible de cierre del D1.
+--- =====================================================================================
+-WITH baseline(n, sig, fp_base) AS (
++-- Q9 -- VEREDICTO INTEGRAL (1 fila). Corre TODOS los chequeos y emite apto_para_freeze.
++--
++--   apto_para_freeze = true SOLO si TODO lo siguiente se cumple:
++--     * 11/11 objetos presentes
++--     * 11/11 fingerprints coincidentes con S8
++--     * cero overloads sobrantes
++--     * cero EXECUTE a PUBLIC
++--     * cero privilegios efectivos de anon/authenticated/service_role
++--     * exactamente 2 triggers, con nombre/tabla/trigger-fn/constraint/deferrable/
++--       initially-deferred/enabled correctos
++--     * S3 ausente en DB y sin callers DB
++--     * H4 no ambiguo
++--
++--   GATE EXTERNO (no verificable desde la DB): ausencia de S3 en repo y en Workflows.
++--   Se verifica con git grep, fuera de este artefacto.
++WITH base(n, sig, fp_base) AS (
+   VALUES
+     ( 1,'public.resolver_horario(bigint,date)',                                           '1bd96c89e587b15582fd7b2e29ae7e18'),
+     ( 2,'public._resolver_horario(bigint,date,boolean)',                                  '7e5bfa21b39d90b674c1a83d76b71b1d'),
+@@ -559,33 +908,178 @@
+     (10,'public.crear_override_horario_puntual(jsonb)',                                   '33d7ac8ad5f80b72a0266fb4eb4f7f4d'),
+     (11,'public.obtener_disponibilidad_rango(date,date,bigint)',                          '37009a32154f93b80520500c0f15b46b')
+ ),
+-m AS (
+-  SELECT b.n, b.sig, b.fp_base, to_regprocedure(b.sig) AS oid,
++obj AS (
++  SELECT b.n, b.sig, b.fp_base, to_regprocedure(b.sig) AS rp,
+          CASE WHEN to_regprocedure(b.sig) IS NULL THEN NULL
+               ELSE md5(pg_get_functiondef(to_regprocedure(b.sig))) END AS fp_now
+-  FROM baseline b
++  FROM base b
++),
++chk_obj AS (
++  SELECT count(*)                                                         AS esperados,
++         count(*) FILTER (WHERE rp IS NOT NULL)                           AS presentes,
++         count(*) FILTER (WHERE rp IS NULL)                               AS ausentes,
++         count(*) FILTER (WHERE fp_now = fp_base)                         AS fp_coinciden,
++         count(*) FILTER (WHERE rp IS NOT NULL AND fp_now IS DISTINCT FROM fp_base) AS fp_difieren,
++         string_agg(sig, ' | ') FILTER (WHERE rp IS NULL)                 AS lista_ausentes,
++         string_agg(sig || ' [vivo=' || fp_now || ' esperado=' || fp_base || ']', ' | ')
++           FILTER (WHERE rp IS NOT NULL AND fp_now IS DISTINCT FROM fp_base) AS lista_fp_difieren
++  FROM obj
++),
++sobrantes AS (
++  SELECT format('%I.%I(%s)', n.nspname, p.proname,
++                pg_get_function_identity_arguments(p.oid)) AS firma
++  FROM pg_proc p
++  JOIN pg_namespace n ON n.oid = p.pronamespace
++  WHERE n.nspname = 'public'
++    AND p.proname IN (
++    'resolver_horario', '_resolver_horario', 'vigencias_conflictos_comprometidos',
++    'crear_vigencia_horario', 'trg_guard_vigencias', 'validar_gap_bordes_congelados',
++    'crear_prereserva', 'confirmar_reserva', 'crear_reserva_con_horario_pactado',
++    'crear_override_horario_puntual', 'obtener_disponibilidad_rango',
++    'crear_paquete_dia_especial'
++    )
++    AND NOT EXISTS (SELECT 1 FROM obj o WHERE o.rp::oid = p.oid)
++),
++chk_ovl AS (
++  SELECT count(*) AS n_sobrantes, string_agg(firma, ' | ') AS lista FROM sobrantes
++),
++acl_pub AS (
++  SELECT DISTINCT o.sig
++  FROM obj o
++  JOIN pg_proc p ON p.oid = o.rp::oid
++  CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
++  WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE'
++),
++chk_pub AS (SELECT count(*) AS n, string_agg(sig, ' | ') AS lista FROM acl_pub),
++priv_eff AS (
++  SELECT o.sig, ro.rolname
++  FROM obj o
++  CROSS JOIN (VALUES ('anon'),('authenticated'),('service_role')) AS ro(rolname)
++  WHERE o.rp IS NOT NULL
++    AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ro.rolname)
++    AND has_function_privilege(ro.rolname, o.rp::oid, 'EXECUTE')
++),
++chk_priv AS (
++  SELECT count(*) AS n, string_agg(sig || ' -> ' || rolname, ' | ') AS lista FROM priv_eff
++),
++trg AS (
++  SELECT t.tgname, ns.nspname AS schema, c.relname AS tabla,
++         (p.oid = to_regprocedure('public.trg_guard_vigencias()')::oid) AS fn_ok,
++         (t.tgconstraint <> 0) AS es_constraint,
++         t.tgdeferrable AS es_deferrable, t.tginitdeferred AS init_deferred,
++         (t.tgenabled = 'O') AS enabled_origin
++  FROM pg_trigger t
++  JOIN pg_class     c  ON c.oid  = t.tgrelid
++  JOIN pg_namespace ns ON ns.oid = c.relnamespace
++  JOIN pg_proc      p  ON p.oid  = t.tgfoid
++  WHERE NOT t.tgisinternal
++    AND (p.oid = to_regprocedure('public.trg_guard_vigencias()')::oid
++         OR t.tgname IN ('trg_vig_guard','trg_vig_guard_detalle'))
++),
++chk_trg AS (
++  SELECT
++    count(*) AS n_total,
++    COALESCE(bool_or(tgname='trg_vig_guard' AND schema='public'
++                     AND tabla='vigencias_horario_base' AND fn_ok AND es_constraint
++                     AND es_deferrable AND init_deferred AND enabled_origin), false) AS base_ok,
++    COALESCE(bool_or(tgname='trg_vig_guard_detalle' AND schema='public'
++                     AND tabla='vigencias_horario_detalle' AND fn_ok AND es_constraint
++                     AND es_deferrable AND init_deferred AND enabled_origin), false) AS detalle_ok,
++    COALESCE(string_agg(tgname || ' @ ' || schema || '.' || tabla
++             || ' [fn_guard=' || fn_ok || ' constraint=' || es_constraint
++             || ' deferrable=' || es_deferrable || ' init_deferred=' || init_deferred
++             || ' enabled=' || enabled_origin || ']', ' ; '), '<ninguno>') AS detalle
++  FROM trg
++),
++s3 AS (
++  SELECT
++    (to_regprocedure('public.crear_paquete_dia_especial(jsonb)') IS NULL) AS regproc_null,
++    (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
++       WHERE p.proname='crear_paquete_dia_especial') AS filas,
++    (SELECT count(*) FROM (
++        SELECT pg_get_functiondef(p.oid) AS cuerpo
++          FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
++         WHERE n.nspname='public' AND p.prokind IN ('f','p')
++        UNION ALL SELECT definition FROM pg_views    WHERE schemaname='public'
++        UNION ALL SELECT definition FROM pg_matviews WHERE schemaname='public'
++     ) x WHERE x.cuerpo ~ '\mcrear_paquete_dia_especial\M') AS callers_db
++),
++h4 AS (
++  SELECT
++    (d.def IS NOT NULL)                                                 AS presente,
++    (d.def LIKE '%[B1.3-D:BEGIN]%')                                     AS tiene_bloque,
++    (d.def ~ '--\s*\[B1\.3-D:END\]\s*\n\s*BEGIN\s*\n\s*INSERT INTO reservas') AS es_0807,
++    (d.def ~ '--\s*\[B1\.3-D:END\]\s*\n[ \t]*INSERT INTO reservas')             AS es_0907
++  FROM (SELECT CASE WHEN to_regprocedure('public.confirmar_reserva(jsonb)') IS NULL THEN NULL
++                    ELSE pg_get_functiondef(to_regprocedure('public.confirmar_reserva(jsonb)'))
++               END AS def) d
++),
++chk_h4 AS (
++  SELECT
++    CASE
++      WHEN NOT presente               THEN '>>> confirmar_reserva AUSENTE <<<'
++      WHEN NOT tiene_bloque           THEN '>>> BLOQUE D AUSENTE <<<'
++      WHEN es_0807 AND NOT es_0907    THEN 'variante 08-07 (anchor literal)'
++      WHEN es_0907 AND NOT es_0807    THEN 'variante 09-07 (anchor regex)'
++      ELSE '>>> AMBIGUO <<<'
++    END AS veredicto,
++    COALESCE(presente AND tiene_bloque AND (es_0807 <> es_0907), false) AS no_ambiguo
++  FROM h4
+ )
+ SELECT
+-  'Q9_VEREDICTO'                                                            AS bloque,
+-  count(*)                                                                  AS objetos_esperados,
+-  count(*) FILTER (WHERE oid IS NOT NULL)                                   AS presentes,
+-  count(*) FILTER (WHERE oid IS NULL)                                       AS ausentes,
+-  count(*) FILTER (WHERE fp_now = fp_base)                                  AS coinciden_con_s8,
+-  count(*) FILTER (WHERE oid IS NOT NULL AND fp_now <> fp_base)             AS difieren_de_s8,
+-  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+-     WHERE p.proname='crear_paquete_dia_especial')                          AS s3_filas_vivas,
+-  (SELECT count(*) FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
+-     WHERE NOT t.tgisinternal
+-       AND p.oid = to_regprocedure('public.trg_guard_vigencias()'))         AS triggers_de_guard,
+-  string_agg(sig || ' -> ' || CASE WHEN oid IS NULL THEN 'AUSENTE'
+-                                   WHEN fp_now = fp_base THEN 'COINCIDE'
+-                                   ELSE 'DIFIERE (' || fp_now || ')' END,
+-             E'\n' ORDER BY n)                                              AS detalle
+-FROM m;
+-
++  'Q9_VEREDICTO_INTEGRAL'                                   AS bloque,
++  (SELECT valor FROM public.configuracion_general WHERE clave = 'ambiente') AS ambiente,
++  current_setting('transaction_read_only')                                   AS transaction_read_only,
++  o.esperados                                               AS objetos_esperados,
++  o.presentes                                               AS objetos_presentes,
++  o.ausentes                                                AS objetos_ausentes,
++  o.fp_coinciden                                            AS fingerprints_coinciden,
++  o.fp_difieren                                             AS fingerprints_difieren,
++  COALESCE(o.lista_ausentes, '<ninguno>')                   AS detalle_ausentes,
++  COALESCE(o.lista_fp_difieren, '<ninguno>')                AS detalle_fp_difieren,
++  ov.n_sobrantes                                            AS overloads_sobrantes,
++  COALESCE(ov.lista, '<ninguno>')                           AS detalle_overloads,
++  pu.n                                                      AS execute_a_public,
++  COALESCE(pu.lista, '<ninguno>')                           AS detalle_execute_public,
++  pr.n                                                      AS priv_efectivos_data_api,
++  COALESCE(pr.lista, '<ninguno>')                           AS detalle_priv_efectivos,
++  tg.n_total                                                AS triggers_total,
++  tg.base_ok                                                AS trg_vig_guard_ok,
++  tg.detalle_ok                                             AS trg_vig_guard_detalle_ok,
++  tg.detalle                                                AS detalle_triggers,
++  s.regproc_null                                            AS s3_regproc_null,
++  s.filas                                                   AS s3_filas_pg_proc,
++  s.callers_db                                              AS s3_callers_db,
++  h.veredicto                                               AS h4_veredicto,
++  h.no_ambiguo                                              AS h4_no_ambiguo,
++  (    o.presentes    = 11
++   AND o.fp_coinciden = 11
++   AND ov.n_sobrantes = 0
++   AND pu.n           = 0
++   AND pr.n           = 0
++   AND tg.n_total     = 2
++   AND tg.base_ok
++   AND tg.detalle_ok
++   AND s.regproc_null
++   AND s.filas        = 0
++   AND s.callers_db   = 0
++   AND h.no_ambiguo
++  )                                                         AS apto_para_freeze,
++  COALESCE(NULLIF(array_to_string(ARRAY[
++    CASE WHEN o.presentes    <> 11 THEN 'objetos presentes ' || o.presentes || '/11' END,
++    CASE WHEN o.fp_coinciden <> 11 THEN 'fingerprints coinciden ' || o.fp_coinciden || '/11' END,
++    CASE WHEN ov.n_sobrantes >  0  THEN 'overloads sobrantes: ' || ov.n_sobrantes END,
++    CASE WHEN pu.n           >  0  THEN 'EXECUTE a PUBLIC en ' || pu.n || ' objeto(s)' END,
++    CASE WHEN pr.n           >  0  THEN 'privilegios efectivos anon/auth/service: ' || pr.n END,
++    CASE WHEN tg.n_total     <> 2  THEN 'triggers ' || tg.n_total || ' (esperado 2)' END,
++    CASE WHEN NOT tg.base_ok       THEN 'trg_vig_guard mal configurado o ausente' END,
++    CASE WHEN NOT tg.detalle_ok    THEN 'trg_vig_guard_detalle mal configurado o ausente' END,
++    CASE WHEN NOT s.regproc_null OR s.filas > 0 THEN 'S3 presente en DB' END,
++    CASE WHEN s.callers_db   >  0  THEN 'S3 con callers DB: ' || s.callers_db END,
++    CASE WHEN NOT h.no_ambiguo     THEN 'H4 sin resolver: ' || h.veredicto END
++  ], ' | '), ''), '<ninguno -- todos los criterios DB se cumplen>')  AS motivos_de_bloqueo,
++  'GATE EXTERNO pendiente: ausencia de S3 en repo y Workflows (git grep)' AS nota_gate_externo
++FROM chk_obj o, chk_ovl ov, chk_pub pu, chk_priv pr, chk_trg tg, s3 s, chk_h4 h;
+ 
+ COMMIT;
+ 
+--- =====================================================================================
+--- FIN D1. Nada fue escrito. La transaccion fue READ ONLY de punta a punta.
+--- =====================================================================================

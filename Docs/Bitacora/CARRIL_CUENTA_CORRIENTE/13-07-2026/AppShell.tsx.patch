@@ -1,0 +1,11 @@
+--- a/AppShell.tsx
++++ b/AppShell.tsx
+@@ -64,7 +64,7 @@
+           <Menu acciones={contexto.acciones} onNavigate={() => setNavAbierto(false)} />
+         </aside>
+ 
+-        <main className="flex-1 p-6">
++        <main className="min-w-0 flex-1 p-6">
+           <AppRoutes />
+         </main>
+       </div>
