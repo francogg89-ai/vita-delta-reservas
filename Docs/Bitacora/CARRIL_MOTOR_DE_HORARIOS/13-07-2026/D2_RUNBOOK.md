@@ -5,9 +5,12 @@
 **Naturaleza:** **100 % lectura.** Cero escrituras. Validado con `pglast` (9/9 parse OK, cero statements de escritura).
 **Ejecuta:** Franco. **Claude no toca TEST.**
 
-> **D2 es el único bloqueante pendiente para cerrar el inventario DB del carril.** Hasta que corra, los artefactos que crean estos objetos quedan `CANDIDATO_REPO_HASTA_D2` / `PENDIENTE_D2` en la matriz H3 y **no entran al canónico**.
->
-> **H1 continúa abierto como bloqueante independiente** para el cierre integral del paquete B1.3 y del artefacto durable A07. **Cerrar el D2 no autoriza a generar el canónico.**
+> **Con D2 se cierra el inventario DB del carril.**
+> **La consolidación integral v1.13.0 continúa bloqueada por H1.**
+
+
+> **Documento diagnóstico versionado en la Bitácora.**
+> **No forma parte del canónico SQL.**
 
 ---
 
@@ -57,10 +60,10 @@ public.fecha_hoy_ar()                                   <- idem
 | `D2_Q2_PRESENCIA_Y_OVERLOADS.sql` | `6d1bc165db92315f22b1b54d12772e8e7ec207310a31032a5c08bf4099fc08ac` |
 | `D2_Q3B_PRIV_EFECTIVOS.sql` | `67314252c5d66182708aec51c814a5dd823af74e75eedcda0c7b95aa43220119` |
 | `D2_Q3_ACL.sql` | `e9c360b95be8a45e237c4e2ff231ad489d915bd09a9207435eef6d1be2066c1f` |
-| `D2_Q4_TRIGGER_OV_GUARD.sql` **← v2** | `b4d44fe2cf8d92e68542492f5557721289745fee39c0c7fa6d2eed55f0ca9a61` |
+| `D2_Q4_TRIGGER_OV_GUARD.sql` — versión vigente | `b4d44fe2cf8d92e68542492f5557721289745fee39c0c7fa6d2eed55f0ca9a61` |
 | `D2_Q5_CUERPOS.sql` | `8c4bfd0c3082089b41ad980a37f2717968823942df6c5660a3716ddf6c4d682f` |
 | `D2_Q6_CALLERS_CANDIDATOS.sql` | `e98d2ef035ad20cecff7d7bf871150719b9ea2c700eea846d7005fbc4bee4b5d` |
-| `D2_Q7_VEREDICTO.sql` **← v2** | `5f2086d392116bfe6678244f2dd586a34bb597c16b63849821909213127f954d` |
+| `D2_Q7_VEREDICTO.sql` — versión vigente | `5f2086d392116bfe6678244f2dd586a34bb597c16b63849821909213127f954d` |
 
 `sha256(set concatenado)` = `de386e252717d436c2d073c77bd89c24ad102e0f7bec5b8357c3c83999e8b970`
 
@@ -186,18 +189,18 @@ Harness **PostgreSQL 17.10**, compilado desde `github.com/postgres/postgres` (`R
 | Gate anti-OPS (`ambiente = 'ops'`) | **9/9 abortan** con `GATE D2: ambiente=ops` |
 | Encoding | ASCII puro, LF-only, 9/9 |
 
-**Escenarios adversos — Q7 v2 los detecta todos:**
+**Escenarios adversos — Q7 (versión vigente) los detecta todos:**
 
 Cada escenario parte de un **fixture limpio**. El setup se aplica **por archivo** con `-v ON_ERROR_STOP=1` y **nunca se descarta stderr**. Antes de cada corrida de Q7 hay una **sonda** (`to_regprocedure`) que prueba el estado real de la base.
 
-| Escenario | Q7 v1 | Q7 v3 |
+| Escenario | Q7 (versión retirada) | Q7 (versión vigente) |
 |---|---|---|
 | **ESC C** — `crear_bloqueo(text)` vivo, `(jsonb)` ausente | `presentes=7, ausentes=0, overloads=0` ❌ | `firmas_esperadas_presentes=6`, `ausentes=1`, `distintas=1`, `vivas=7` ✅ |
 | **ESC D** — `(jsonb)` y `(text)` coexisten | `overloads_extra=0` ❌ | `presentes=7`, `ausentes=0`, `distintas=1`, `overloads_extra=1`, `vivas=8` ✅ |
 | **ESC E** — `trg_ov_guard` sólo `INSERT` | `ok=t` ❌ | `ok=f` + observación ✅ (y **Q4 coincide**) |
 | **ESC H** — rol `anon` inexistente + trigger intruso | **`ERROR: role "anon" does not exist`, la Q abortaba** ❌ | `roles_data_api_ausentes=1 (anon)`, `otros_triggers=1` ✅ |
 
-**Q4 — escenario TRUNCATE:** no es construible. `CREATE ... TRUNCATE ... FOR EACH ROW` → `ERROR: TRUNCATE FOR EACH ROW triggers are not supported`. La corrección se demuestra sobre el **predicado aislado** con `tgtype` sintéticos: para `tgtype=61` (I/U/D+TRUNCATE+ROW) y `tgtype=93` (INSTEAD OF), **v1 daba `t` y v2 da `f`**.
+**Q4 — escenario TRUNCATE:** no es construible. `CREATE ... TRUNCATE ... FOR EACH ROW` → `ERROR: TRUNCATE FOR EACH ROW triggers are not supported`. La corrección se demuestra sobre el **predicado aislado** con `tgtype` sintéticos: para `tgtype=61` (I/U/D+TRUNCATE+ROW) y `tgtype=93` (INSTEAD OF), **la versión anterior daba `t` y la vigente da `f`**.
 
 Log completo, con comandos de setup, sondas, stdout íntegro y exit codes: **`D2_VALIDACION_HARNESS_PG17.txt`**.
 
@@ -206,6 +209,7 @@ Log completo, con comandos de setup, sondas, stdout íntegro y exit codes: **`D2
 1. Salida de las 9 consultas (**Q5 en CSV**).
 2. Confirmación de que **todas** reportaron `ambiente = test` y `transaction_read_only = on`.
 
-Con eso se cierra el inventario del carril y se puede consolidar v1.13.0.
+> **Con D2 se cierra el inventario DB del carril.**
+> **La consolidación integral v1.13.0 continúa bloqueada por H1.**
 
 **No publicar la IPv6 de `server_addr` de Q0 en nada destinado al repo.** Misma política que en el D1: salida raw local, versión sanitizada para el árbol versionado.

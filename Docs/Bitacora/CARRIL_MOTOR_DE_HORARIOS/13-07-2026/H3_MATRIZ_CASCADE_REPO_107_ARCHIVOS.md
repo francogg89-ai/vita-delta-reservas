@@ -1,16 +1,30 @@
-# H3 — MATRIZ CASCADE DEL REPO · 107 ARCHIVOS  *(v3 — corregida)*
+# H3 — MATRIZ CASCADE DEL REPO · 107 ARCHIVOS  *(v4 — post-D2)*
 
 **Bloque:** `B1.3-consolidacion-canonica`  
 **HEAD:** `07fea85802bc4fccbff1236813593762aefe58d9` (rama `main`, árbol limpio)  
 **Alcance:** `Docs/Bitacora/CARRIL_MOTOR_DE_HORARIOS/` — **107 archivos versionados**, uno por fila.
 
-> **Documento diagnóstico. Fuera del repo.**
+> **Documento diagnóstico versionado en la Bitácora.**
+> **No forma parte del canónico SQL.**
+
+## Cambios en v4 (post-ejecución de D2)
+
+D2 corrió en TEST (verde) y la comparación **cuerpo vivo vs fragmento del repo** dio **7/7 comparación directa LF byte a byte, con `sha256_lf_vivo = sha256_lf_repo`**. En consecuencia:
+
+| Filas | v3 | v4 | Prueba |
+|---|---|---|---|
+| **4, 8, 9, 86** | `CANDIDATO_REPO_HASTA_D2` / `PENDIENTE_D2` | **`SI` / `CONSOLIDAR`** | `fp_lf` vivo == `fp_lf` derivado del repo, objeto por objeto |
+| **16** | `~24 invocaciones` | **`21 invocaciones reales`** | recuento del barrido H7 |
+
+`autoridad_actual = SI` sube de 8 a **12**. `CONSOLIDAR` sube de 8 a **12**. Ya **no hay `PENDIENTE_D2`**.
+
+**Nada más cambió.** Fila 70 sigue `PENDIENTE_H1`. La comparación se detalla en `D2_RESULTADOS_TEST_Y_CIERRE_B1_3.md`.
 
 ## Cambios en v3
 
 | Fila | Corrección |
 |---|---|
-| **16** | `~24 invocaciones de S3` → **`21 invocaciones reales`** (recuento del barrido H7) |
+| **16** | `21 invocaciones reales de S3 (barrido H7)` → **`21 invocaciones reales`** (recuento del barrido H7) |
 | **4, 8, 9, 86** | `accion_v1_13` = **`PENDIENTE_D2`**. Eran `CONSOLIDAR`, lo cual **contradecía el propio diccionario**: `CONSOLIDAR` significa *entra al canónico*, y el D2 todavía no corrió |
 | **70** | `autoridad_actual` = **`PENDIENTE_H1`**. No puede ser `SI` mientras la cadena de custodia y la sanitización del A07 sigan bloqueadas |
 
@@ -54,21 +68,20 @@ Un archivo puede ser autoridad de un **cuerpo de función** y a la vez un **scri
 | estado | n | | autoridad_actual | n | | accion_v1_13 | n | | estado_script | n |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `VIGENTE` | 59 | | `NO` | 93 | | `CITAR` | 58 | | `EJECUTABLE` | 47 |
-| `HISTORICO` | 26 | | `SI` | 8 | | `ARCHIVAR` | 31 | | `NO_APLICA` | 45 |
-| `SUPERADO` | 16 | | `CANDIDATO_REPO_HASTA_D2` | 4 | | `CONSOLIDAR` | 8 | | `NO_EJECUTABLE_GATE_OBSOLETO` | 15 |
-| `CONTAMINACION` | 3 | | `PARCIAL` | 1 | | `PENDIENTE_D2` | 4 | |  |  |
-| `COLISION_DIVERGENTE` | 2 | | `PENDIENTE_H1` | 1 | | `RECLASIFICAR` | 3 | |  |  |
-| `DUPLICADO` | 1 | |  |  | | `PRESERVAR_APP` | 1 | |  |  |
-|  |  | |  |  | | `BLOQUEADO_H1` | 1 | |  |  |
+| `HISTORICO` | 26 | | `SI` | 12 | | `ARCHIVAR` | 31 | | `NO_APLICA` | 45 |
+| `SUPERADO` | 16 | | `PARCIAL` | 1 | | `CONSOLIDAR` | 12 | | `NO_EJECUTABLE_GATE_OBSOLETO` | 15 |
+| `CONTAMINACION` | 3 | | `PENDIENTE_H1` | 1 | | `RECLASIFICAR` | 3 | |  |  |
+| `COLISION_DIVERGENTE` | 2 | |  |  | | `PRESERVAR_APP` | 1 | |  |  |
+| `DUPLICADO` | 1 | |  |  | | `BLOQUEADO_H1` | 1 | |  |  |
 |  |  | |  |  | | `ARCHIVAR_EVIDENCIA` | 1 | |  |  |
 
-**Sólo 8 archivos entran al canónico SQL.** Otros 4 esperan al D2. Uno espera a H1.
+**12 archivos entran al canónico SQL** (`CONSOLIDAR`). Uno espera a H1 (`BLOQUEADO_H1`). Ya no hay `PENDIENTE_D2`.
 
----
+## Autoridad probada contra el vivo — 12 archivos, uno con autoridad parcial
 
-## Autoridad probada contra el vivo — 8 archivos (+1 parcial)
+Son los que entran al canónico SQL (`CONSOLIDAR`). Los 8 del pin de D1 + los 4 de D2 (S0/S1/S2/B2-helper), estos últimos con autoridad probada por la comparación directa LF del cierre de D2.
 
-| Objeto vivo (pineado) | Artefacto | dominio | estado_script |
+| Objeto vivo | Artefacto | dominio | estado_script |
 |---|---|---|---|
 | `resolver_horario` (wrapper) | `06-07/B1_2_CORE_MIGRACION_TEST.sql` | CUERPO_FN | **NO_EJECUTABLE** (gatea 58d75c1b) |
 | `_resolver_horario`, `vigencias_conflictos_comprometidos`,<br>`crear_vigencia_horario`, `trg_guard_vigencias`,<br>2 triggers, **DDL de vigencias** | `08-07/B1_3_A_MIGRACION_SEMANAL_TEST.sql` | CUERPO_FN + TRIGGER + DDL + ACL | EJECUTABLE |
@@ -78,23 +91,37 @@ Un archivo puede ser autoridad de un **cuerpo de función** y a la vez un **scri
 | `crear_reserva_con_horario_pactado` | `09-07/B1_3_E_CREAR_RESERVA_PACTADA_TEST.sql` | CUERPO_FN + ACL | EJECUTABLE |
 | `crear_override_horario_puntual` | `09-07/B1_3_F_CREAR_OVERRIDE_PUNTUAL_TEST.sql` | CUERPO_FN + ACL | EJECUTABLE |
 | `obtener_disponibilidad_rango` | `HORARIOS_DISPONIBILIDAD_RANGO_A_INTEGRACION_TEST.sql` | CUERPO_FN | EJECUTABLE |
+| **3 validadores S0** (`validar_estado_horario_final`, `validar_no_eventos_comprometidos`, `validar_estado_override`) | **`04-07/HORARIOS_GUARD_S0_VALIDADORES_TEST.sql`** | CUERPO_FN | **NO_EJECUTABLE** (gatea 58d75c1b) |
+| **`trg_guard_overrides()` + trigger `trg_ov_guard`** | **`04-07/HORARIOS_GUARD_S1_TRIGGER_TEST.sql`** | CUERPO_FN + TRIGGER | **NO_EJECUTABLE** (gatea 58d75c1b) |
+| **`crear_override_horario` (S2)** | **`04-07/HORARIOS_GUARD_S2_FUNCION_TEST.sql`** | CUERPO_FN | **NO_EJECUTABLE** (gatea 58d75c1b) |
+| **`crear_bloqueo`, `fecha_hoy_ar`** | **`HORARIOS_B2_GUARD_HELPER_TEST.sql`** | CUERPO_FN | EJECUTABLE (sin gate de fingerprint) |
 
-## `PENDIENTE_D2` — 4 archivos
+**El parcial es la fila 30** (`06-07/B1_2_CORE_MIGRACION_TEST.sql`): es autoridad del **wrapper** `resolver_horario`, pero su `_resolver_horario` y su helper fueron superados por A. Queda con autoridad `PARCIAL` — **ya contado dentro de los 12 `CONSOLIDAR`, no es un archivo número 13.**
 
-Crean objetos vivos o presuntamente vivos que **no están pineados** y que **nadie midió contra TEST**. **No entran al canónico hasta que el D2 corra.**
+**Autoridad ≠ ejecutabilidad.** 5 de estos 12 son `NO_EJECUTABLE_GATE_OBSOLETO`: su gate espera el resolver viejo `58d75c1b` y abortan hoy. El canónico se arma del **cuerpo** de la función (probado idéntico al vivo), no de re-ejecutar el script.
 
-| # | Artefacto | Objetos | estado_script |
-|---|---|---|---|
-| 4 | `04-07/HORARIOS_GUARD_S0_VALIDADORES_TEST.sql` | `validar_estado_horario_final` **(viva — Q6)**, `validar_no_eventos_comprometidos`, `validar_estado_override` | **NO_EJECUTABLE** |
-| 8 | `04-07/HORARIOS_GUARD_S1_TRIGGER_TEST.sql` | `trg_guard_overrides()` + `trg_ov_guard` | **NO_EJECUTABLE** |
-| 9 | `04-07/HORARIOS_GUARD_S2_FUNCION_TEST.sql` | `crear_override_horario(jsonb)` | **NO_EJECUTABLE** |
-| 86 | `HORARIOS_B2_GUARD_HELPER_TEST.sql` | `crear_bloqueo(jsonb)`, `fecha_hoy_ar()` | EJECUTABLE (sin gate de fingerprint) |
 
 ## `PENDIENTE_H1` — 1 archivo
 
 | # | Artefacto | Motivo |
 |---|---|---|
-| 70 | `10-07/portal-a07-crear-reserva__TEMPLATE.PATCHED.json` | Cadena de custodia y sanitización **bloqueadas**. Sin hash del crudo, hash del sanitizado, manifiesto de paths alterados y confirmación de que no cambiaron nodos/conexiones/`jsCode`, **no puede declararse autoridad de nada** |
+| 70 | `10-07/portal-a07-crear-reserva__TEMPLATE.PATCHED.json` | Cadena de custodia y sanitización **bloqueadas**. No puede declararse autoridad de nada hasta cerrar la política durable del A07 |
+
+Hay **tres hashes** asociados al A07, y **no son el mismo archivo**:
+
+```
+archivo del repo (10-07/portal-a07-crear-reserva__TEMPLATE.PATCHED.json):
+  3188bceb777b38dcc12d5aa8475cdb40fe89cb189257644c3b4a738c87cd6def   -> PRESENTE en el repo
+
+hash histórico reportado en rondas previas, sin artefacto actualmente localizado:
+  2c99db28866a4e9e7e0ec586e5a18fd443a4b91b64b704fcaa833cbe31a981c3   -> NO LOCALIZADO
+
+export __TEST__ disponible fuera del repo (portal-a07-crear-reserva__TEST__.json):
+  32337c2eabd9c07767c3863d381f5e7e76b3150af99ea47f36890bb5e7081b92   -> fuera del repo
+```
+
+**El archivo del repo tiene sha `3188bceb…`, no `2c99db28…`.** El `2c99db28…` es un hash reportado cuyo artefacto no fue localizado en este clone. Resolver la procedencia de los tres es el primer trabajo de H1 (ver kickoff, §11 y §12).
+
 
 ---
 
@@ -105,12 +132,12 @@ Crean objetos vivos o presuntamente vivos que **no están pineados** y que **nad
 | 1 | `04-07-2026/HORARIOS_GUARD_ALTA_OVERRIDES_CIERRE_TECNICO_PRELIMINAR.md` | 04-07-2026 | GUARD-cierre | MD_CIERRE | HISTORICO | NO | NINGUNO | — | NO_APLICA | — | — | CITAR | Cierre preliminar de S0-S3. S3 ya no existe; el resto sigue vivo pero sin pin. | `3ee96779128f` |
 | 2 | `04-07-2026/HORARIOS_GUARD_S0_RUNSHEET.md` | 04-07-2026 | GUARD-S0 | MD_RUNSHEET | HISTORICO | NO | NINGUNO | — | NO_APLICA | — | — | CITAR | Runsheet de S0. Negative-scope explicito sobre S1/S2/S3. | `18f88c2cb5ed` |
 | 3 | `04-07-2026/HORARIOS_GUARD_S0_SMOKES_TEST.sql` | 04-07-2026 | GUARD-S0 | SQL_SMOKE | HISTORICO | NO | NINGUNO | — | **NO_EJECUTABLE_GATE_OBSOLETO** | `validar_estado_horario_final` | — | ARCHIVAR | Smoke de S0. Helpers temporales en BEGIN..ROLLBACK. | `dc06fc3a5e41` |
-| 4 | `04-07-2026/HORARIOS_GUARD_S0_VALIDADORES_TEST.sql` | 04-07-2026 | GUARD-S0 | SQL_MIGRACION | VIGENTE | **CANDIDATO_REPO_HASTA_D2** | CUERPO_FN | CREATE de los 3 validadores S0 (no el gate, no el script) | **NO_EJECUTABLE_GATE_OBSOLETO** | `validar_estado_horario_final, validar_no_eventos_comprometidos, validar_estado_override` | — | **PENDIENTE_D2** | CANDIDATO a autoridad del CUERPO de los 3 validadores S0. validar_estado_horario_final CONFIRMADA VIVA por Q6. NO esta en el pin de 11. Script NO re-ejecutable: su gate espera resolver 58d75c1b y el vivo es 1bd96c89. NO entra al canonico hasta que D2 lo mida contra TEST. | `4708bb164965` |
-| 5 | `04-07-2026/HORARIOS_GUARD_S1_ROLLBACK_TEST.sql` | 04-07-2026 | GUARD-S1 | SQL_ROLLBACK | VIGENTE | NO | NINGUNO | — | EJECUTABLE | `trg_ov_guard, trg_guard_overrides` | — | CITAR | Rollback de S1. Vigente si S1 sigue vivo (no verificado en D1). | `cde0bc9bd5ed` |
+| 4 | `04-07-2026/HORARIOS_GUARD_S0_VALIDADORES_TEST.sql` | 04-07-2026 | GUARD-S0 | SQL_MIGRACION | VIGENTE | **SI** | CUERPO_FN | CREATE de los 3 validadores S0 (no el gate, no el script) | **NO_EJECUTABLE_GATE_OBSOLETO** | `validar_estado_horario_final, validar_no_eventos_comprometidos, validar_estado_override` | — | **CONSOLIDAR** | Autoridad de los 3 validadores S0 (validar_estado_horario_final, validar_no_eventos_comprometidos, validar_estado_override). D2: comparacion directa LF vivo==repo, 3/3. Script NO re-ejecutable (gate 58d75c1b). | `4708bb164965` |
+| 5 | `04-07-2026/HORARIOS_GUARD_S1_ROLLBACK_TEST.sql` | 04-07-2026 | GUARD-S1 | SQL_ROLLBACK | VIGENTE | NO | NINGUNO | — | EJECUTABLE | `trg_ov_guard, trg_guard_overrides` | — | CITAR | Rollback de S1. Vigente: S1 fue confirmado vivo y exacto por D2. La aplicabilidad destructiva del rollback no fue ejecutada en este bloque. | `cde0bc9bd5ed` |
 | 6 | `04-07-2026/HORARIOS_GUARD_S1_RUNSHEET.md` | 04-07-2026 | GUARD-S1 | MD_RUNSHEET | HISTORICO | NO | NINGUNO | — | NO_APLICA | — | — | CITAR | Runsheet de S1. | `737f137b0e3b` |
 | 7 | `04-07-2026/HORARIOS_GUARD_S1_SMOKES_TEST.sql` | 04-07-2026 | GUARD-S1 | SQL_SMOKE | HISTORICO | NO | NINGUNO | — | **NO_EJECUTABLE_GATE_OBSOLETO** | `trg_ov_guard` | — | ARCHIVAR | Smoke de S1. | `dd3f8f5ed124` |
-| 8 | `04-07-2026/HORARIOS_GUARD_S1_TRIGGER_TEST.sql` | 04-07-2026 | GUARD-S1 | SQL_MIGRACION | VIGENTE | **CANDIDATO_REPO_HASTA_D2** | CUERPO_FN + TRIGGER | CREATE trg_guard_overrides() + CREATE CONSTRAINT TRIGGER trg_ov_guard (lin. 152-155) | **NO_EJECUTABLE_GATE_OBSOLETO** | `trg_guard_overrides, trg_ov_guard` | — | **PENDIENTE_D2** | CANDIDATO a autoridad del CUERPO de trg_guard_overrides + trg_ov_guard. NO esta en el pin de 11 ni fue consultado por Q4. Script NO re-ejecutable: su gate espera resolver 58d75c1b y el vivo es 1bd96c89. NO entra al canonico hasta que D2 lo mida contra TEST. | `7bcef3c4c1fc` |
-| 9 | `04-07-2026/HORARIOS_GUARD_S2_FUNCION_TEST.sql` | 04-07-2026 | GUARD-S2 | SQL_MIGRACION | VIGENTE | **CANDIDATO_REPO_HASTA_D2** | CUERPO_FN | CREATE de crear_override_horario(jsonb) | **NO_EJECUTABLE_GATE_OBSOLETO** | `crear_override_horario` | — | **PENDIENTE_D2** | CANDIDATO a autoridad del CUERPO de crear_override_horario (S2). NO esta en el pin de 11. F NO la reemplaza (F reemplazo a S3). Script NO re-ejecutable: su gate espera resolver 58d75c1b y el vivo es 1bd96c89. NO entra al canonico hasta que D2 lo mida contra TEST. | `632adaac7363` |
+| 8 | `04-07-2026/HORARIOS_GUARD_S1_TRIGGER_TEST.sql` | 04-07-2026 | GUARD-S1 | SQL_MIGRACION | VIGENTE | **SI** | CUERPO_FN + TRIGGER | CREATE trg_guard_overrides() + CREATE CONSTRAINT TRIGGER trg_ov_guard (lin. 152-155) | **NO_EJECUTABLE_GATE_OBSOLETO** | `trg_guard_overrides, trg_ov_guard` | — | **CONSOLIDAR** | Autoridad de trg_guard_overrides() y del trigger trg_ov_guard. D2: comparacion directa LF vivo==repo + fp_triggerdef vivo==repo. Script NO re-ejecutable (gate 58d75c1b). | `7bcef3c4c1fc` |
+| 9 | `04-07-2026/HORARIOS_GUARD_S2_FUNCION_TEST.sql` | 04-07-2026 | GUARD-S2 | SQL_MIGRACION | VIGENTE | **SI** | CUERPO_FN | CREATE de crear_override_horario(jsonb) | **NO_EJECUTABLE_GATE_OBSOLETO** | `crear_override_horario` | — | **CONSOLIDAR** | Autoridad de crear_override_horario(jsonb). D2: comparacion directa LF vivo==repo. Script NO re-ejecutable (gate 58d75c1b). | `632adaac7363` |
 | 10 | `04-07-2026/HORARIOS_GUARD_S2_ROLLBACK_TEST.sql` | 04-07-2026 | GUARD-S2 | SQL_ROLLBACK | VIGENTE | NO | NINGUNO | — | EJECUTABLE | `crear_override_horario` | — | CITAR | Rollback de S2. | `a200c7a6580b` |
 | 11 | `04-07-2026/HORARIOS_GUARD_S2_RUNSHEET.md` | 04-07-2026 | GUARD-S2 | MD_RUNSHEET | HISTORICO | NO | NINGUNO | — | NO_APLICA | — | — | CITAR | Runsheet de S2. | `5d27dd404857` |
 | 12 | `04-07-2026/HORARIOS_GUARD_S2_SMOKES_TEST.sql` | 04-07-2026 | GUARD-S2 | SQL_SMOKE | HISTORICO | NO | NINGUNO | — | **NO_EJECUTABLE_GATE_OBSOLETO** | `crear_override_horario` | — | ARCHIVAR | Smoke de S2. | `bf6548df2811` |
@@ -171,7 +198,7 @@ Crean objetos vivos o presuntamente vivos que **no están pineados** y que **nad
 | 67 | `10-07-2026/harness_texto_error_reserva.mjs` | 10-07-2026 | integracion-A07 | MJS_HARNESS | VIGENTE | NO | NINGUNO | — | NO_APLICA | — | — | CITAR | Harness de textos de error. | `22eb202b7c0c` |
 | 68 | `10-07-2026/patch_a07_gap_conflicto.py` | 10-07-2026 | integracion-A07 | PY_PATCHER | VIGENTE | NO | NINGUNO | — | NO_APLICA | — | — | CITAR | Patcher Python del A07. | `73eb5c1da527` |
 | 69 | `10-07-2026/patch_crear_reserva_gap_conflicto.py` | 10-07-2026 | integracion-A07 | PY_PATCHER | VIGENTE | NO | NINGUNO | — | NO_APLICA | — | — | CITAR | Patcher Python del frontend. | `3683f6ad579e` |
-| 70 | `10-07-2026/portal-a07-crear-reserva__TEMPLATE.PATCHED.json` | 10-07-2026 | integracion-A07 | JSON_WORKFLOW | VIGENTE | **PENDIENTE_H1** | APP_N8N | Workflow n8n. No es SQL. BLOQUEADO por H1 | NO_APLICA | `A07 (n8n)` | — | **BLOQUEADO_H1** | *** NUDO DE H1 *** Template A07 (sha 2c99db28..., 24 nodos, 5 refs $(), 0 huerfanas). NO puede ser autoridad mientras la cadena de custodia y la sanitizacion sigan bloqueadas. Politica durable de artefactos A07 SIN RESOLVER. | `3188bceb777b` |
+| 70 | `10-07-2026/portal-a07-crear-reserva__TEMPLATE.PATCHED.json` | 10-07-2026 | integracion-A07 | JSON_WORKFLOW | VIGENTE | **PENDIENTE_H1** | APP_N8N | Workflow n8n. No es SQL. BLOQUEADO por H1 | NO_APLICA | `A07 (n8n)` | — | **BLOQUEADO_H1** | *** NUDO DE H1 *** Template A07 del repo (sha256 3188bceb...). NO puede ser autoridad mientras la cadena de custodia y la sanitizacion sigan bloqueadas. Politica durable del artefacto A07 SIN RESOLVER. Ver seccion PENDIENTE_H1. | `3188bceb777b` |
 | 71 | `11-07-2026/CC_L3_BLOQUE0_CIERRE.md` | 11-07-2026 | CUENTA-CORRIENTE | MD_CIERRE | **CONTAMINACION** | NO | NINGUNO | — | NO_APLICA | — | — | RECLASIFICAR | Pertenece al carril CUENTA CORRIENTE, no a Horarios. DECISION: documentar y NO mover. | `635eca352e50` |
 | 72 | `11-07-2026/CC_L3_BLOQUE0_EVIDENCIAS_EJECUCION_TEST.md` | 11-07-2026 | CUENTA-CORRIENTE | MD_EVIDENCIA | **CONTAMINACION** | NO | NINGUNO | — | NO_APLICA | — | — | RECLASIFICAR | Pertenece al carril CUENTA CORRIENTE. DECISION: documentar y NO mover. | `9019f878740a` |
 | 73 | `12-07-2026/QAGAP_A_SEED_TEST.sql` | 12-07-2026 | QA-gap | SQL_SEED | VIGENTE | NO | NINGUNO | — | EJECUTABLE | `crear_prereserva, confirmar_reserva` | — | CITAR | Seed del QA formal de gaps. RUNID qagap_20260712_01. ASCII puro (unico .sql que cumple). | `590e1ff07bcf` |
@@ -187,7 +214,7 @@ Crean objetos vivos o presuntamente vivos que **no están pineados** y que **nad
 | 83 | `HORARIOS_A07UX_TEARDOWN_TEST.sql` | (raiz) | A07UX | SQL_TEARDOWN | VIGENTE | NO | NINGUNO | — | EJECUTABLE | — | — | CITAR | Teardown del A07UX. | `aac2abf21536` |
 | 84 | `HORARIOS_A07UX_smoke_e2e_TEST.ps1` | (raiz) | A07UX | PS1_SMOKE | VIGENTE | NO | NINGUNO | — | NO_APLICA | — | — | CITAR | Smoke E2E del A07UX (PowerShell). | `08e4d9eb552d` |
 | 85 | `HORARIOS_B2_CIERRE.md` | (raiz) | HORARIOS-B2 | MD_CIERRE | VIGENTE | NO | NINGUNO | — | NO_APLICA | `crear_bloqueo, fecha_hoy_ar` | — | CITAR | Cierre de HORARIOS_B2 (guard helper). Distinto de HORARIOS_FASEB_B2. | `1625275470db` |
-| 86 | `HORARIOS_B2_GUARD_HELPER_TEST.sql` | (raiz) | HORARIOS-B2 | SQL_MIGRACION | VIGENTE | **CANDIDATO_REPO_HASTA_D2** | CUERPO_FN | CREATE de crear_bloqueo(jsonb) y fecha_hoy_ar() | EJECUTABLE | `crear_bloqueo, fecha_hoy_ar, crear_prereserva` | — | **PENDIENTE_D2** | CANDIDATO a autoridad del CUERPO de crear_bloqueo y fecha_hoy_ar. NINGUNA de las dos esta en el pin de 11. NO entra al canonico hasta que D2 lo mida contra TEST. | `31e7558fbfc9` |
+| 86 | `HORARIOS_B2_GUARD_HELPER_TEST.sql` | (raiz) | HORARIOS-B2 | SQL_MIGRACION | VIGENTE | **SI** | CUERPO_FN | CREATE de crear_bloqueo(jsonb) y fecha_hoy_ar() | EJECUTABLE | `crear_bloqueo, fecha_hoy_ar, crear_prereserva` | — | **CONSOLIDAR** | Autoridad de crear_bloqueo(jsonb) y fecha_hoy_ar(). D2: comparacion directa LF vivo==repo, 2/2. Sin gate de fingerprint (EJECUTABLE). | `31e7558fbfc9` |
 | 87 | `HORARIOS_B2_RUNSHEET (1).md` | (raiz) | HORARIOS-B2 | MD_RUNSHEET | **COLISION_DIVERGENTE** | NO | NINGUNO | — | NO_APLICA | — | — | ARCHIVAR | md5 1a152ac9..., 13129 B. Divergente del (2). Sufijo de descarga. NO se elige por tamano. | `8497b436780a` |
 | 88 | `HORARIOS_B2_RUNSHEET (2).md` | (raiz) | HORARIOS-B2 | MD_RUNSHEET | **COLISION_DIVERGENTE** | NO | NINGUNO | — | NO_APLICA | — | — | ARCHIVAR | md5 e0f1b023..., 15725 B. Divergente del (1). Sufijo de descarga. NO se elige por tamano. | `c87e4a587c48` |
 | 89 | `HORARIOS_B3_CIERRE.md` | (raiz) | HORARIOS-B3 | MD_CIERRE | VIGENTE | NO | NINGUNO | — | NO_APLICA | — | — | CITAR | Cierre de HORARIOS_B3 (wrappers UX A07/A08). | `f3b2af9783c4` |
