@@ -3,6 +3,13 @@ dist
 dist-ssr
 *.local
 
+# Harness de QA (SB-UI-6): artefactos GENERADOS por la suite. Se regeneran con
+#   npm run qa:build       -> dist-qa/
+#   npm run qa:responsive  -> qa/screenshots/
+# Nunca se comitean: son salida, no fuente.
+dist-qa
+qa/screenshots/
+
 # Entorno (NO comitear claves de proyecto / secretos)
 .env
 .env.*
