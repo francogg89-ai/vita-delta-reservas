@@ -98,7 +98,7 @@ Son los que entran al canónico SQL (`CONSOLIDAR`). Los 8 del pin de D1 + los 4 
 
 **El parcial es la fila 30** (`06-07/B1_2_CORE_MIGRACION_TEST.sql`): es autoridad del **wrapper** `resolver_horario`, pero su `_resolver_horario` y su helper fueron superados por A. Queda con autoridad `PARCIAL` — **ya contado dentro de los 12 `CONSOLIDAR`, no es un archivo número 13.**
 
-**Autoridad ≠ ejecutabilidad.** 5 de estos 12 son `NO_EJECUTABLE_GATE_OBSOLETO`: su gate espera el resolver viejo `58d75c1b` y abortan hoy. El canónico se arma del **cuerpo** de la función (probado idéntico al vivo), no de re-ejecutar el script.
+**Autoridad ≠ ejecutabilidad.** 4 de estos 12 artefactos son `NO_EJECUTABLE_GATE_OBSOLETO`: su gate espera el resolver viejo `58d75c1b` y abortan hoy. El canónico se arma del **cuerpo** de la función (probado idéntico al vivo), no de re-ejecutar el script.
 
 
 ## `PENDIENTE_H1` — 1 archivo
