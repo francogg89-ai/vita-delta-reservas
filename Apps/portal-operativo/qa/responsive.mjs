@@ -36,15 +36,15 @@ const ok = (c, m) => {
   if (!c) fallos++;
 };
 /**
- * HALLAZGO CONOCIDO: bug REAL, medido, pendiente de decision de Franco. No cuenta como falla de la
- * suite (si no, la suite deja de servir de gate de regresion), pero se lista SIEMPRE y bien fuerte.
- * Cuando se decida el fix, esto pasa a ser un `ok()` duro.
+ * REGISTRO DE HALLAZGO (infraestructura de tripwire). Un hallazgo es un bug REAL y medido que se
+ * lista pero no cuenta como falla dura. Tras SB-UI-6.1 NO quedan hallazgos abiertos: H-1 y H-2 son
+ * ASERCIONES DURAS (`ok()`). Esta funcion se conserva a proposito, sin invocar, para que un hallazgo
+ * NUEVO se pueda registrar y el gate lo detecte como "SOBRAN" (set esperado {}).
  */
 const hallazgo = (c, id, m) => {
   console.log(`      ${c ? 'ok   ' : '·HALL'} ${m}`);
-  // Se deduplica por ID: el mismo hallazgo (p.ej. H-1) se evalua en varios viewports, pero es UN
-  // solo hallazgo. Antes se empujaba una entrada por evaluacion y el conteo daba "3 hallazgos"
-  // aunque solo se imprimian H-1 y H-2. Se guarda el primer mensaje visto para cada ID.
+  // Se deduplica por ID: el mismo hallazgo se evaluaria en varios viewports pero es UN solo
+  // hallazgo. Se guarda el primer mensaje visto para cada ID.
   if (!c && !hallazgos.some((h) => h.id === id)) hallazgos.push({ id, msg: `${id} -- ${m}` });
 };
 
@@ -183,219 +183,445 @@ for (const abierto of [false, true]) {
       esMobile ? 'menu mobile CERRADO por defecto (aside oculto)' : `menu lateral visible (${r.aside?.w}px)`
     );
 
-    if (esMobile) {
-      const hamburguesa = p.locator('button[aria-label="Abrir o cerrar menu"]');
-      await hamburguesa.click();
-      await p.waitForTimeout(120);
-      const abiertoR = await p.evaluate(() => {
-        const a = document.querySelector('aside');
-        return {
-          visible: getComputedStyle(a).display !== 'none',
-          expanded: document.querySelector('button[aria-label="Abrir o cerrar menu"]')?.getAttribute('aria-expanded'),
-          links: a.querySelectorAll('a').length,
-          desborda: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-        };
-      });
-      ok(abiertoR.visible, 'menu mobile ABIERTO al tocar la hamburguesa');
-      ok(abiertoR.expanded === 'true', 'aria-expanded="true" (accesible)');
-      ok(abiertoR.links > 0, `el menu tiene ${abiertoR.links} enlaces`);
-      // H-1: el drawer es `position: static` + `shrink-0` -> cuando se abre EMPUJA el contenido en
-      // vez de superponerse. El <main> queda en 119px (71px utiles tras el p-6) y un importe como
-      // "$ 3.800.000,00" mide 135px con `shrink-0`: no entra ni puede encoger. NO es un problema de
-      // A30/A31 -- le pasa a cualquier pantalla del portal. Fix propuesto aparte (drawer overlay).
-      hallazgo(!abiertoR.desborda, 'H-1', 'con el menu abierto la pagina NO desborda');
-
-      // navegar cierra el drawer
-      await p.locator('aside a').first().click();
-      await p.waitForTimeout(150);
-      const cerrado = await p.evaluate(() => getComputedStyle(document.querySelector('aside')).display === 'none');
-      ok(cerrado, 'navegar CIERRA el drawer mobile (onNavigate)');
-    }
-
+    // Screenshot del estado medido ANTES de tocar el drawer (el test de drawer navega y muta la
+    // vista, asi que se captura primero, en un estado conocido).
     if (!abierto) {
       await p.screenshot({ path: `qa/screenshots/${v.nombre}-${v.w}.png`, fullPage: false });
     } else if (esMobile) {
-      await p.screenshot({ path: 'qa/screenshots/mobile-375-detalle-abierto.png', fullPage: false });
+      await p.screenshot({ path: `qa/screenshots/mobile-${v.w}-detalle-abierto.png`, fullPage: false });
+    }
+
+    if (esMobile) {
+      // Estado del drawer (una lectura reutilizable). aria-expanded vive en la hamburguesa.
+      const leerDrawer = () =>
+        p.evaluate(() => {
+          const a = document.querySelector('aside');
+          const cs = getComputedStyle(a);
+          const btn = document.querySelector('button[aria-label="Abrir o cerrar menu"]');
+          return {
+            display: cs.display,
+            position: cs.position,
+            rects: a.getClientRects().length,
+            expanded: btn?.getAttribute('aria-expanded'),
+            links: a.querySelectorAll('a').length,
+            desborda: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            mainW: document.querySelector('main')?.offsetWidth ?? 0,
+          };
+        });
+      const mainCerrado = r.main; // ancho del <main> con el drawer cerrado (medido arriba)
+      const hamburguesa = p.locator('button[aria-label="Abrir o cerrar menu"]');
+
+      // 1) ABRIR con la hamburguesa.
+      await hamburguesa.click();
+      await p.waitForTimeout(150);
+      const ab = await leerDrawer();
+      ok(ab.display !== 'none', 'el drawer se ABRE al tocar la hamburguesa');
+      ok(ab.expanded === 'true', 'aria-expanded="true" con el drawer abierto');
+      ok(ab.links > 0, `el drawer abierto tiene ${ab.links} enlaces`);
+      // H-1 (ASERCION DURA): overlay fuera del flujo -> el <main> NO cambia de ancho (ni se angosta ni
+      // se ensancha, |dif| acotada en ambos sentidos) y la pagina no desborda a lo ancho.
+      const TOL_MAIN = 1;
+      ok(
+        Math.abs(ab.mainW - mainCerrado) <= TOL_MAIN,
+        `el <main> no cambia de ancho al abrir el drawer: ${ab.mainW}px abierto vs ${mainCerrado}px cerrado (|dif| <= ${TOL_MAIN}px)`
+      );
+      ok(!ab.desborda, 'con el drawer abierto la pagina NO desborda a lo ancho (scrollWidth === clientWidth)');
+      ok(
+        ab.position === 'fixed' || ab.position === 'absolute',
+        `el drawer abierto es overlay fuera del flujo (position: ${ab.position})`
+      );
+
+      // SCREENSHOT con el drawer REALMENTE ABIERTO, antes de cerrarlo (una vez, con detalle cerrado).
+      if (!abierto) {
+        await p.screenshot({ path: `qa/screenshots/mobile-${v.w}-drawer-abierto.png`, fullPage: false });
+      }
+
+      // 2) CERRAR con el MISMO control visible: la hamburguesa sigue accesible porque el drawer se
+      //    ancla al AREA DE CONTENIDO (no tapa el header). Es el punto exacto que fallaba antes.
+      await hamburguesa.click();
+      await p.waitForTimeout(150);
+      const ce = await leerDrawer();
+      ok(
+        ce.display === 'none' && ce.rects === 0,
+        'el drawer se CIERRA con el mismo control (display:none, sin geometria)'
+      );
+      ok(ce.expanded === 'false', 'aria-expanded="false" con el drawer cerrado');
+
+      // 3) NAVEGAR tambien cierra: reabrir y clickear un enlace del menu.
+      await hamburguesa.click();
+      await p.waitForTimeout(120);
+      await p.locator('aside a').first().click();
+      await p.waitForTimeout(150);
+      const nav = await leerDrawer();
+      ok(
+        nav.display === 'none' && nav.rects === 0,
+        'al navegar, el drawer queda oculto y no interactuable (display:none, sin geometria)'
+      );
+      ok(nav.expanded === 'false', 'y aria-expanded vuelve a "false" tras navegar');
+    } else {
+      // Tablet/desktop: el aside es columna estatica de 256px. Tolerancia explicita por borde/subpixel.
+      const TOL_ASIDE = 2;
+      ok(
+        r.aside != null && Math.abs((r.aside.w ?? 0) - 256) <= TOL_ASIDE,
+        `aside lateral de 256px en ${v.nombre} (medido ${r.aside?.w}px, tolerancia ${TOL_ASIDE}px)`
+      );
     }
     await p.close();
   }
 }
 
 // =============================================================================================
-// H-2 -- FILAS INUTILIZABLES EN MOBILE. Medido aca, no contado de memoria en un .md.
-// Selecciona F20 (peor caso: gastos con TODOS los opcionales), abre el detalle fino, localiza
-// Gastos congelados y mide alto de fila, ancho total/visible y % oculto. Guarda screenshot.
+// H-2 -- GASTOS CONGELADOS: EXACTAMENTE UNA representacion por breakpoint (card en mobile, tabla en
+// tablet/desktop), medida sobre el DOM productivo real. Medido aca, no contado de memoria en un .md.
+//
+// En cada viewport (mobile 375, tablet 768, desktop 1280):
+//   1) se localiza la seccion "Gastos congelados";
+//   2) EXCLUSIVIDAD (asercion dura): tablaVis !== cardsVis. En mobile: cards visibles y tabla NO
+//      visible; en tablet/desktop: tabla visible y CERO cards visibles. Que ambas esten visibles a
+//      la vez es una FALLA (antes se "priorizaban" las cards y eso ocultaba el defecto);
+//   3) la representacion visible debe ser la ESPERADA por breakpoint (card/tabla);
+//   4) CARDINALIDAD (mobile): la fuente de verdad de que gastos existen es la tabla (en el DOM aunque
+//      este display:none). Se exige: cantidad de cards == cantidad de filas; conjunto de IDs de card
+//      (data-qa-gasto-id) == conjunto de IDs de fila; sin faltantes; sin duplicados; una card por
+//      id_gasto. Una mutacion que renderice solo el primer gasto FALLA. (m.n > 0 no alcanza.);
+//   5) VACIO VERTICAL REAL por UNION de intervalos: se juntan los intervalos verticales de todos los
+//      rectangulos de texto legibles, se ordenan, se fusionan SOLO los solapados/contiguos y se suma
+//      la union. vacio = alto total - union. Un hueco grande entre dos lineas NO cuenta como
+//      contenido (a diferencia de bot-top). Una card alta con un gran hueco FALLA;
+//   6) veredicto: inutilizable si (alto >= ALTO_MIN Y vacio >= VACIO_MIN) -> asercion dura;
+//   7) F20 / desborde: documentElement.scrollWidth === clientWidth SIEMPRE. Ademas, segun la
+//      representacion: CARDS -> cada card queda completa dentro del viewport (izq y der); TABLA ->
+//      NO se exige que las filas entren (la tabla puede ser mas ancha y desplazarse dentro de su
+//      wrapper); se exige que el WRAPPER quede dentro del viewport y que el scroll horizontal
+//      interno funcione (no tautologico);
+//   8) screenshot de la representacion EFECTIVAMENTE MEDIDA en cada viewport.
+// H-2 es ASERCION DURA (ok), no un hallazgo.
 // =============================================================================================
 {
   console.log('\n' + '='.repeat(92));
-  console.log('H-2 -- ¿las filas densas inutilizan la tabla en mobile? (F20, 375px)');
+  console.log('H-2 -- Gastos congelados: 1 representacion por breakpoint, sin desperdicio (F20)');
   console.log('='.repeat(92));
 
-  const p = await b.newPage({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true });
-  await p.goto(BASE, { waitUntil: 'networkidle' });
-  await p.waitForSelector('main');
-  await p.selectOption('[data-qa-barra] select', 'F20');
-  await p.waitForTimeout(200);
-  await p.locator('main details').first().locator('summary').click();
-  await p.waitForTimeout(300);
+  const ALTO_MIN = 120; // px: por debajo de esto una unidad no "ocupa pantalla" aunque este vacia
+  const VACIO_MIN = 100; // px: desperdicio vertical concreto que vuelve la unidad inutilizable
+  const TOL_VP = 1; // px de tolerancia para "no excede el viewport"
 
-  const m = await p.evaluate(() => {
-    const h = [...document.querySelectorAll('main p')].find((e) => /Gastos congelados/i.test(e.textContent ?? ''));
-    const tabla = h?.closest('section')?.querySelector('table');
-    if (!tabla) return null;
-    const sc = tabla.closest('.overflow-x-auto');
-    const sr = sc.getBoundingClientRect();
+  for (const vp of [
+    { nombre: 'mobile', w: 375, h: 812, mobile: true, esperado: 'card' },
+    { nombre: 'tablet', w: 768, h: 1024, mobile: false, esperado: 'tabla' },
+    { nombre: 'desktop', w: 1280, h: 900, mobile: false, esperado: 'tabla' },
+  ]) {
+    const p = await b.newPage({
+      viewport: { width: vp.w, height: vp.h },
+      ...(vp.mobile ? { hasTouch: true, isMobile: true } : {}),
+    });
+    await p.goto(BASE, { waitUntil: 'networkidle' });
+    await p.waitForSelector('main');
+    await p.selectOption('[data-qa-barra] select', 'F20');
+    await p.waitForTimeout(200);
+    await p.locator('main details').first().locator('summary').click();
+    await p.waitForTimeout(300);
 
-    // Solapamiento horizontal UTIL de un rectangulo con la franja visible del scroller. El filtro
-    // anterior (`rect.right > sr.left+2 && rect.left < sr.right-2`) aceptaba cualquier asomo minimo:
-    // si la 4a celda entraba unos pocos pixeles, TODAS sus lineas contaban como visibles y se sumaba
-    // su altura completa. Por eso informaba 17px vacios donde la captura muestra un bloque blanco
-    // enorme.
-    const overlapX = (r) => Math.max(0, Math.min(r.right, sr.right - 2) - Math.max(r.left, sr.left + 2));
-    // Una linea es LEGIBLE si asoma al menos 16px de ancho Y al menos el 25% de su propio ancho. Un
-    // sliver marginal (pocos pixeles de una celda de 160px) no habilita a contar toda esa linea.
-    const legible = (r) => {
-      const vis = overlapX(r);
-      return vis >= 16 && r.width > 0 && vis / r.width >= 0.25;
-    };
+    const m = await p.evaluate(() => {
+      const visible = (el) =>
+        !!el &&
+        el.getClientRects().length > 0 &&
+        getComputedStyle(el).display !== 'none' &&
+        getComputedStyle(el).visibility !== 'hidden';
 
-    const filas = [...tabla.querySelectorAll('tbody tr')].map((tr) => {
-      const tds = [...tr.querySelectorAll('td')];
-      const alto = Math.round(tr.getBoundingClientRect().height);
+      const h = [...document.querySelectorAll('main p')].find((e) =>
+        /Gastos congelados/i.test(e.textContent ?? '')
+      );
+      const sec = h?.closest('section');
+      if (!sec) return { rep: 'none', motivo: 'no se encontro la seccion Gastos congelados' };
 
-      // columnas cuyo contenido asoma LEGIBLEMENTE en la franja visible
-      let columnasVisibles = 0;
-      let altoContenido = 0;
-      for (const td of tds) {
-        const rg = document.createRange();
-        rg.selectNodeContents(td);
-        const rects = [...rg.getClientRects()].filter(legible);
-        if (rects.length === 0) continue; // esta celda no aporta una sola linea legible
-        columnasVisibles++;
-        const h = Math.round(Math.max(...rects.map((r) => r.bottom)) - Math.min(...rects.map((r) => r.top)));
-        if (h > altoContenido) altoContenido = h; // la fila es tan alta como su celda visible mas alta
+      const tabla = sec.querySelector('table'); // en el DOM aunque en mobile este display:none
+      const cardsEls = [...sec.querySelectorAll('[data-qa="gasto-card"]')].filter(visible);
+      const tablaVis = visible(tabla);
+      const cardsVis = cardsEls.length > 0;
+      if (!tablaVis && !cardsVis)
+        return { rep: 'none', motivo: 'no hay NI tabla NI cards de gastos VISIBLES', tablaVis, cardsVis };
+
+      const vw = document.documentElement.clientWidth;
+      const franja = (el) => {
+        const r = el.getBoundingClientRect();
+        return { left: Math.max(0, r.left), right: Math.min(vw, r.right) };
+      };
+      const overlapX = (r, fr) =>
+        Math.max(0, Math.min(r.right, fr.right - 2) - Math.max(r.left, fr.left + 2));
+      const legible = (r, fr) => {
+        const vis = overlapX(r, fr);
+        return vis >= 16 && r.width > 0 && vis / r.width >= 0.25;
+      };
+      // Mide una unidad: alto total, y contenido legible por UNION de intervalos verticales
+      // fusionados (los huecos NO cuentan). Devuelve tambien el borde derecho (para "no excede vp").
+      const medirBloque = (el, fr) => {
+        const rect = el.getBoundingClientRect();
+        const alto = Math.round(rect.height);
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        const iv = [];
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          if (!(n.textContent ?? '').trim()) continue;
+          const rg = document.createRange();
+          rg.selectNodeContents(n);
+          for (const r of rg.getClientRects()) {
+            if (!legible(r, fr)) continue;
+            iv.push([r.top, r.bottom]);
+          }
+        }
+        iv.sort((a, bb) => a[0] - bb[0]);
+        let union = 0;
+        let ct = null;
+        let cb = null;
+        for (const [t, btm] of iv) {
+          if (ct === null) {
+            ct = t;
+            cb = btm;
+            continue;
+          }
+          if (t <= cb) {
+            // solapan o se tocan -> mismo bloque de contenido
+            if (btm > cb) cb = btm;
+          } else {
+            // HUECO -> el intervalo previo cierra; el hueco es vacio
+            union += cb - ct;
+            ct = t;
+            cb = btm;
+          }
+        }
+        if (ct !== null) union += cb - ct;
+        const altoContenido = Math.round(union);
+        return {
+          alto,
+          altoContenido,
+          vacio: alto - altoContenido,
+          pct: alto > 0 ? Math.round(((alto - altoContenido) / alto) * 100) : 0,
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+        };
+      };
+
+      // IDs de las filas de la tabla (fuente de verdad; la tabla existe en el DOM en todo viewport).
+      const idsFilas = tabla
+        ? [...tabla.querySelectorAll('tbody tr')].map((tr) => {
+            const t = (tr.querySelector('td')?.textContent ?? '').trim();
+            const mm = t.match(/#(\d+)/);
+            return mm ? Number(mm[1]) : null;
+          })
+        : [];
+
+      let rep;
+      let unidades;
+      let idsCards = [];
+      let wrapper = null;
+      if (cardsVis) {
+        rep = 'card';
+        unidades = cardsEls.map((c) => medirBloque(c, franja(c)));
+        idsCards = cardsEls.map((c) => Number(c.getAttribute('data-qa-gasto-id')));
+      } else {
+        rep = 'tabla';
+        const sc = tabla.closest('.overflow-x-auto') ?? tabla.parentElement;
+        const fr = franja(sc);
+        unidades = [...tabla.querySelectorAll('tbody tr')].map((tr) => medirBloque(tr, fr));
+        // WRAPPER (no las filas): la tabla PUEDE ser mas ancha que el area visible y desplazarse
+        // DENTRO de su wrapper (comportamiento productivo de DataTable). Se mide el wrapper y el
+        // scroll horizontal interno NO tautologico: asignar scrollLeft, ver que cambio, restaurar.
+        const wr = sc.getBoundingClientRect();
+        const cs = getComputedStyle(sc);
+        const scrollWidth = sc.scrollWidth;
+        const clientWidth = sc.clientWidth;
+        const excede = scrollWidth > clientWidth + 1;
+        let desplazable = null;
+        let restaurado = null;
+        if (excede) {
+          const orig = sc.scrollLeft;
+          sc.scrollLeft = orig + 40;
+          desplazable = sc.scrollLeft !== orig;
+          sc.scrollLeft = orig;
+          restaurado = sc.scrollLeft === orig;
+        }
+        wrapper = {
+          left: Math.round(wr.left),
+          right: Math.round(wr.right),
+          overflowX: cs.overflowX,
+          scrollWidth,
+          clientWidth,
+          excede,
+          desplazable,
+          restaurado,
+        };
       }
       return {
-        alto,
-        altoContenido,
-        vacio: alto - altoContenido,
-        pct: alto > 0 ? Math.round(((alto - altoContenido) / alto) * 100) : 0,
-        columnasVisibles,
-        total: tds.length,
+        rep,
+        tablaVis,
+        cardsVis,
+        n: unidades.length,
+        unidades,
+        idsCards,
+        idsFilas,
+        wrapper,
+        vw,
+        pageScrollW: document.documentElement.scrollWidth,
+        pageClientW: document.documentElement.clientWidth,
       };
     });
-    return {
-      anchoTabla: tabla.scrollWidth,
-      anchoVisible: sc.clientWidth,
-      oculto: tabla.scrollWidth - sc.clientWidth,
-      filas,
-    };
-  });
 
-  if (!m) {
-    ok(false, 'H-2: no se encontro la tabla Gastos congelados');
-  } else {
-    // El % horizontal oculto se informa APARTE: por si solo no declara "fila inutilizable".
-    const pctOculto = Math.round((m.oculto / m.anchoTabla) * 100);
-    console.log(`\n    tabla ${m.anchoTabla}px | visible ${m.anchoVisible}px | oculto horizontalmente ${m.oculto}px (${pctOculto}%)`);
-    console.log('    (el % horizontal se informa aparte; H-2 se decide por el desperdicio VERTICAL)\n');
-    console.log('    fila | altura | contenido visible | ESPACIO VERTICAL VACIO | columnas visibles');
-    console.log('    ' + '-'.repeat(70));
-    for (const [i, f] of m.filas.entries()) {
-      console.log(
-        `    #${i + 1}   | ${String(f.alto).padStart(5)}px| ${String(f.altoContenido).padStart(14)}px| ` +
-          `${String(f.vacio).padStart(9)}px (${String(f.pct).padStart(2)}%) | ${f.columnasVisibles} de ${f.total}`
+    console.log(`\n  ${vp.nombre} (${vp.w}px) -- representacion esperada: ${vp.esperado}`);
+
+    // (2') fail-closed: nada visible que medir NUNCA es exito.
+    if (m.rep === 'none') {
+      ok(false, `H-2 @${vp.nombre}: ${m.motivo}`);
+      await p.close();
+      continue;
+    }
+    // (2) EXCLUSIVIDAD dura: exactamente una representacion visible.
+    ok(
+      m.tablaVis !== m.cardsVis,
+      `H-2 @${vp.nombre}: exactamente UNA representacion visible (tablaVis=${m.tablaVis}, cardsVis=${m.cardsVis})`
+    );
+    // (3) la representacion visible es la esperada por breakpoint.
+    ok(
+      m.rep === vp.esperado,
+      `la representacion visible en ${vp.nombre} es «${m.rep}» (esperada «${vp.esperado}»)`
+    );
+    // (5-basico) cero unidades = falla. Fail-closed limpio: si no hay unidades, NO seguir hacia el
+    // reduce (m.unidades[0] seria undefined y romperia). Se corta este viewport.
+    ok(
+      m.n > 0,
+      `hay ${m.n} ${m.rep === 'card' ? 'card(s)' : 'fila(s)'} de gasto (F20 trae gastos; cero = falla)`
+    );
+    if (m.n === 0) {
+      await p.close();
+      continue;
+    }
+
+    // (7) DESBORDE. La PAGINA nunca debe desbordar a lo ancho (ambas representaciones).
+    ok(
+      m.pageScrollW === m.pageClientW,
+      `sin scroll horizontal de pagina en ${vp.nombre} (documentElement.scrollWidth ${m.pageScrollW} === clientWidth ${m.pageClientW})`
+    );
+    if (m.rep === 'card') {
+      // CARDS: cada card queda COMPLETA dentro del viewport (izquierda Y derecha). Una card no se
+      // desplaza; si sobresale a izquierda o derecha, es un bug.
+      const fuera = m.unidades.filter((u) => u.left < -TOL_VP || u.right > m.vw + TOL_VP).length;
+      ok(
+        fuera === 0,
+        `ninguna card excede el viewport a lo ancho en ${vp.nombre} (todas dentro de [0, ${m.vw}]px${fuera ? `, ${fuera} fuera` : ''})`
+      );
+    } else {
+      // TABLA: DataTable esta disenada para que la tabla pueda ser MAS ANCHA que el area visible y
+      // se desplace DENTRO de su wrapper overflow-x-auto. Por eso NO se exige que las filas o la
+      // tabla terminen dentro del viewport (en tablet 768 la tabla de 9 columnas excede
+      // legitimamente). Se exige: el WRAPPER queda dentro del viewport; su overflowX es auto|scroll;
+      // y si la tabla excede el wrapper, el scroll horizontal INTERNO funciona (no tautologico: se
+      // asigno scrollLeft, cambio, y se restauro al valor original).
+      const w = m.wrapper;
+      ok(
+        w != null && w.left >= -TOL_VP && w.right <= m.vw + TOL_VP,
+        `el wrapper overflow-x-auto queda dentro del viewport en ${vp.nombre} (left ${w?.left}, right ${w?.right}, vw ${m.vw})`
+      );
+      ok(
+        w.overflowX === 'auto' || w.overflowX === 'scroll',
+        `el wrapper tiene overflow-x desplazable en ${vp.nombre} (overflowX: ${w.overflowX})`
+      );
+      if (w.excede) {
+        ok(
+          w.desplazable === true,
+          `la tabla excede el wrapper y el scroll horizontal INTERNO funciona en ${vp.nombre} (scrollWidth ${w.scrollWidth} > clientWidth ${w.clientWidth}; scrollLeft cambia)`
+        );
+        ok(
+          w.restaurado === true,
+          `y la medicion restauro el scrollLeft en ${vp.nombre} (no deja la tabla movida)`
+        );
+        console.log(`    tabla ${w.scrollWidth}px se desplaza dentro del wrapper ${w.clientWidth}px -> scroll interno OK (no tautologico)`);
+      } else {
+        console.log(`    tabla ${w.scrollWidth}px entra en el wrapper ${w.clientWidth}px (no requiere scroll interno)`);
+      }
+    }
+
+    // (4) CARDINALIDAD en mobile: cards == filas fuente, mismos IDs, sin faltantes ni duplicados.
+    if (m.rep === 'card') {
+      const filas = m.idsFilas.filter((x) => x != null);
+      const cards = m.idsCards.filter((x) => x != null);
+      const setF = new Set(filas);
+      const setC = new Set(cards);
+      const faltan = [...setF].filter((x) => !setC.has(x));
+      const sobran = [...setC].filter((x) => !setF.has(x));
+      const dup = cards.length !== setC.size;
+      console.log(`    fuente (filas de tabla): [${[...setF].join(', ')}]  |  cards: [${cards.join(', ')}]`);
+      ok(
+        cards.length === filas.length && faltan.length === 0 && sobran.length === 0 && !dup && setF.size > 0,
+        `una card por gasto: ${cards.length} cards == ${filas.length} filas, mismos IDs, sin faltantes` +
+          `${faltan.length ? ` (faltan ${faltan.join(',')})` : ''}${sobran.length ? ` (sobran ${sobran.join(',')})` : ''}` +
+          `${dup ? ' (HAY DUPLICADOS)' : ''}`
       );
     }
 
-    // Tres criterios, informados por separado. NO se elige "la de mayor proporcion": una fila baja
-    // puede ser 90% vacia y aun asi ser el caso menos grave. Lo que decide es el desperdicio
-    // VERTICAL concreto (pixeles), no la proporcion.
-    const masAlta = m.filas.reduce((a, f) => (f.alto > a.alto ? f : a), m.filas[0]);
-    const masVacia = m.filas.reduce((a, f) => (f.vacio > a.vacio ? f : a), m.filas[0]);
-    const mayorPct = m.filas.reduce((a, f) => (f.pct > a.pct ? f : a), m.filas[0]);
-    const idx = (f) => m.filas.indexOf(f) + 1;
-    console.log('');
-    console.log(`    fila mas alta:         #${idx(masAlta)}  (${masAlta.alto}px, ${masAlta.vacio}px vacios, ${masAlta.pct}%)`);
-    console.log(`    fila con mas px vacios: #${idx(masVacia)}  (${masVacia.vacio}px vacios de ${masVacia.alto}px, ${masVacia.pct}%)`);
-    console.log(`    fila con mayor % vacio: #${idx(mayorPct)}  (${mayorPct.pct}%, ${mayorPct.vacio}px de ${mayorPct.alto}px)`);
-    console.log('');
+    console.log('    unidad | altura | contenido legible (union) | ESPACIO VERTICAL VACIO');
+    console.log('    ' + '-'.repeat(66));
+    for (const [i, f] of m.unidades.entries()) {
+      console.log(
+        `    #${String(i + 1).padStart(3)} | ${String(f.alto).padStart(5)}px| ${String(f.altoContenido).padStart(20)}px| ` +
+          `${String(f.vacio).padStart(9)}px (${String(f.pct).padStart(2)}%)`
+      );
+    }
 
-    // VEREDICTO. Dos umbrales EXPLICITOS, y NO se decide solo por porcentaje:
-    //   - la fila mas desperdiciada tiene que ser suficientemente ALTA (si es baja, aunque sea 90%
-    //     vacia, no inutiliza nada);
-    //   - y su desperdicio VERTICAL en PIXELES tiene que superar el umbral.
-    const ALTO_MIN = 120; // px: por debajo de esto una fila no "ocupa pantalla" aunque este vacia
-    const VACIO_MIN = 100; // px: desperdicio vertical concreto que vuelve la fila inutilizable
+    // (6) VEREDICTO por la unidad mas desperdiciada, umbrales EXPLICITOS, vacio por UNION.
+    const masVacia = m.unidades.reduce((a, f) => (f.vacio > a.vacio ? f : a), m.unidades[0]);
+    const idx = m.unidades.indexOf(masVacia) + 1;
     const inutilizable = masVacia.alto >= ALTO_MIN && masVacia.vacio >= VACIO_MIN;
-
-    console.log(`    umbrales: alto >= ${ALTO_MIN}px  Y  desperdicio vertical >= ${VACIO_MIN}px  (no se decide por %)`);
+    console.log('');
+    console.log(`    umbrales: alto >= ${ALTO_MIN}px  Y  desperdicio vertical (union) >= ${VACIO_MIN}px`);
     console.log(
-      `    fila #${idx(masVacia)}: alto ${masVacia.alto}px (${masVacia.alto >= ALTO_MIN ? 'OK' : 'baja'}), ` +
+      `    unidad mas desperdiciada #${idx}: alto ${masVacia.alto}px (${masVacia.alto >= ALTO_MIN ? 'alta' : 'baja'}), ` +
         `desperdicio ${masVacia.vacio}px (${masVacia.vacio >= VACIO_MIN ? 'supera' : 'no supera'} el umbral)\n`
     );
 
-    // `hallazgo(cond, ...)` imprime `ok <msg>` cuando cond es true. Por eso el mensaje que se le pasa
-    // describe el ESTADO BUENO (filas compactas), y el estado roto se reporta aparte con su propio
-    // texto. Antes se le pasaba "filas inutilizables..." con la condicion invertida: cuando H-2 NO
-    // se detectaba imprimia "ok filas inutilizables", que es contradictorio.
-    if (inutilizable) {
-      // estado ROTO: se registra el hallazgo con la descripcion del problema.
-      hallazgo(
-        false,
-        'H-2',
-        `filas inutilizables en mobile: la fila mas desperdiciada (#${idx(masVacia)}) mide ${masVacia.alto}px ` +
-          `con solo ${masVacia.altoContenido}px de contenido legible -> ${masVacia.vacio}px verticales vacios (${masVacia.pct}%), ` +
-          `${masVacia.columnasVisibles} de ${masVacia.total} columnas legibles; ademas ${pctOculto}% de la tabla oculto a lo ancho`
-      );
-    } else {
-      // estado BUENO: el mensaje positivo describe filas compactas, no el problema.
-      hallazgo(
-        true,
-        'H-2',
-        `filas compactas en mobile: la fila mas desperdiciada (#${idx(masVacia)}) desperdicia solo ${masVacia.vacio}px ` +
-          `verticales (umbral ${VACIO_MIN}px)`
-      );
-    }
+    ok(
+      !inutilizable,
+      `H-2 @${vp.nombre}: ${m.rep === 'card' ? 'cards' : 'filas'} compactas -- la unidad mas ` +
+        `desperdiciada (#${idx}) mide ${masVacia.alto}px con ${masVacia.altoContenido}px legibles (union) -> ` +
+        `${masVacia.vacio}px vacios (${masVacia.pct}%) [umbral alto>=${ALTO_MIN} Y vacio>=${VACIO_MIN}]`
+    );
 
-    // scrollIntoView ANTES de la captura: sin esto, la tabla que se pretende documentar puede estar
-    // fuera del viewport y la imagen no muestra nada de lo que se acaba de medir.
+    // (8) screenshot de la representacion MEDIDA (se trae la seccion al viewport antes).
     await p.evaluate(() => {
-      const h = [...document.querySelectorAll('main p')].find((e) => /Gastos congelados/i.test(e.textContent ?? ''));
+      const h = [...document.querySelectorAll('main p')].find((e) =>
+        /Gastos congelados/i.test(e.textContent ?? '')
+      );
       h?.closest('section')?.scrollIntoView({ block: 'center' });
     });
     await p.waitForTimeout(200);
-    await p.screenshot({ path: 'qa/screenshots/H2-gastos-densos-375.png' });
-    console.log('    screenshot -> qa/screenshots/H2-gastos-densos-375.png (con la tabla en el viewport)');
+    await p.screenshot({ path: `qa/screenshots/H2-gastos-${vp.nombre}-${vp.w}.png` });
+    console.log(`    screenshot -> qa/screenshots/H2-gastos-${vp.nombre}-${vp.w}.png (representacion medida: ${m.rep})`);
+    await p.close();
   }
-  await p.close();
 }
-
 await b.close();
 console.log(fallos === 0 ? '\n  RESPONSIVE OK (aserciones duras)' : `\n  ${fallos} FALLAS`);
 if (hallazgos.length) {
   console.log(`\n  ${hallazgos.length} HALLAZGO(S) ABIERTO(S) -- medidos, pendientes de decision:`);
   for (const h of hallazgos) console.log(`    ${h.msg}`);
+} else {
+  console.log('\n  0 HALLAZGO(S) ABIERTO(S)');
 }
 
-// GATE DE HALLAZGOS. H-1 y H-2 son bugs CONOCIDOS y medibles (drawer que empuja, filas
-// inutilizables en F20/375). Que la suite los siga detectando es parte de su trabajo: si dejan de
-// aparecer, o el medidor se rompio (como el falso negativo de H-2 que motivo SB-UI-6-FIX3), o
-// alguien "arreglo" el sintoma sin pasar por el sub-bloque productivo. En cualquier caso hay que
-// mirar. Se exige EXACTAMENTE el set {H-1, H-2}: ni menos (regresion del harness) ni mas (apareceria
-// algo no documentado que hay que revisar antes de seguir).
-const ESPERADOS = ['H-1', 'H-2'];
+// GATE DE HALLAZGOS. Tras SB-UI-6.1, H-1 y H-2 pasaron a ASERCIONES DURAS (arriba, cuentan en
+// `fallos`): el drawer es un overlay que NO comprime el <main>, y Gastos congelados usa card
+// compacta en mobile. Por eso el set de hallazgos abiertos esperado es VACIO: {}. La maquinaria de
+// hallazgos NO se elimina: se conserva como tripwire para que cualquier hallazgo NUEVO e inesperado
+// (o un medidor que vuelva a registrar) rompa el gate por "SOBRAN". No se sacan H-1/H-2 del gate sin
+// reemplazo: se reemplazan por comprobaciones duras y se exige explicitamente {}.
+const ESPERADOS = [];
 const ids = hallazgos.map((h) => h.id).sort();
 const setOk = ids.length === ESPERADOS.length && ESPERADOS.every((e, i) => ids[i] === e);
 
 if (!setOk) {
-  const faltan = ESPERADOS.filter((e) => !ids.includes(e));
   const sobran = ids.filter((i) => !ESPERADOS.includes(i));
-  console.log('\n  GATE DE HALLAZGOS -- FALLA: se esperaba exactamente {H-1, H-2}.');
-  if (faltan.length) console.log(`    FALTAN: ${faltan.join(', ')} -> el medidor dejo de detectarlos (revisar el harness o si se "arreglo" el sintoma)`);
-  if (sobran.length) console.log(`    SOBRAN: ${sobran.join(', ')} -> hallazgo no documentado, revisar antes de seguir`);
+  console.log('\n  GATE DE HALLAZGOS -- FALLA: se esperaba el set vacio {}.');
+  if (sobran.length) console.log(`    SOBRAN: ${sobran.join(', ')} -> hallazgo no esperado, revisar antes de seguir`);
 } else {
-  console.log('\n  gate de hallazgos OK -- exactamente {H-1, H-2}, ambos medidos.');
+  console.log('\n  gate de hallazgos OK -- sin hallazgos abiertos ({}).');
 }
 
 console.log('');

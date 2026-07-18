@@ -102,13 +102,19 @@ una misma instancia. **`reqId` es defensa en profundidad, no el mecanismo activo
 | ningún elemento desborda / ningún texto se encima | **AUTO** | `responsive` |
 | cada tabla ancha con scroll interno | **AUTO** — **no tautológico**: se lee `overflowX` computado, se **asigna** `scrollLeft`, se comprueba que **cambió**, y se restaura | `responsive` |
 | select y botón utilizables | **AUTO** | `responsive` |
-| menú mobile cerrado / abierto / navegar lo cierra | **AUTO** — con `aria-expanded` | `responsive` |
+| **H-1 (dura)** drawer mobile: abre por hamburguesa, cierra por el mismo control, navegar cierra | **AUTO** — `aria-expanded` true/false; `Math.abs(mainAbierto−mainCerrado)≤1` (no comprime); overlay `fixed/absolute`; screenshot con el drawer REALMENTE ABIERTO antes de cerrar | `responsive` |
+| aside tablet/desktop de 256px | **AUTO** — con tolerancia explícita (±2px) | `responsive` |
+| **H-2 (dura)** exclusividad de representación | **AUTO** — `tablaVis !== cardsVis`; mobile→cards y tabla no visible; tablet/desktop→tabla y cero cards | `responsive` |
+| **H-2 (dura)** cardinalidad en mobile | **AUTO** — una card por gasto: cantidad e IDs de card == filas fuente, sin faltantes ni duplicados (mutación a solo-el-primero falla) | `responsive` |
+| **H-2 (dura)** vacío vertical por UNIÓN de intervalos | **AUTO** — no `bot−top`; un hueco grande entre líneas cuenta como vacío; umbrales alto≥120px Y vacío≥100px | `responsive` |
+| **H-2 (dura)** cards en mobile / tabla en md+, sin desborde de página | **AUTO** — en 375/768/1280: `documentElement.scrollWidth===clientWidth`; screenshot de la representación medida | `responsive` |
+| **H-2 (dura)** desborde horizontal por representación | **AUTO** — **cards**: cada card completa dentro del viewport (izq y der). **Tabla**: NO se exige que las filas entren (puede ser más ancha); se exige que el **wrapper** `overflow-x-auto` quede dentro del viewport, `overflowX` auto/scroll, y si excede, **scroll interno funcional** (no tautológico: se asigna `scrollLeft`, cambia, se restaura) | `responsive` |
 
 ## Coherencia de los fixtures
 
 Existe porque los fixtures mintieron **tres veces**: F20 con `id_zona`/`id_cabana` cruzados contra la
 clase, F20 con las `regla` cruzadas contra la clase, y F9 con el gasto #42 en `incidencias` **y** en
-`gastos_sin_incidencia`. Un fixture incoherente hace que 205 aserciones prueben una fantasía.
+`gastos_sin_incidencia`. Un fixture incoherente hace que las 248 aserciones prueben una fantasía.
 
 | Qué | Cómo | Dónde |
 |---|---|---|
@@ -134,7 +140,7 @@ clase, F20 con las `regla` cruzadas contra la clase, y F9 con el gasto #42 en `i
 
 | Qué | Por qué no se automatiza | Dónde |
 |---|---|---|
-| **descubribilidad del scroll horizontal** | La pregunta no es si la tabla scrollea (scrollea: está medido), sino si un ser humano **se da cuenta**. Está medido que no hay affordance ninguna: sin sombra, sin gradiente, sin aviso; la barra son 2px y en touch es overlay (invisible en reposo). La única pista es una columna cortada al medio. | `qa/SMOKE_MANUAL.md` — 3 personas, teléfono real |
+| **tarea humana sobre la card mobile** | *"Necesito saber cuánto salió la reparación de la bomba y quién la pagó."* — la persona debe hallar gasto, monto y **Pagador** sin scroll horizontal, zoom ni rotación, y distinguir **Pagador** de **Incidencia**. La máquina mide que la card es compacta y única; que un humano *resuelva la tarea* y *lea bien* no se automatiza. **Pendiente de humanos, no ejecutado.** | `qa/SMOKE_MANUAL.md` — 3 personas, teléfono real |
 
 ---
 
@@ -166,4 +172,4 @@ Con el portal apuntando a TEST, sesión de socio, en el navegador:
    y que **suman** `gastos_acumulados`.
 
 Cualquier divergencia entre lo que devuelve TEST y lo que asume `qa/fixtures.ts` es un fixture
-mentiroso, y todas las 205 aserciones que dependan de él están probando una fantasía.
+mentiroso, y todas las 248 aserciones que dependan de él están probando una fantasía.

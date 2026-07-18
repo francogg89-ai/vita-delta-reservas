@@ -1,4 +1,4 @@
-# RUNSHEET — Harness de QA (SB-UI-6-FIX3)
+# RUNSHEET — Harness de QA (SB-UI-6.1)
 
 ## ⚠️ El puerto 5173 lo comparten `npm run dev` y `npm run qa`
 
@@ -30,14 +30,14 @@ POSIX.
 npm run build            # 1. requisito de qa:higiene (necesita dist/)
 npm run typecheck        # 2. TS de producción                     -> EXIT 0
 npm run typecheck:qa     # 3. TS sobre qa/ + src/                  -> EXIT 0
-npm run qa:probes        # 4. 205 aserciones de dominio y vista    -> EXIT 0
+npm run qa:probes        # 4. 248 aserciones de dominio y vista    -> EXIT 0
 npm run qa:higiene       # 5. 10 checks: el harness no llega a prod-> EXIT 0
 npm run qa:build         # 6. el harness compila                   -> EXIT 0
 npm run qa:mutacion      # 7. mutation gate de useAction (autónomo)-> EXIT 0
 
 npm run qa               # 8. levanta el harness visual en :5173
 npm run qa:estructural   # 9. 41 aserciones: CONTENEDOR REAL en Chromium
-npm run qa:responsive    # 10. 375/768/1280 + H-1 y H-2 medidos
+npm run qa:responsive    # 10. 375/768/1280 + H-1 y H-2 como ASERCIONES DURAS
 ```
 
 Los dos últimos necesitan el harness levantado (otra terminal). `qa:mutacion` **es autónomo**:
@@ -51,7 +51,7 @@ toda la suite, `git status --short` no muestra nada nuevo.
 
 ## Qué prueba cada uno
 
-### `qa:probes` — 205 aserciones, sin vitest ni jest
+### `qa:probes` — 248 aserciones, sin vitest ni jest
 
 **Gate de pureza (SB-UI-6-FIX3):** antes de ejecutar, inspecciona el metafile del bundle y **aborta
 si aparece Supabase** (`@supabase/supabase-js`, `src/lib/supabase.ts`, `createClient`,
@@ -84,6 +84,7 @@ Runner mínimo propio. Compila los **módulos reales** con esbuild y los ejecuta
   `id_gasto` · identidad del desglose A31. **Existe porque F20 quedó contradictorio dos veces**; y
   al escribirlo cazó un tercer fixture roto (F9 tenía el gasto #42 en `incidencias` **y** en
   `gastos_sin_incidencia`).
+- **H — card mobile de gastos (SB-UI-6.1):** el componente productivo real `GastoCardMobile` (exportado, no una copia): #id_gasto congelado, monto, etiqueta, fecha, clase, alcance con IDs crudos, **Pagador** y **Incidencia** en filas separadas (quién pagó ≠ a quién se imputó, el motivo sin incidencia sale por `incidenciaGasto`), procedencia, comentario, clase sugerida, nullables, y comprobante SEGURO (http/https con `target`+`rel`; `javascript:`/`data:`/`vbscript:`/relativa/`ftp:` → sin `<a>` + aviso). **Integración:** ContenidoFoto rinde una card por gasto, IDs sin faltantes ni duplicados, y texto largo (etiqueta/comentario) completo sin pérdida.
 
 ### `qa:estructural` — 41 aserciones, CONTENEDOR REAL en Chromium
 
@@ -154,13 +155,31 @@ devDependencies directas**.
 375/768/1280, detalle cerrado y abierto: `scrollWidth === clientWidth` · nada desborda · ningún
 texto se encima · **scroll no tautológico** (se mide `overflowX` computado, se **asigna**
 `scrollLeft`, se comprueba que **cambió**, y se restaura — un wrapper bloqueado no pasa) · select y
-botón usables · menú mobile cerrado/abierto/`aria-expanded`/navegar-cierra-drawer. Además **mide
-H-2** (selecciona F20, abre el detalle, localiza Gastos congelados; mide el **contenido legible**
-de cada fila con solapamiento horizontal útil — `overlapX ≥ 16px` y ≥ 25% del ancho de la línea, para
-que un sliver marginal no cuente toda la línea como visible; decide por **desperdicio vertical en
-píxeles** con umbrales explícitos —alto ≥ 120px y vacío ≥ 100px—, no por porcentaje; hace
-`scrollIntoView` y guarda screenshot enfocado
-screenshot).
+botón usables.
+
+**H-1 (ASERCIÓN DURA).** El drawer mobile es un overlay anclado al área de contenido (no al viewport:
+no tapa el header ni la hamburguesa). Se afirma, en 375px: se **abre** con la hamburguesa;
+`aria-expanded="true"` abierto; **screenshot con el drawer REALMENTE ABIERTO, antes de cerrar**;
+`Math.abs(mainAbierto − mainCerrado) ≤ 1` (no comprime el `<main>` ni lo ensancha); la página no
+desborda; el aside abierto es `position: fixed|absolute`; se **cierra con el mismo control** →
+`display:none`, sin geometría, `aria-expanded="false"`; **navegar también cierra**. En tablet/desktop:
+aside estático de **256px** con tolerancia explícita (±2px).
+
+**H-2 (ASERCIÓN DURA).** *Gastos congelados* con F20, en 375/768/1280: **exclusividad** dura
+`tablaVis !== cardsVis` (mobile → cards y tabla no visible; tablet/desktop → tabla y cero cards);
+la representación visible es la **esperada** por breakpoint; **cardinalidad** en mobile (una card por
+gasto: cantidad e IDs de card == filas fuente, sin faltantes ni duplicados — una mutación que rinda
+solo el primer gasto falla); **vacío vertical por UNIÓN** de intervalos de texto legibles fusionados
+(no `bot−top`: un hueco grande entre líneas cuenta como vacío) con umbrales explícitos (alto ≥ 120px
+Y vacío ≥ 100px); `documentElement.scrollWidth === clientWidth` en los tres viewports. Para el
+**desborde horizontal** se distingue la representación: las **cards** quedan completas dentro del
+viewport (izquierda y derecha); la **tabla** puede ser más ancha que el área visible y se desplaza
+**dentro de su wrapper `overflow-x-auto`** (comportamiento productivo de DataTable) — no se exige que
+las filas entren, sino que el **wrapper** quede dentro del viewport, con `overflowX` auto|scroll y, si
+la tabla excede, **scroll horizontal interno funcional** (no tautológico: se asigna `scrollLeft`, se
+verifica que cambió y se restaura). Screenshot de la representación **efectivamente medida** por
+viewport. El solapamiento horizontal útil (`overlapX ≥ 16px` y ≥ 25% del ancho de la línea) evita que
+un sliver marginal cuente la línea completa como visible.
 
 ### `qa` — harness visual
 
@@ -184,20 +203,26 @@ TEST ni OPS.
 
 ### Smoke manual
 
-`qa/SMOKE_MANUAL.md` — descubribilidad del deslizamiento horizontal. 3 personas, teléfono real.
-No automatizable.
+`qa/SMOKE_MANUAL.md` — tarea humana sobre la **card mobile** de gastos: *"Necesito saber cuánto salió
+la reparación de la bomba y quién la pagó."* La persona debe hallar gasto, monto y **Pagador** sin
+scroll horizontal, zoom ni rotación, y distinguir **Pagador** de **Incidencia**. 3 personas, teléfono
+real. **PENDIENTE de ejecución humana — no declarado ejecutado.**
 
 ---
 
-## Hallazgos abiertos (medidos, pendientes de decisión de producción)
+## Hallazgos: H-1 y H-2 RESUELTOS y enforzados como aserciones duras (gate final `{}`)
 
-`qa:responsive` los reporta como `·HALL` y **no** los cuenta como falla, para que la suite siga
-sirviendo de gate de regresión.
+En SB-UI-6.1, H-1 y H-2 dejaron de ser hallazgos abiertos y pasaron a **aserciones duras** de
+`qa:responsive` (cuentan en `fallos`, no en un listado aparte). El gate de hallazgos ahora exige el
+**set vacío `{}`**: la maquinaria de `·HALL` se conserva como tripwire para que cualquier hallazgo
+NUEVO e inesperado rompa el gate por "SOBRAN", pero no debe quedar ninguno abierto.
 
-- **H-1 — el drawer mobile empuja en vez de superponerse.** `position: static` + `shrink-0`: al
-  abrirse comprime el `<main>` a 119px (71px útiles tras el `p-6`). Un importe como `$ 3.800.000,00`
-  mide 135px con `shrink-0`: no entra ni puede encoger → la página desborda **+149px**. **No es de
-  A30/A31**: le pasa a cualquier pantalla del portal.
-- **H-2 — filas inutilizables en mobile.** Gastos congelados con F20, 375px: la peor fila mide
-  **279px** con **16px** de contenido visible (**94% vacío**), **3 de 9** columnas a la vista,
-  **72% de la tabla oculta**. La altura la genera contenido que el socio **no puede ver**.
+- **H-1 (resuelto).** El drawer mobile ya no es `static + shrink-0` (que comprimía el `<main>` a
+  ~119px y desbordaba la página). Ahora es un overlay anclado al área de contenido: no comprime el
+  `<main>`, no tapa la hamburguesa (que sigue abriendo y cerrando), navegar cierra, y cerrado queda
+  `display:none`. Enforzado por las aserciones duras de H-1 descritas arriba.
+- **H-2 (resuelto).** *Gastos congelados* ya no usa la tabla de 9 columnas en mobile (que ocultaba el
+  ~72% y dejaba filas ~94% vacías). Ahora en mobile es **una card por gasto** (la tabla se conserva en
+  tablet/desktop). Enforzado por las aserciones duras de H-2 (exclusividad, cardinalidad, vacío por
+  unión; la página nunca desborda a lo ancho; cards dentro del viewport; la tabla se desplaza dentro
+  de su wrapper con scroll interno funcional).

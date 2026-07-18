@@ -9,13 +9,13 @@
 // =============================================================================================
 
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { HistoricoAcumuladosData, HistoricoMesData } from '../src/lib/contratos';
+import type { GastoFoto, HistoricoAcumuladosData, HistoricoMesData } from '../src/lib/contratos';
 import { FLOOR_CONTABLE } from '../src/lib/constantes';
 import { ContenidoAcumulados } from '../src/screens/historico/ContenidoAcumulados';
-import { ContenidoFoto } from '../src/screens/historico/ContenidoFoto';
+import { ContenidoFoto, GastoCardMobile } from '../src/screens/historico/ContenidoFoto';
 import { analizarAcumulados } from '../src/screens/historico/acumulados';
 import { clasificarFoto } from '../src/screens/historico/estadoFoto';
-import { comprobanteSeguro, formatFechaHora } from '../src/screens/historico/foto';
+import { CLASE_GASTO, comprobanteSeguro, formatFechaHora } from '../src/screens/historico/foto';
 import { construirPlanSelector } from '../src/screens/historico/planSelector';
 import { HistoricoVista, type EstadoLectura } from '../src/screens/historico/HistoricoVista';
 import type { HistoricoVistaProps } from '../src/screens/historico/HistoricoVista';
@@ -284,8 +284,10 @@ const h6 = html30(F6, 'E1');
 ok(h6.includes('href="https://vita.delta/c/61.pdf"'), 'https:// -> enlace');
 ok(h6.includes('href="http://vita.delta/c/62.pdf"'), 'http:// -> enlace');
 ok(h6.includes('href="https://vita.delta/c/63"'), 'HTTPS:// (mayusculas) -> normalizado y enlazado');
-ok((h6.match(/target="_blank"/g) ?? []).length === 3, 'los 3 enlaces llevan target="_blank"');
-ok((h6.match(/rel="noopener noreferrer"/g) ?? []).length === 3, 'los 3 llevan rel="noopener noreferrer"');
+const nEnlaces = (h6.match(/href="https?:\/\//gi) ?? []).length;
+ok(nEnlaces >= 3, `los 3 comprobantes validos se enlazan (aparecen ${nEnlaces}x: tabla desktop + card mobile)`);
+ok((h6.match(/target="_blank"/g) ?? []).length === nEnlaces, 'TODOS los enlaces (tabla y card) llevan target="_blank"');
+ok((h6.match(/rel="noopener noreferrer"/g) ?? []).length === nEnlaces, 'TODOS los enlaces llevan rel="noopener noreferrer"');
 ok(!plano(h6).includes('Comprobante no enlazable'), 'ninguno de los validos dispara el aviso');
 
 caso('D8 · comprobantes PELIGROSOS -> NUNCA href (F5)');
@@ -302,11 +304,12 @@ ok(
   'el PAYLOAD ejecutable no se refleja en ninguna parte del HTML'
 );
 ok(!/(javascript|data|vbscript|file|ftp):/i.test(h5.replace(/>[^<]*</g, '><')), 'ningun protocolo peligroso sobrevive en un ATRIBUTO');
+const nAviso = (plano(h5).match(/Comprobante no enlazable: URL no segura/g) ?? []).length;
 ok(
-  (plano(h5).match(/Comprobante no enlazable: URL no segura/g) ?? []).length === 10,
-  'los 10 valores peligrosos muestran "Comprobante no enlazable: URL no segura"'
+  nAviso >= 10,
+  `los 10 valores peligrosos muestran "Comprobante no enlazable: URL no segura" (aparece ${nAviso}x: tabla + card)`
 );
-ok((h5.match(/<a /g) ?? []).length === 0, 'CERO etiquetas <a> en toda la tabla de F5');
+ok((h5.match(/<a /g) ?? []).length === 0, 'CERO etiquetas <a> en F5 (ni tabla ni card): ningun comprobante peligroso se enlaza');
 // y la funcion pura, aparte del render
 for (const v of ['javascript:alert(1)', 'JavaScript:alert(1)', 'java\nscript:alert(1)', '  javascript:alert(1)  ', 'data:text/html,x', 'vbscript:x', 'file:///etc/passwd', 'ftp://x/a', '/rel.pdf', '//evil.com', 'no url', '']) {
   ok(comprobanteSeguro(v) === null, `comprobanteSeguro(${JSON.stringify(v).slice(0, 30)}) -> null`);
@@ -637,6 +640,171 @@ caso('G5 · A31: el desglose suma los gastos acumulados, salvo donde eso ES el f
   }
   ok(malos.length === 0, `identidad de gastos coherente en los fixtures que NO la rompen a proposito${malos.length ? ' -- ' + malos.join(' | ') : ''}`);
   ok(analizarAcumulados(F16).anomalias.some((a) => a.codigo === 'identidad_gastos'), 'y F16 la rompe a proposito: la anomalia sigue saltando');
+}
+
+// =============================================================================================
+bloque('H -- CARD MOBILE DE GASTOS (representacion productiva de H-2, SB-UI-6.1)');
+// =============================================================================================
+// Se renderiza el COMPONENTE PRODUCTIVO real `GastoCardMobile` (el mismo que la app muestra en
+// mobile en "Gastos congelados"), NO una copia de prueba. La seguridad del comprobante usa el
+// `comprobanteSeguro` real; no hay validacion paralela.
+{
+  const nombreSocioProbe = (id: number): string | null =>
+    (({ 1: 'Rodrigo', 2: 'Remo', 3: 'Franco' }) as Record<number, string>)[id] ?? null;
+
+  const gastoBase: GastoFoto = {
+    id_gasto: 42,
+    fecha: '2026-07-08',
+    clase: 'D',
+    clase_sugerida: 'E',
+    etiqueta: 'Reparacion de bomba de agua',
+    monto: 185000,
+    moneda: 'ARS',
+    id_zona: 3,
+    id_cabana: 7,
+    pagador_tipo: 'socio',
+    id_socio_pagador: 3,
+    medio_pago: 'Transferencia',
+    comentario: 'Se corto el agua en la zona',
+    comprobante_url: 'https://ejemplo.test/comprobante/42.pdf',
+    creado_por: 'vicky',
+    created_at: '2026-07-08T14:30:00Z',
+    sin_incidencia: false,
+    motivo_sin_incidencia: null,
+  };
+
+  const card = (g: GastoFoto) =>
+    renderToStaticMarkup(<GastoCardMobile gasto={g} nombreSocio={nombreSocioProbe} />);
+  const cardTxt = (g: GastoFoto) => plano(card(g));
+
+  caso('gasto normal: todos los campos presentes y legibles');
+  {
+    const t = cardTxt(gastoBase);
+    ok(t.includes('#42'), 'id_gasto congelado #42 visible (correlacion con Incidencias / Gastos sin incidencia)');
+    ok(t.includes('Reparacion de bomba de agua'), 'etiqueta');
+    ok(t.includes('185.000'), 'monto formateado (185.000)');
+    ok(t.includes(CLASE_GASTO['D']), `clase por su etiqueta ("${CLASE_GASTO['D']}")`);
+    ok(t.includes('Zona #3') && t.includes('Cabaña #7'), 'alcance con IDs CRUDOS de zona y cabaña');
+    ok(t.includes('Transferencia'), 'medio de pago');
+    ok(t.includes('vicky') && t.includes('2026'), 'procedencia: creado_por + created_at (formatFechaHora)');
+    ok(t.includes('Se corto el agua en la zona'), 'comentario');
+  }
+
+  caso('naturaleza congelada: ID congelado + nombre VIVO resuelto del catalogo');
+  {
+    const t = cardTxt(gastoBase);
+    ok(t.includes('#3') && t.includes('Franco'), 'pagador con ID congelado (#3) y nombre vivo (Franco)');
+    const conRenombre = (id: number): string | null => (id === 3 ? 'Franco (renombrado)' : null);
+    const t2 = plano(renderToStaticMarkup(<GastoCardMobile gasto={gastoBase} nombreSocio={conRenombre} />));
+    ok(
+      t2.includes('#3') && t2.includes('Franco (renombrado)'),
+      'el nombre se resuelve VIVO (cambia si el catalogo renombra), el ID sigue congelado'
+    );
+  }
+
+  caso('pagador e incidencia son conceptos SEPARADOS (quien pago != a quien/como se imputo)');
+  {
+    // pagado por Socio, incidido: Pagador = Socio, Incidencia = Incidida (rotulos distintos).
+    const g1: GastoFoto = { ...gastoBase, pagador_tipo: 'socio', id_socio_pagador: 3, sin_incidencia: false };
+    const t1 = cardTxt(g1);
+    ok(t1.includes('Pagador') && t1.includes('Socio #3') && t1.includes('Franco'), 'Pagador = Socio #3 · Franco (QUIEN pago)');
+    ok(t1.includes('Incidencia') && t1.includes('Incidida'), 'Incidencia = Incidida (COMO se imputo), rotulo aparte');
+    // pagado por Caja, SIN incidencia con motivo: divergen del todo, imposible confundirlos.
+    const g2: GastoFoto = { ...gastoBase, pagador_tipo: 'caja', id_socio_pagador: null, sin_incidencia: true, motivo_sin_incidencia: 'pool_vacio' };
+    const t2 = cardTxt(g2);
+    ok(t2.includes('Pagador') && t2.includes('Caja'), 'Pagador = Caja');
+    ok(t2.includes('Incidencia') && t2.includes('Pool'), 'Incidencia = Pool vacío (motivo), NO se lee del pagador');
+  }
+
+  caso('incidencia cubre el motivo sin incidencia via incidenciaGasto');
+  {
+    const g1: GastoFoto = { ...gastoBase, sin_incidencia: true, motivo_sin_incidencia: 'pool_vacio' };
+    ok(cardTxt(g1).includes('Pool'), 'motivo pool_vacio -> "Pool vacío"');
+    const g2: GastoFoto = { ...gastoBase, sin_incidencia: true, motivo_sin_incidencia: 'zona_sin_activas' };
+    ok(cardTxt(g2).includes('Zona sin'), 'motivo zona_sin_activas -> "Zona sin cabañas activas"');
+    const g3: GastoFoto = { ...gastoBase, sin_incidencia: true, motivo_sin_incidencia: null };
+    ok(cardTxt(g3).includes('Sin incidencia'), 'sin motivo -> "Sin incidencia"');
+  }
+
+  caso('clase sugerida: se muestra si difiere, se omite si coincide');
+  {
+    ok(cardTxt(gastoBase).includes('Clase sugerida'), 'D != E -> se muestra la clase sugerida');
+    const g: GastoFoto = { ...gastoBase, clase: 'D', clase_sugerida: 'D' };
+    ok(!cardTxt(g).includes('Clase sugerida'), 'clase_sugerida == clase -> se omite');
+  }
+
+  caso('nullables: comentario / clase_sugerida / medio / comprobante / zona / cabaña en null');
+  {
+    const g: GastoFoto = {
+      ...gastoBase,
+      clase_sugerida: null,
+      medio_pago: null,
+      comentario: null,
+      comprobante_url: null,
+      id_zona: null,
+      id_cabana: null,
+    };
+    const t = cardTxt(g);
+    ok(!t.includes('Clase sugerida'), 'clase_sugerida null -> sin linea');
+    ok(!t.includes('Comprobante'), 'comprobante_url null -> sin enlace ni aviso');
+    ok(t.includes('—'), 'medio null y alcance sin zona/cabaña -> guion (—), sin romper');
+    ok(t.includes('#42') && t.includes('185.000'), 'lo esencial (id, monto) sigue');
+  }
+
+  caso('comprobante SEGURO: http/https se enlazan con target y rel; el resto NO se enlaza');
+  {
+    const conUrl = (u: string) => card({ ...gastoBase, comprobante_url: u });
+    const https = conUrl('https://ejemplo.test/c.pdf');
+    ok(https.includes('href="https://ejemplo.test/c.pdf"'), 'https: enlazado');
+    ok(https.includes('target="_blank"') && https.includes('rel="noopener noreferrer"'), 'https: target=_blank + rel=noopener noreferrer');
+    const http = conUrl('http://ejemplo.test/c.pdf');
+    ok(http.includes('href="http://ejemplo.test/c.pdf"') && http.includes('rel="noopener noreferrer"'), 'http: enlazado con rel seguro');
+    const inseguros: ReadonlyArray<readonly [string, string]> = [
+      ['javascript:alert(1)', 'javascript:'],
+      ['data:text/plain,x', 'data:'],
+      ['vbscript:msgbox(1)', 'vbscript:'],
+      ['/ruta/relativa.pdf', 'URL relativa'],
+      ['ftp://ejemplo.test/c.pdf', 'ftp (otro protocolo)'],
+    ];
+    for (const [u, etiqueta] of inseguros) {
+      const h = conUrl(u);
+      ok(!/<a\s/i.test(h), `${etiqueta}: NO genera <a> (no enlazable)`);
+      ok(plano(h).includes('no enlazable'), `${etiqueta}: muestra el aviso "no enlazable"`);
+    }
+    ok(
+      comprobanteSeguro('javascript:alert(1)') === null && comprobanteSeguro('https://ok.test/x') !== null,
+      'la card usa el MISMO comprobanteSeguro productivo (sin validacion paralela)'
+    );
+  }
+
+  caso('INTEGRACION: ContenidoFoto rinde UNA card por gasto; IDs sin faltantes ni duplicados');
+  {
+    // Fixture con varios gastos (NO se toca F20). Se rinde el ContenidoFoto real (E1 muestra el
+    // detalle fino) y se cuentan las cards que salen de data.gastos -> es el punto de integracion.
+    const gs: GastoFoto[] = [
+      { ...gastoBase, id_gasto: 101, etiqueta: 'Gasto A' },
+      { ...gastoBase, id_gasto: 102, etiqueta: 'Gasto B' },
+      { ...gastoBase, id_gasto: 103, etiqueta: 'Gasto C' },
+    ];
+    const html = html30({ ...F9, gastos: gs }, 'E1');
+    const nCards = (html.match(/data-qa="gasto-card"/g) ?? []).length;
+    ok(nCards === gs.length, `${nCards} cards para ${gs.length} gastos (una por gasto; una mutacion que rinda solo el primero fallaria)`);
+    const ids = [...html.matchAll(/data-qa-gasto-id="(\d+)"/g)].map((mm) => Number(mm[1]));
+    const set = new Set(ids);
+    ok(ids.length === gs.length && set.size === gs.length, 'IDs de card en la cantidad justa y SIN duplicados');
+    ok(gs.every((g) => set.has(g.id_gasto)), 'los IDs de card == los IDs de los gastos fuente (sin faltantes)');
+  }
+
+  caso('INTEGRACION: texto largo en etiqueta y comentario se ve COMPLETO en la card (sin perdida)');
+  {
+    const larga =
+      'Reparacion integral de la bomba sumergible del pozo profundo con cambio de sello mecanico, rodamientos y tablero de arranque';
+    const coment =
+      'El proveedor dejo constancia de que la garantia cubre seis meses y que hay que purgar el aire cada dos semanas para evitar cavitacion';
+    const t = cardTxt({ ...gastoBase, id_gasto: 201, etiqueta: larga, comentario: coment });
+    ok(t.includes(larga), 'la etiqueta larga aparece COMPLETA en la card (sin truncar)');
+    ok(t.includes(coment), 'el comentario largo aparece COMPLETO en la card (sin perdida semantica)');
+  }
 }
 
 // =============================================================================================

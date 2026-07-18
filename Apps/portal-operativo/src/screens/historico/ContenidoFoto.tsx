@@ -514,6 +514,97 @@ function columnasGastos(nombreSocio: (id: number) => string | null): Columna<Gas
   ];
 }
 
+/** Fila rotulada dentro de la card mobile de gasto (label a la izquierda, valor a la derecha). */
+function ParGasto({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="shrink-0 text-reed">{label}</dt>
+      <dd className="text-right text-ink">{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * Representacion MOBILE de un gasto congelado (fix de H-2). Card vertical: cada campo en su propia
+ * linea, legible sin scroll horizontal ni filas gigantes casi vacias. En desktop/tablet se conserva
+ * la tabla de 9 columnas (`columnasGastos`).
+ *
+ * Usa EXACTAMENTE los mismos helpers que la tabla (`alcanceGasto`, `pagadorGasto`, `incidenciaGasto`,
+ * `comprobanteSeguro`, `Money`, `formatFecha`, `formatFechaHora`, `CLASE_GASTO`): no se duplica ni
+ * una linea de formato ni de seguridad. Preserva: #id_gasto congelado (correlacion), fecha, clase,
+ * etiqueta, alcance con IDs CRUDOS de zona/cabaña, pagador, medio de pago, monto, incidencia (que
+ * incluye el motivo sin incidencia via `incidenciaGasto`), procedencia congelada (creado_por +
+ * created_at), comentario, clase sugerida, comprobante SEGURO y los nullables.
+ *
+ * Pagador e Incidencia van en filas SEPARADAS y rotuladas a proposito: "quien pago" (Pagador) NO
+ * es "a quien/como se imputo en el reparto" (Incidencia).
+ *
+ * Se EXPORTA para que `qa/probes.tsx` mida el componente productivo real, no una copia de prueba.
+ */
+export function GastoCardMobile({
+  gasto,
+  nombreSocio,
+}: {
+  gasto: GastoFoto;
+  nombreSocio: (id: number) => string | null;
+}) {
+  const g = gasto;
+  // SEGURIDAD: el href sale SIEMPRE de comprobanteSeguro, NUNCA del valor crudo. Si existe pero no
+  // es http/https absoluta, se dice y no se enlaza.
+  const href = g.comprobante_url !== null ? comprobanteSeguro(g.comprobante_url) : null;
+  return (
+    <div data-qa="gasto-card" data-qa-gasto-id={g.id_gasto} className="rounded-2xl border border-sand bg-white p-3 text-sm">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="tabular-nums text-reed">#{g.id_gasto}</span>
+        <span className="shrink-0 text-base font-semibold tabular-nums">
+          <Money monto={g.monto} />
+        </span>
+      </div>
+
+      <div className="mt-1">
+        <div className="text-ink">{g.etiqueta}</div>
+        <div className="mt-0.5 text-xs text-reed">
+          <span className="tabular-nums">{formatFecha(g.fecha)}</span>
+          {' · '}
+          {CLASE_GASTO[g.clase]}
+        </div>
+      </div>
+
+      <dl className="mt-2 space-y-1">
+        <ParGasto label="Pagador">{pagadorGasto(g, nombreSocio)}</ParGasto>
+        <ParGasto label="Medio">{g.medio_pago ?? <span className="text-reed">—</span>}</ParGasto>
+        <ParGasto label="Alcance">
+          <span className="tabular-nums">{alcanceGasto(g)}</span>
+        </ParGasto>
+        <ParGasto label="Incidencia">{incidenciaGasto(g)}</ParGasto>
+      </dl>
+
+      <div className="mt-2 text-xs text-reed">
+        Cargado por {g.creado_por} · {formatFechaHora(g.created_at)}
+      </div>
+      {g.comentario !== null && <div className="mt-0.5 text-xs text-reed">{g.comentario}</div>}
+      {g.clase_sugerida !== null && g.clase_sugerida !== g.clase && (
+        <div className="mt-0.5 text-xs text-reed">Clase sugerida al cargarlo: {g.clase_sugerida}</div>
+      )}
+      {g.comprobante_url !== null &&
+        (href !== null ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 inline-block text-xs text-river underline"
+          >
+            Comprobante
+          </a>
+        ) : (
+          <div className="mt-1 text-xs font-medium text-red-700">
+            Comprobante no enlazable: URL no segura
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function DetalleFino({ data }: { data: HistoricoMesData }) {
   const { incidenciasOrdenadas, nombreSocio } = analizarFoto(data);
 
@@ -570,11 +661,22 @@ function DetalleFino({ data }: { data: HistoricoMesData }) {
           {data.gastos.length === 0 ? (
             <Vacio mensaje="No hubo gastos internos en este mes." />
           ) : (
-            <DataTable
-              columnas={columnasGastos(nombreSocio)}
-              filas={data.gastos}
-              filaKey={(g) => g.id_gasto}
-            />
+            <>
+              {/* Desktop/tablet: tabla de 9 columnas (D-FE-15). Mobile: una card por gasto (fix
+                  de H-2). Se muestran mutuamente excluyentes por breakpoint; `DataTable` no se toca. */}
+              <div className="hidden md:block">
+                <DataTable
+                  columnas={columnasGastos(nombreSocio)}
+                  filas={data.gastos}
+                  filaKey={(g) => g.id_gasto}
+                />
+              </div>
+              <div className="space-y-2 md:hidden">
+                {data.gastos.map((g) => (
+                  <GastoCardMobile key={g.id_gasto} gasto={g} nombreSocio={nombreSocio} />
+                ))}
+              </div>
+            </>
           )}
         </Sub>
 

@@ -53,11 +53,19 @@ export function AppShell() {
         </div>
       </header>
 
-      <div className="flex flex-1">
+      <div className="relative flex flex-1">
         <aside
           className={
-            'w-64 shrink-0 border-r border-sand bg-white p-4 md:block ' +
-            (navAbierto ? 'block' : 'hidden')
+            // Fix de H-1. Desktop/tablet (md+): columna estatica de 256px (w-64) DENTRO del flex,
+            // siempre visible -- identica a la anterior. Mobile (<md): cuando esta abierto es un
+            // overlay ABSOLUTO anclado al AREA DE CONTENIDO (el div `relative` de arriba, que empieza
+            // DEBAJO del header), NO al viewport: asi solapa el <main> sin comprimirlo y SIN tapar el
+            // header ni la hamburguesa, que queda visible y sigue siendo el control de abrir/cerrar.
+            // Cerrado queda en display:none, fuera de vista y sin interaccion. `md:static` gana sobre
+            // `absolute` y `md:block` sobre `hidden` en >=768px.
+            'w-64 border-r border-sand bg-white p-4 ' +
+            'md:static md:z-auto md:block md:shrink-0 ' +
+            (navAbierto ? 'absolute inset-y-0 left-0 z-40 block ' : 'hidden')
           }
         >
           {/* La navegacion la maneja el router (D-FE-12); onNavigate cierra el drawer mobile. */}
